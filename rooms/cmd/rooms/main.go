@@ -144,7 +144,7 @@ func newMux(logger *slog.Logger, gwClient httpapi.GatewayCaller) (*http.ServeMux
 	// receipt backends, neither of which exists yet (rooms/internal/memory,
 	// rooms/internal/receipt); real clients wire in here later without
 	// changing the httpapi.Handler seam.
-	roomHandler := httpapi.NewHandler(room.NewStore(), memory.NewFake(), gwClient, receipt.NewFake(), logger)
+	roomHandler := httpapi.NewHandler(room.NewMemoryStore(), memory.NewFake(), gwClient, receipt.NewFake(), logger)
 	roomHandler.RegisterRoutes(mux)
 	return mux, roomHandler
 }

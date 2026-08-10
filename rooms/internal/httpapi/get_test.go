@@ -14,14 +14,14 @@ func TestHandleGetRoom(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		setup      func(t *testing.T, s *room.Store) string // returns the room ID to request
+		setup      func(t *testing.T, s room.Store) string // returns the room ID to request
 		lookupAs   string
 		wantStatus int
 		checkBody  func(t *testing.T, body map[string]any)
 	}{
 		{
 			name: "200 returns goal, state, members, and the replayed transcript",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "ship the thing")
 				member := mustAddMember(t, s, r.ID, "agt_1")
@@ -56,7 +56,7 @@ func TestHandleGetRoom(t *testing.T) {
 		},
 		{
 			name: "404 for an unknown room ID",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return "rom_does_not_exist"
 			},
@@ -65,7 +65,7 @@ func TestHandleGetRoom(t *testing.T) {
 		},
 		{
 			name: "404 for a room owned by a different tenant, identical to a missing room",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "goal")
 				return r.ID
@@ -75,7 +75,7 @@ func TestHandleGetRoom(t *testing.T) {
 		},
 		{
 			name: "401 when no tenant is in context",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "goal")
 				return r.ID

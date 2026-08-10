@@ -29,17 +29,17 @@ func TestHandleAddMember(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		setup      func(t *testing.T, s *room.Store) string // returns the room ID to target
-		memStore   memory.Store                             // nil uses a fresh memory.Fake
+		setup      func(t *testing.T, s room.Store) string // returns the room ID to target
+		memStore   memory.Store                            // nil uses a fresh memory.Fake
 		body       any
 		lookupAs   string
 		wantStatus int
 		checkBody  func(t *testing.T, body map[string]any)
-		afterCheck func(t *testing.T, s *room.Store, roomID string)
+		afterCheck func(t *testing.T, s room.Store, roomID string)
 	}{
 		{
 			name: "201 seats an agent",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
@@ -61,7 +61,7 @@ func TestHandleAddMember(t *testing.T) {
 		},
 		{
 			name: "400 missing agent_id",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
@@ -71,7 +71,7 @@ func TestHandleAddMember(t *testing.T) {
 		},
 		{
 			name: "400 malformed JSON",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
@@ -81,7 +81,7 @@ func TestHandleAddMember(t *testing.T) {
 		},
 		{
 			name: "404 for an unknown room ID",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return "rom_does_not_exist"
 			},
@@ -91,7 +91,7 @@ func TestHandleAddMember(t *testing.T) {
 		},
 		{
 			name: "404 for a room owned by a different tenant",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
@@ -101,7 +101,7 @@ func TestHandleAddMember(t *testing.T) {
 		},
 		{
 			name: "409 for a terminated room",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "goal")
 				if _, err := s.CompleteRoom(context.Background(), tenantA, r.ID); err != nil {
@@ -115,7 +115,7 @@ func TestHandleAddMember(t *testing.T) {
 		},
 		{
 			name: "401 when no tenant is in context",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
@@ -125,7 +125,7 @@ func TestHandleAddMember(t *testing.T) {
 		},
 		{
 			name: "201 onboards a member from memory entries plus documents",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
@@ -143,7 +143,7 @@ func TestHandleAddMember(t *testing.T) {
 			body:       map[string]any{"agent_id": "agt_1", "documents": []string{"doc A", "doc B"}},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusCreated,
-			afterCheck: func(t *testing.T, s *room.Store, roomID string) {
+			afterCheck: func(t *testing.T, s room.Store, roomID string) {
 				t.Helper()
 				got, err := s.GetRoom(context.Background(), tenantA, roomID)
 				if err != nil {
@@ -166,14 +166,14 @@ func TestHandleAddMember(t *testing.T) {
 		},
 		{
 			name: "201 seats a member with zero documents",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
 			body:       map[string]any{"agent_id": "agt_1"},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusCreated,
-			afterCheck: func(t *testing.T, s *room.Store, roomID string) {
+			afterCheck: func(t *testing.T, s room.Store, roomID string) {
 				t.Helper()
 				got, err := s.GetRoom(context.Background(), tenantA, roomID)
 				if err != nil {
@@ -189,7 +189,7 @@ func TestHandleAddMember(t *testing.T) {
 		},
 		{
 			name: "500 refuses the join when the memory read fails; no member is added",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
@@ -197,7 +197,7 @@ func TestHandleAddMember(t *testing.T) {
 			body:       map[string]any{"agent_id": "agt_1"},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusInternalServerError,
-			afterCheck: func(t *testing.T, s *room.Store, roomID string) {
+			afterCheck: func(t *testing.T, s room.Store, roomID string) {
 				t.Helper()
 				got, err := s.GetRoom(context.Background(), tenantA, roomID)
 				if err != nil {
