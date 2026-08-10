@@ -14,13 +14,13 @@ func TestHandleCompleteRoom(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		setup      func(t *testing.T, s *room.Store) string // returns the room ID to complete
+		setup      func(t *testing.T, s room.Store) string // returns the room ID to complete
 		lookupAs   string
 		wantStatus int
 	}{
 		{
 			name: "200 completes an open room",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
@@ -29,7 +29,7 @@ func TestHandleCompleteRoom(t *testing.T) {
 		},
 		{
 			name: "404 for an unknown room ID",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return "rom_does_not_exist"
 			},
@@ -38,7 +38,7 @@ func TestHandleCompleteRoom(t *testing.T) {
 		},
 		{
 			name: "404 for a room owned by a different tenant, identical to a missing room",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
@@ -47,7 +47,7 @@ func TestHandleCompleteRoom(t *testing.T) {
 		},
 		{
 			name: "409 for a room already completed",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "goal")
 				if _, err := s.CompleteRoom(context.Background(), tenantA, r.ID); err != nil {
@@ -60,7 +60,7 @@ func TestHandleCompleteRoom(t *testing.T) {
 		},
 		{
 			name: "409 for a room already abandoned",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				r, err := s.CreateRoomWithBudget(context.Background(), tenantA, "goal", 1)
 				if err != nil {
@@ -82,7 +82,7 @@ func TestHandleCompleteRoom(t *testing.T) {
 		},
 		{
 			name: "401 when no tenant is in context",
-			setup: func(t *testing.T, s *room.Store) string {
+			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},

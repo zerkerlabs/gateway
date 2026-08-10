@@ -75,14 +75,14 @@ func (g unreachableGateway) Call(_ context.Context, _, agentID string, _ []byte)
 // newMux returns a handler serving the four v1 room routes behind the real
 // auth middleware, backed by a fresh in-memory room store and a fresh
 // in-memory memory store.
-func newMux(t *testing.T) (http.Handler, *room.Store) {
+func newMux(t *testing.T) (http.Handler, room.Store) {
 	t.Helper()
 	return newMuxWithMemory(t, memory.NewFake())
 }
 
 // newMuxWithMemory is newMux with a caller-supplied memory.Store, for tests
 // that need to seed onboarding entries or exercise a failing memory backend.
-func newMuxWithMemory(t *testing.T, memoryStore memory.Store) (http.Handler, *room.Store) {
+func newMuxWithMemory(t *testing.T, memoryStore memory.Store) (http.Handler, room.Store) {
 	t.Helper()
 	return newMuxWithMemoryAndGateway(t, memoryStore, unreachableGateway{t})
 }
@@ -97,7 +97,7 @@ func newMuxWithMemory(t *testing.T, memoryStore memory.Store) (http.Handler, *ro
 // handler test reaches its handler by presenting a real bearer token — the
 // tenant a handler sees is the one a signed token asserted, never one a test
 // wrote onto the context directly.
-func newMuxWithMemoryAndGateway(t *testing.T, memoryStore memory.Store, gatewayClient httpapi.GatewayCaller) (http.Handler, *room.Store) {
+func newMuxWithMemoryAndGateway(t *testing.T, memoryStore memory.Store, gatewayClient httpapi.GatewayCaller) (http.Handler, room.Store) {
 	t.Helper()
 	mux, store, _ := newMuxWithReceipts(t, memoryStore, gatewayClient, receipt.NewFake())
 	return mux, store
@@ -107,9 +107,9 @@ func newMuxWithMemoryAndGateway(t *testing.T, memoryStore memory.Store, gatewayC
 // receipt.Emitter, for tests that observe what an addressed message emits or
 // exercise the async fail-open emission behaviour. It also returns the
 // *httpapi.Handler itself so a test can call Shutdown.
-func newMuxWithReceipts(t *testing.T, memoryStore memory.Store, gatewayClient httpapi.GatewayCaller, emitter receipt.Emitter) (http.Handler, *room.Store, *httpapi.Handler) {
+func newMuxWithReceipts(t *testing.T, memoryStore memory.Store, gatewayClient httpapi.GatewayCaller, emitter receipt.Emitter) (http.Handler, room.Store, *httpapi.Handler) {
 	t.Helper()
-	store := room.NewStore()
+	store := room.NewMemoryStore()
 	h := httpapi.NewHandler(store, memoryStore, gatewayClient, emitter, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
@@ -172,7 +172,7 @@ func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 
 // mustCreateRoom creates a room under tenantA, the tenant every handler test
 // treats as the room's owner; cross-tenant cases look the room up as tenantB.
-func mustCreateRoom(t *testing.T, s *room.Store, goal string) *room.Room {
+func mustCreateRoom(t *testing.T, s room.Store, goal string) *room.Room {
 	t.Helper()
 	r, err := s.CreateRoom(context.Background(), tenantA, goal)
 	if err != nil {
@@ -181,7 +181,7 @@ func mustCreateRoom(t *testing.T, s *room.Store, goal string) *room.Room {
 	return r
 }
 
-func mustAddMember(t *testing.T, s *room.Store, roomID, agentID string) *room.Member {
+func mustAddMember(t *testing.T, s room.Store, roomID, agentID string) *room.Member {
 	t.Helper()
 	m, err := s.AddMember(context.Background(), tenantA, roomID, agentID, tenantA, nil)
 	if err != nil {

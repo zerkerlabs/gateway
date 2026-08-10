@@ -36,14 +36,14 @@ func TestHandleGetReceipts(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		setup      func(t *testing.T, s *room.Store, em *receipt.Fake) string // returns the room ID to request
+		setup      func(t *testing.T, s room.Store, em *receipt.Fake) string // returns the room ID to request
 		lookupAs   string
 		wantStatus int
 		checkBody  func(t *testing.T, body map[string]any)
 	}{
 		{
 			name: "200 returns the room's receipts in emission order",
-			setup: func(t *testing.T, s *room.Store, em *receipt.Fake) string {
+			setup: func(t *testing.T, s room.Store, em *receipt.Fake) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "ship the thing")
 				other := mustCreateRoom(t, s, "a different room")
@@ -75,7 +75,7 @@ func TestHandleGetReceipts(t *testing.T) {
 		},
 		{
 			name: "200 excludes a receipt emitted under another tenant for the same room ID",
-			setup: func(t *testing.T, s *room.Store, em *receipt.Fake) string {
+			setup: func(t *testing.T, s room.Store, em *receipt.Fake) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "goal")
 				mustEmit(t, em, r.ID, tenantA, receipt.OutcomeSucceeded, "")
@@ -98,7 +98,7 @@ func TestHandleGetReceipts(t *testing.T) {
 		},
 		{
 			name: "200 with an empty collection for a room with no receipts",
-			setup: func(t *testing.T, s *room.Store, em *receipt.Fake) string {
+			setup: func(t *testing.T, s room.Store, em *receipt.Fake) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "goal")
 				return r.ID
@@ -115,7 +115,7 @@ func TestHandleGetReceipts(t *testing.T) {
 		},
 		{
 			name: "404 for an unknown room ID",
-			setup: func(t *testing.T, s *room.Store, em *receipt.Fake) string {
+			setup: func(t *testing.T, s room.Store, em *receipt.Fake) string {
 				t.Helper()
 				return "rom_does_not_exist"
 			},
@@ -124,7 +124,7 @@ func TestHandleGetReceipts(t *testing.T) {
 		},
 		{
 			name: "404 for a room owned by a different tenant, identical to a missing room",
-			setup: func(t *testing.T, s *room.Store, em *receipt.Fake) string {
+			setup: func(t *testing.T, s room.Store, em *receipt.Fake) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "goal")
 				mustEmit(t, em, r.ID, tenantA, receipt.OutcomeSucceeded, "")
@@ -135,7 +135,7 @@ func TestHandleGetReceipts(t *testing.T) {
 		},
 		{
 			name: "401 when no tenant is in context",
-			setup: func(t *testing.T, s *room.Store, em *receipt.Fake) string {
+			setup: func(t *testing.T, s room.Store, em *receipt.Fake) string {
 				t.Helper()
 				r := mustCreateRoom(t, s, "goal")
 				return r.ID

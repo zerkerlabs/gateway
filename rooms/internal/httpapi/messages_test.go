@@ -11,7 +11,7 @@ import (
 
 // roomAndMember creates a room under tenantA with the given turn budget (0
 // means the store default) and seats one member in it.
-func roomAndMember(t *testing.T, s *room.Store, turnBudget int) (roomID, memberID string) {
+func roomAndMember(t *testing.T, s room.Store, turnBudget int) (roomID, memberID string) {
 	t.Helper()
 	var r *room.Room
 	var err error
@@ -32,14 +32,14 @@ func TestHandlePostMessage(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		setup      func(t *testing.T, s *room.Store) (roomID string, body any)
+		setup      func(t *testing.T, s room.Store) (roomID string, body any)
 		lookupAs   string
 		wantStatus int
 		checkBody  func(t *testing.T, body map[string]any)
 	}{
 		{
 			name: "201 appends a message and consumes a turn",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				roomID, memberID := roomAndMember(t, s, 0)
 				return roomID, map[string]any{"member_id": memberID, "body": "hello"}
@@ -58,7 +58,7 @@ func TestHandlePostMessage(t *testing.T) {
 		},
 		{
 			name: "400 missing member_id",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				roomID, _ := roomAndMember(t, s, 0)
 				return roomID, map[string]any{"body": "hello"}
@@ -68,7 +68,7 @@ func TestHandlePostMessage(t *testing.T) {
 		},
 		{
 			name: "400 missing body",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				roomID, memberID := roomAndMember(t, s, 0)
 				return roomID, map[string]any{"member_id": memberID}
@@ -78,7 +78,7 @@ func TestHandlePostMessage(t *testing.T) {
 		},
 		{
 			name: "400 malformed JSON",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				roomID, _ := roomAndMember(t, s, 0)
 				return roomID, []byte(`{"body": `)
@@ -88,7 +88,7 @@ func TestHandlePostMessage(t *testing.T) {
 		},
 		{
 			name: "400 member not seated in the room",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				roomID, _ := roomAndMember(t, s, 0)
 				return roomID, map[string]any{"member_id": "mem_nope", "body": "hello"}
@@ -98,7 +98,7 @@ func TestHandlePostMessage(t *testing.T) {
 		},
 		{
 			name: "404 for an unknown room ID",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				return "rom_does_not_exist", map[string]any{"member_id": "mem_1", "body": "hello"}
 			},
@@ -107,7 +107,7 @@ func TestHandlePostMessage(t *testing.T) {
 		},
 		{
 			name: "404 for a room owned by a different tenant",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				roomID, memberID := roomAndMember(t, s, 0)
 				return roomID, map[string]any{"member_id": memberID, "body": "hello"}
@@ -117,7 +117,7 @@ func TestHandlePostMessage(t *testing.T) {
 		},
 		{
 			name: "409 posting to a terminated room",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				roomID, memberID := roomAndMember(t, s, 0)
 				if _, err := s.CompleteRoom(context.Background(), tenantA, roomID); err != nil {
@@ -130,7 +130,7 @@ func TestHandlePostMessage(t *testing.T) {
 		},
 		{
 			name: "409 exceeding the turn budget",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				roomID, memberID := roomAndMember(t, s, 1)
 				if _, err := s.AppendMessage(context.Background(), tenantA, roomID, memberID, "spends the only turn"); err != nil {
@@ -143,7 +143,7 @@ func TestHandlePostMessage(t *testing.T) {
 		},
 		{
 			name: "401 when no tenant is in context",
-			setup: func(t *testing.T, s *room.Store) (string, any) {
+			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
 				roomID, memberID := roomAndMember(t, s, 0)
 				return roomID, map[string]any{"member_id": memberID, "body": "hello"}

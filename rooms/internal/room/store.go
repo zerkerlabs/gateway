@@ -10,10 +10,150 @@ import (
 	"github.com/zerkerlabs/gateway/rooms/internal/resource"
 )
 
-// Store is a thread-safe, tenant-scoped, in-memory Room store. It holds rooms
-// and their members; a room's messages are not stored separately — they are
-// replayed from its event log on read.
-type Store struct {
+// Store persists and retrieves Room records and their event logs. Every
+// method is scoped to the tenantID argument — no implementation may read or
+// mutate a room that belongs to a different tenant, and a room that exists in
+// another tenant must be reported as ErrNotFound rather than distinguished
+// from one that does not exist at all (AGENTS.md invariant #2).
+//
+// Implementations must be safe for concurrent use.
+type Store interface {
+	// CreateRoom creates a new room under tenantID with the given goal and the
+	// default turn budget. The room starts in StateOpen with no members.
+	CreateRoom(ctx context.Context, tenantID, goal string) (*Room, error)
+
+	// CreateRoomWithBudget is CreateRoom with an explicit, positive turn budget
+	// in place of the default.
+	CreateRoomWithBudget(ctx context.Context, tenantID, goal string, turnBudget int) (*Room, error)
+
+	// GetRoom fetches one room by ID. Returns ErrNotFound if the ID does not
+	// exist or belongs to a different tenant.
+	GetRoom(ctx context.Context, tenantID, roomID string) (*Room, error)
+
+	// ListRooms returns every room belonging to tenantID.
+	ListRooms(ctx context.Context, tenantID string) ([]*Room, error)
+
+	// AddMember seats an agent in a room, carrying startingContext — the
+	// onboarding context the caller assembled from the agent's memory scope
+	// plus any documents supplied on the request (rooms/internal/memory); pass
+	// nil for a member with no onboarding context. tenantID scopes the room
+	// lookup — it returns ErrNotFound if roomID does not exist or belongs to
+	// another tenant. agentTenantID is the tenant that owns agentID; if it
+	// differs from the room's tenant, the add is rejected with
+	// ErrTenantMismatch (rooms are single-tenant). Returns ErrRoomTerminated if
+	// the room has already reached a terminal state.
+	AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string) (*Member, error)
+
+	// AppendMessage records a message in a room, authored by one of its
+	// members. Posting a message consumes one turn; if doing so would exceed
+	// the room's turn budget, the message is rejected with
+	// ErrTurnBudgetExceeded and the room transitions to StateAbandoned instead.
+	// Returns ErrNotFound if roomID does not exist or belongs to a different
+	// tenant, ErrMemberNotFound if memberID is not seated in that room,
+	// ErrRoomTerminated if the room has already reached a terminal state, and
+	// ErrTurnReserved if its remaining turns are held by deliveries still in
+	// flight (see ReserveTurn) — a retryable conflict that leaves the room
+	// open, since those turns may yet be released.
+	AppendMessage(ctx context.Context, tenantID, roomID, memberID, body string) (*Message, error)
+
+	// ReserveTurn claims one of a room's turns for msg, running exactly the
+	// checks AppendMessage runs — the room exists and is visible to this
+	// tenant, it is open, msg.MemberID is seated in it, and the budget has room
+	// for one more turn — and, if they pass, holding that turn until the
+	// reservation is resolved.
+	//
+	// It exists so a caller with a side effect to perform before recording a
+	// message can make that side effect safe in both directions. Firing it for
+	// a request the room would reject means it happened for a request that was
+	// never valid; firing it and only then finding the room out of turns or
+	// terminated by a concurrent request means it happened with no record in
+	// the transcript. Reserving the turn up front closes both: the checks run
+	// before the side effect, and the turn is held across it, so a committed
+	// message cannot be refused by anything that arrives in the meantime.
+	//
+	// Reserving is how the addressed-message path acquires its turn, so it
+	// carries the same consequences AppendMessage does: a room that is
+	// genuinely out of turns is abandoned here too, rather than letting agents
+	// loop indefinitely. A turn that is merely reserved by another delivery is
+	// different — that one may still be released unspent — so it is refused
+	// with ErrTurnReserved and leaves the room open.
+	ReserveTurn(ctx context.Context, tenantID, roomID string, msg PendingMessage) (*Reservation, error)
+
+	// CommitTurn spends a reserved turn, recording the message it was reserved
+	// for.
+	//
+	// It is deliberately unconditional. By the time a caller commits, the side
+	// effect the reservation was protecting has already happened — the message
+	// was delivered to the recipient's agent, with whatever policy and payment
+	// consequences that carried — so the transcript must record it even if a
+	// concurrent request terminated the room or exhausted its budget in the
+	// meantime. A confirmed delivery with no message in the transcript is the
+	// worse outcome by far: the recipient got the call and the room denies it.
+	//
+	// For the same reason, an implementation must not honour ctx cancellation
+	// here — a caller that hung up mid-delivery does not un-deliver the call.
+	//
+	// Returns ErrReservationNotHeld if res was already committed or released,
+	// and ErrNotFound if its room no longer exists.
+	CommitTurn(ctx context.Context, res *Reservation) (*Message, error)
+
+	// ReleaseTurn gives a reserved turn back unspent: the side effect it was
+	// protecting did not happen, so nothing is recorded and the room is free to
+	// spend the turn on something else. Returns ErrReservationNotHeld if res
+	// was already committed or released.
+	ReleaseTurn(ctx context.Context, res *Reservation) error
+
+	// CompleteRoom explicitly marks a room's goal as met. Returns ErrNotFound
+	// if roomID does not exist or belongs to a different tenant, and
+	// ErrRoomTerminated if the room has already reached a terminal state.
+	CompleteRoom(ctx context.Context, tenantID, roomID string) (*Room, error)
+
+	// MemberAgentID returns the AgentID of the member identified by memberID
+	// within roomID, so a caller can resolve the gateway agent to deliver an
+	// addressed message to before making the proxied call
+	// (rooms/internal/gateway). Returns ErrNotFound if roomID does not exist or
+	// belongs to a different tenant, and ErrMemberNotFound if memberID is not
+	// seated in that room.
+	MemberAgentID(ctx context.Context, tenantID, roomID, memberID string) (string, error)
+
+	// RecordDeliveryFailure appends an EventDeliveryFailed event to a room's
+	// log: a message from fromMemberID addressed to toMemberID could not be
+	// delivered as a proxied call to toAgentID. It does not consume a turn and
+	// does not append a message — a failed call must never look like a
+	// delivered one (the caller is responsible for not calling AppendMessage in
+	// this case). Returns ErrNotFound if roomID does not exist or belongs to a
+	// different tenant.
+	RecordDeliveryFailure(ctx context.Context, tenantID, roomID, fromMemberID, toMemberID, toAgentID, class string) error
+
+	// RecordDelivery appends an EventMessageDelivered event recording that a
+	// message from fromMemberID addressed to toMemberID was confirmed
+	// delivered as a proxied call to toAgentID, carrying the gateway's
+	// invocationID so the room history can be reconciled against the gateway's
+	// invocation record. It does not append the message itself — the caller
+	// does that — so a delivery and the message it delivered stay separately
+	// attributable in the log. Returns ErrNotFound if roomID does not exist or
+	// belongs to a different tenant.
+	RecordDelivery(ctx context.Context, tenantID, roomID, fromMemberID, toMemberID, toAgentID, invocationID string) error
+
+	// Messages returns a room's transcript: its messages in append order,
+	// replayed from its event log. Returns ErrNotFound if roomID does not
+	// exist or belongs to a different tenant.
+	Messages(ctx context.Context, tenantID, roomID string) ([]*Message, error)
+
+	// Events returns a room's full event log in sequence order. Returns
+	// ErrNotFound if roomID does not exist or belongs to a different tenant.
+	Events(ctx context.Context, tenantID, roomID string) ([]*Event, error)
+}
+
+// MemoryStore is a thread-safe, tenant-scoped, in-memory implementation of
+// Store. It holds rooms and their members; a room's messages are not stored
+// separately — they are replayed from its event log on read.
+//
+// It is a first-class, supported implementation of Store, not test
+// scaffolding: it is the zero-dependency way to run Rooms for evaluation,
+// where durability is not wanted. Every room, member, transcript, and turn
+// budget it holds is lost on restart.
+type MemoryStore struct {
 	mu    sync.RWMutex
 	rooms map[string]map[string]*Room // tenantID -> roomID -> *Room
 	// pending holds turns that have been reserved but not yet spent, keyed by
@@ -26,30 +166,28 @@ type Store struct {
 	pending map[string]map[string]*Reservation
 }
 
-// NewStore returns an empty Store ready for use.
-func NewStore() *Store {
-	return &Store{
+// NewMemoryStore returns an empty MemoryStore ready for use.
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{
 		rooms:   make(map[string]map[string]*Room),
 		pending: make(map[string]map[string]*Reservation),
 	}
 }
 
-// CreateRoom creates a new room under tenantID with the given goal and the
-// default turn budget. The room starts in StateOpen with no members.
-func (s *Store) CreateRoom(ctx context.Context, tenantID, goal string) (*Room, error) {
+// CreateRoom implements Store.
+func (s *MemoryStore) CreateRoom(ctx context.Context, tenantID, goal string) (*Room, error) {
 	return s.createRoom(ctx, tenantID, goal, DefaultTurnBudget)
 }
 
-// CreateRoomWithBudget is CreateRoom with an explicit, positive turn budget in
-// place of the default.
-func (s *Store) CreateRoomWithBudget(ctx context.Context, tenantID, goal string, turnBudget int) (*Room, error) {
+// CreateRoomWithBudget implements Store.
+func (s *MemoryStore) CreateRoomWithBudget(ctx context.Context, tenantID, goal string, turnBudget int) (*Room, error) {
 	if turnBudget <= 0 {
 		return nil, fmt.Errorf("turn budget must be positive, got %d", turnBudget)
 	}
 	return s.createRoom(ctx, tenantID, goal, turnBudget)
 }
 
-func (s *Store) createRoom(ctx context.Context, tenantID, goal string, turnBudget int) (*Room, error) {
+func (s *MemoryStore) createRoom(ctx context.Context, tenantID, goal string, turnBudget int) (*Room, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -74,9 +212,8 @@ func (s *Store) createRoom(ctx context.Context, tenantID, goal string, turnBudge
 	return cloneRoom(r), nil
 }
 
-// GetRoom fetches one room by ID. Returns ErrNotFound if the ID does not exist
-// or belongs to a different tenant.
-func (s *Store) GetRoom(ctx context.Context, tenantID, roomID string) (*Room, error) {
+// GetRoom implements Store.
+func (s *MemoryStore) GetRoom(ctx context.Context, tenantID, roomID string) (*Room, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -91,8 +228,8 @@ func (s *Store) GetRoom(ctx context.Context, tenantID, roomID string) (*Room, er
 	return cloneRoom(r), nil
 }
 
-// ListRooms returns every room belonging to tenantID.
-func (s *Store) ListRooms(ctx context.Context, tenantID string) ([]*Room, error) {
+// ListRooms implements Store.
+func (s *MemoryStore) ListRooms(ctx context.Context, tenantID string) ([]*Room, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -107,15 +244,8 @@ func (s *Store) ListRooms(ctx context.Context, tenantID string) ([]*Room, error)
 	return rooms, nil
 }
 
-// AddMember seats an agent in a room, carrying startingContext — the
-// onboarding context the caller assembled from the agent's memory scope plus
-// any documents supplied on the request (rooms/internal/memory); pass nil for
-// a member with no onboarding context. tenantID scopes the room lookup — it
-// returns ErrNotFound if roomID does not exist or belongs to another tenant.
-// agentTenantID is the tenant that owns agentID; if it differs from the room's
-// tenant, the add is rejected with ErrTenantMismatch (rooms are single-tenant).
-// Returns ErrRoomTerminated if the room has already reached a terminal state.
-func (s *Store) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string) (*Member, error) {
+// AddMember implements Store.
+func (s *MemoryStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string) (*Member, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -150,16 +280,8 @@ func (s *Store) AddMember(ctx context.Context, tenantID, roomID, agentID, agentT
 	return cloneMember(m), nil
 }
 
-// AppendMessage records a message in a room, authored by one of its members.
-// Posting a message consumes one turn; if doing so would exceed the room's
-// turn budget, the message is rejected with ErrTurnBudgetExceeded and the
-// room transitions to StateAbandoned instead. Returns ErrNotFound if roomID
-// does not exist or belongs to a different tenant, ErrMemberNotFound if
-// memberID is not seated in that room, ErrRoomTerminated if the room has
-// already reached a terminal state, and ErrTurnReserved if its remaining turns
-// are held by deliveries still in flight (see ReserveTurn) — a retryable
-// conflict that leaves the room open, since those turns may yet be released.
-func (s *Store) AppendMessage(ctx context.Context, tenantID, roomID, memberID, body string) (*Message, error) {
+// AppendMessage implements Store.
+func (s *MemoryStore) AppendMessage(ctx context.Context, tenantID, roomID, memberID, body string) (*Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -213,27 +335,8 @@ type Reservation struct {
 	msg       PendingMessage
 }
 
-// ReserveTurn claims one of a room's turns for msg, running exactly the checks
-// AppendMessage runs — the room exists and is visible to this tenant, it is
-// open, msg.MemberID is seated in it, and the budget has room for one more turn
-// — and, if they pass, holding that turn until the reservation is resolved.
-//
-// It exists so a caller with a side effect to perform before recording a
-// message can make that side effect safe in both directions. Firing it for a
-// request the room would reject means it happened for a request that was never
-// valid; firing it and only then finding the room out of turns or terminated by
-// a concurrent request means it happened with no record in the transcript.
-// Reserving the turn up front closes both: the checks run before the side
-// effect, and the turn is held across it, so a committed message cannot be
-// refused by anything that arrives in the meantime.
-//
-// Reserving is how the addressed-message path acquires its turn, so it carries
-// the same consequences AppendMessage does: a room that is genuinely out of
-// turns is abandoned here too, rather than letting agents loop indefinitely.
-// A turn that is merely reserved by another delivery is different — that one
-// may still be released unspent — so it is refused with ErrTurnReserved and
-// leaves the room open.
-func (s *Store) ReserveTurn(ctx context.Context, tenantID, roomID string, msg PendingMessage) (*Reservation, error) {
+// ReserveTurn implements Store.
+func (s *MemoryStore) ReserveTurn(ctx context.Context, tenantID, roomID string, msg PendingMessage) (*Reservation, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -263,23 +366,10 @@ func (s *Store) ReserveTurn(ctx context.Context, tenantID, roomID string, msg Pe
 	return res, nil
 }
 
-// CommitTurn spends a reserved turn, recording the message it was reserved for.
-//
-// It is deliberately unconditional. By the time a caller commits, the side
-// effect the reservation was protecting has already happened — the message was
-// delivered to the recipient's agent, with whatever policy and payment
-// consequences that carried — so the transcript must record it even if a
-// concurrent request terminated the room or exhausted its budget in the
-// meantime. A confirmed delivery with no message in the transcript is the worse
-// outcome by far: the recipient got the call and the room denies it.
-//
-// For the same reason it does not honour ctx cancellation. A caller that hung
-// up mid-delivery does not un-deliver the call, so ctx is accepted only for
-// symmetry with the rest of Store.
-//
-// Returns ErrReservationNotHeld if res was already committed or released, and
-// ErrNotFound if its room no longer exists.
-func (s *Store) CommitTurn(_ context.Context, res *Reservation) (*Message, error) {
+// CommitTurn implements Store. It does not honour ctx cancellation — see the
+// Store.CommitTurn doc comment for why — so ctx is accepted only for symmetry
+// with the rest of Store.
+func (s *MemoryStore) CommitTurn(_ context.Context, res *Reservation) (*Message, error) {
 	if res == nil {
 		return nil, ErrReservationNotHeld
 	}
@@ -306,14 +396,10 @@ func (s *Store) CommitTurn(_ context.Context, res *Reservation) (*Message, error
 	return cloneMessage(m), nil
 }
 
-// ReleaseTurn gives a reserved turn back unspent: the side effect it was
-// protecting did not happen, so nothing is recorded and the room is free to
-// spend the turn on something else. Like CommitTurn it ignores ctx
-// cancellation — a released turn that stayed reserved would be lost for the
-// life of the room.
-//
-// Returns ErrReservationNotHeld if res was already committed or released.
-func (s *Store) ReleaseTurn(_ context.Context, res *Reservation) error {
+// ReleaseTurn implements Store. Like CommitTurn it ignores ctx cancellation —
+// a released turn that stayed reserved would be lost for the life of the
+// room.
+func (s *MemoryStore) ReleaseTurn(_ context.Context, res *Reservation) error {
 	if res == nil {
 		return ErrReservationNotHeld
 	}
@@ -330,7 +416,7 @@ func (s *Store) ReleaseTurn(_ context.Context, res *Reservation) error {
 // canPost reports whether memberID may post one message to r right now: the
 // room is open, memberID is seated in it, and the budget has room for one more
 // turn. Caller must hold s.mu (any lock).
-func (s *Store) canPost(r *Room, memberID string) error {
+func (s *MemoryStore) canPost(r *Room, memberID string) error {
 	if r.State != StateOpen {
 		return ErrRoomTerminated
 	}
@@ -364,7 +450,7 @@ func (s *Store) canPost(r *Room, memberID string) error {
 // ErrTurnReserved deliberately does not trigger it: those turns are held by
 // deliveries still in flight and may yet be released, so a call that never
 // landed must not be able to kill a room. Caller must hold s.mu (write lock).
-func (s *Store) abandonIfOutOfTurns(r *Room, err error) {
+func (s *MemoryStore) abandonIfOutOfTurns(r *Room, err error) {
 	if !errors.Is(err, ErrTurnBudgetExceeded) {
 		return
 	}
@@ -375,7 +461,7 @@ func (s *Store) abandonIfOutOfTurns(r *Room, err error) {
 // dropPending removes res from the pending set, reporting whether it was still
 // there — false means it was already committed or released, and the caller must
 // not act on it twice. Caller must hold s.mu (write lock).
-func (s *Store) dropPending(res *Reservation) bool {
+func (s *MemoryStore) dropPending(res *Reservation) bool {
 	held, ok := s.pending[res.roomID]
 	if !ok {
 		return false
@@ -390,10 +476,8 @@ func (s *Store) dropPending(res *Reservation) bool {
 	return true
 }
 
-// CompleteRoom explicitly marks a room's goal as met. Returns ErrNotFound if
-// roomID does not exist or belongs to a different tenant, and
-// ErrRoomTerminated if the room has already reached a terminal state.
-func (s *Store) CompleteRoom(ctx context.Context, tenantID, roomID string) (*Room, error) {
+// CompleteRoom implements Store.
+func (s *MemoryStore) CompleteRoom(ctx context.Context, tenantID, roomID string) (*Room, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -414,13 +498,8 @@ func (s *Store) CompleteRoom(ctx context.Context, tenantID, roomID string) (*Roo
 	return cloneRoom(r), nil
 }
 
-// MemberAgentID returns the AgentID of the member identified by memberID
-// within roomID, so a caller can resolve the gateway agent to deliver an
-// addressed message to before making the proxied call
-// (rooms/internal/gateway). Returns ErrNotFound if roomID does not exist or
-// belongs to a different tenant, and ErrMemberNotFound if memberID is not
-// seated in that room.
-func (s *Store) MemberAgentID(ctx context.Context, tenantID, roomID, memberID string) (string, error) {
+// MemberAgentID implements Store.
+func (s *MemoryStore) MemberAgentID(ctx context.Context, tenantID, roomID, memberID string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -440,14 +519,8 @@ func (s *Store) MemberAgentID(ctx context.Context, tenantID, roomID, memberID st
 	return "", ErrMemberNotFound
 }
 
-// RecordDeliveryFailure appends an EventDeliveryFailed event to a room's log:
-// a message from fromMemberID addressed to toMemberID could not be delivered
-// as a proxied call to toAgentID. It does not consume a turn and does not
-// append a message — a failed call must never look like a delivered one
-// (the caller is responsible for not calling AppendMessage in this case).
-// Returns ErrNotFound if roomID does not exist or belongs to a different
-// tenant.
-func (s *Store) RecordDeliveryFailure(ctx context.Context, tenantID, roomID, fromMemberID, toMemberID, toAgentID, class string) error {
+// RecordDeliveryFailure implements Store.
+func (s *MemoryStore) RecordDeliveryFailure(ctx context.Context, tenantID, roomID, fromMemberID, toMemberID, toAgentID, class string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -469,16 +542,8 @@ func (s *Store) RecordDeliveryFailure(ctx context.Context, tenantID, roomID, fro
 	return nil
 }
 
-// RecordDelivery appends an EventMessageDelivered event recording that a
-// message from fromMemberID addressed to toMemberID was confirmed delivered as
-// a proxied call to toAgentID, carrying the gateway's invocationID so the room
-// history can be reconciled against the gateway's invocation record.
-//
-// It does not append the message itself — the caller does that — so a delivery
-// and the message it delivered stay separately attributable in the log.
-// Returns ErrNotFound if roomID does not exist or belongs to a different
-// tenant.
-func (s *Store) RecordDelivery(ctx context.Context, tenantID, roomID, fromMemberID, toMemberID, toAgentID, invocationID string) error {
+// RecordDelivery implements Store.
+func (s *MemoryStore) RecordDelivery(ctx context.Context, tenantID, roomID, fromMemberID, toMemberID, toAgentID, invocationID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -510,10 +575,8 @@ func hasMember(r *Room, memberID string) bool {
 	return false
 }
 
-// Messages returns a room's transcript: its messages in append order,
-// replayed from its event log. Returns ErrNotFound if roomID does not exist
-// or belongs to a different tenant.
-func (s *Store) Messages(ctx context.Context, tenantID, roomID string) ([]*Message, error) {
+// Messages implements Store.
+func (s *MemoryStore) Messages(ctx context.Context, tenantID, roomID string) ([]*Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -528,9 +591,8 @@ func (s *Store) Messages(ctx context.Context, tenantID, roomID string) ([]*Messa
 	return transcript(r), nil
 }
 
-// Events returns a room's full event log in sequence order. Returns
-// ErrNotFound if roomID does not exist or belongs to a different tenant.
-func (s *Store) Events(ctx context.Context, tenantID, roomID string) ([]*Event, error) {
+// Events implements Store.
+func (s *MemoryStore) Events(ctx context.Context, tenantID, roomID string) ([]*Event, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -570,7 +632,7 @@ func transcript(r *Room) []*Message {
 // committed (see ReserveTurn). A reserved turn has to count, or a post that
 // arrives while a delivery is in flight could spend the same last turn twice.
 // Caller must hold s.mu (any lock).
-func (s *Store) turnsSpent(r *Room) int {
+func (s *MemoryStore) turnsSpent(r *Room) int {
 	return turnsConsumed(r) + len(s.pending[r.ID])
 }
 
@@ -590,7 +652,7 @@ func turnsConsumed(r *Room) int {
 // appendEvent appends a new Event of the given kind and payload to r's log,
 // assigning the next contiguous sequence number. Caller must hold s.mu (write
 // lock).
-func (s *Store) appendEvent(r *Room, kind EventKind, payload any) {
+func (s *MemoryStore) appendEvent(r *Room, kind EventKind, payload any) {
 	r.Events = append(r.Events, &Event{
 		Sequence:  len(r.Events) + 1,
 		Kind:      kind,
@@ -601,7 +663,7 @@ func (s *Store) appendEvent(r *Room, kind EventKind, payload any) {
 
 // bucket returns (and lazily initialises) the per-tenant room map. Caller must
 // hold s.mu (write lock).
-func (s *Store) bucket(tenantID string) map[string]*Room {
+func (s *MemoryStore) bucket(tenantID string) map[string]*Room {
 	if s.rooms[tenantID] == nil {
 		s.rooms[tenantID] = make(map[string]*Room)
 	}
@@ -609,7 +671,7 @@ func (s *Store) bucket(tenantID string) map[string]*Room {
 }
 
 // find looks up a room by tenant and ID. Caller must hold s.mu (any lock).
-func (s *Store) find(tenantID, roomID string) (*Room, error) {
+func (s *MemoryStore) find(tenantID, roomID string) (*Room, error) {
 	bucket, ok := s.rooms[tenantID]
 	if !ok {
 		return nil, ErrNotFound

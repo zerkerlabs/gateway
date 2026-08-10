@@ -1,5 +1,6 @@
 // Package room defines the Room domain model — Room, Member, Message, and
-// Event — and a tenant-scoped in-memory store for them.
+// Event — and the Store interface that persists them. MemoryStore is the
+// in-memory implementation.
 //
 // A room is a durable, membership-scoped space where two or more agents cowork
 // a single task. Rooms are single-tenant: every member of a room belongs to the
