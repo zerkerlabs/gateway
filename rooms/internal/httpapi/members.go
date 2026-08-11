@@ -26,7 +26,7 @@ type addMemberRequest struct {
 func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantFromContext(r.Context())
 	if tenantID == "" {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "unauthorized")
 		return
 	}
 
@@ -34,12 +34,12 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 
 	var req addMemberRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, CodeInvalidRequestBody, "invalid request body")
 		return
 	}
 
 	if req.AgentID == "" {
-		writeError(w, http.StatusBadRequest, "agent_id is required")
+		writeError(w, http.StatusBadRequest, CodeMissingField, "agent_id is required")
 		return
 	}
 
@@ -64,11 +64,11 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, room.ErrNotFound):
-			writeError(w, http.StatusNotFound, "room not found")
+			writeError(w, http.StatusNotFound, CodeRoomNotFound, "room not found")
 		case errors.Is(err, room.ErrRoomTerminated):
-			writeError(w, http.StatusConflict, "room is terminated")
+			writeError(w, http.StatusConflict, CodeRoomTerminated, "room is terminated")
 		case errors.Is(err, room.ErrTenantMismatch):
-			writeError(w, http.StatusBadRequest, "agent belongs to a different tenant")
+			writeError(w, http.StatusBadRequest, CodeTenantMismatch, "agent belongs to a different tenant")
 		default:
 			h.logger.Error("add member: store error", "err", err)
 			w.WriteHeader(http.StatusInternalServerError)

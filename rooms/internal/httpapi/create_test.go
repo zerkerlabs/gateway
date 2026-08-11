@@ -14,6 +14,7 @@ func TestHandleCreateRoom(t *testing.T) {
 		body       any
 		tenantID   string
 		wantStatus int
+		wantCode   string
 		checkBody  func(t *testing.T, body map[string]any)
 	}{
 		{
@@ -60,32 +61,41 @@ func TestHandleCreateRoom(t *testing.T) {
 			body:       map[string]any{},
 			tenantID:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "missing_field",
 		},
 		{
 			name:       "400 empty goal",
 			body:       map[string]any{"goal": ""},
 			tenantID:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "missing_field",
 		},
 		{
 			name:       "400 malformed JSON",
 			body:       []byte(`{"goal": `),
 			tenantID:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "invalid_request_body",
 		},
 		{
 			name:       "400 zero turn budget",
 			body:       map[string]any{"goal": "goal", "turn_budget": 0},
 			tenantID:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "invalid_field",
 		},
 		{
 			name:       "400 negative turn budget",
 			body:       map[string]any{"goal": "goal", "turn_budget": -1},
 			tenantID:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "invalid_field",
 		},
 		{
+			// No Authorization header at all, so the auth middleware itself
+			// refuses the request (401, no body, by its own documented
+			// contract) before the handler's own belt-and-braces tenant check
+			// ever runs.
 			name:       "401 no tenant in context",
 			body:       map[string]any{"goal": "goal"},
 			tenantID:   "",
@@ -105,8 +115,14 @@ func TestHandleCreateRoom(t *testing.T) {
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
-			if tt.checkBody != nil {
-				tt.checkBody(t, decodeBody(t, rec))
+			if tt.wantCode != "" || tt.checkBody != nil {
+				body := decodeBody(t, rec)
+				if tt.wantCode != "" && body["code"] != tt.wantCode {
+					t.Errorf("code = %v, want %q", body["code"], tt.wantCode)
+				}
+				if tt.checkBody != nil {
+					tt.checkBody(t, body)
+				}
 			}
 		})
 	}

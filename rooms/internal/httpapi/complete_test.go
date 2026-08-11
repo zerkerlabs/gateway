@@ -17,6 +17,7 @@ func TestHandleCompleteRoom(t *testing.T) {
 		setup      func(t *testing.T, s room.Store) string // returns the room ID to complete
 		lookupAs   string
 		wantStatus int
+		wantCode   string
 	}{
 		{
 			name: "200 completes an open room",
@@ -35,6 +36,7 @@ func TestHandleCompleteRoom(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusNotFound,
+			wantCode:   "room_not_found",
 		},
 		{
 			name: "404 for a room owned by a different tenant, identical to a missing room",
@@ -44,6 +46,7 @@ func TestHandleCompleteRoom(t *testing.T) {
 			},
 			lookupAs:   tenantB,
 			wantStatus: http.StatusNotFound,
+			wantCode:   "room_not_found",
 		},
 		{
 			name: "409 for a room already completed",
@@ -57,6 +60,7 @@ func TestHandleCompleteRoom(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusConflict,
+			wantCode:   "room_terminated",
 		},
 		{
 			name: "409 for a room already abandoned",
@@ -79,8 +83,13 @@ func TestHandleCompleteRoom(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusConflict,
+			wantCode:   "room_terminated",
 		},
 		{
+			// No Authorization header at all, so the auth middleware itself
+			// refuses the request (401, no body, by its own documented
+			// contract) before the handler's own belt-and-braces tenant check
+			// ever runs.
 			name: "401 when no tenant is in context",
 			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
@@ -104,6 +113,12 @@ func TestHandleCompleteRoom(t *testing.T) {
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantCode != "" {
+				body := decodeBody(t, rec)
+				if body["code"] != tt.wantCode {
+					t.Errorf("code = %v, want %q", body["code"], tt.wantCode)
+				}
 			}
 		})
 	}

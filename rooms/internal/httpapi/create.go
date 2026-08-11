@@ -19,23 +19,23 @@ type createRoomRequest struct {
 func (h *Handler) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantFromContext(r.Context())
 	if tenantID == "" {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	var req createRoomRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, CodeInvalidRequestBody, "invalid request body")
 		return
 	}
 
 	if req.Goal == "" {
-		writeError(w, http.StatusBadRequest, "goal is required")
+		writeError(w, http.StatusBadRequest, CodeMissingField, "goal is required")
 		return
 	}
 
 	if req.TurnBudget != nil && *req.TurnBudget <= 0 {
-		writeError(w, http.StatusBadRequest, "turn_budget must be positive")
+		writeError(w, http.StatusBadRequest, CodeInvalidField, "turn_budget must be positive")
 		return
 	}
 

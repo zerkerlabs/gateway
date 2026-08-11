@@ -35,6 +35,7 @@ func TestHandlePostMessage(t *testing.T) {
 		setup      func(t *testing.T, s room.Store) (roomID string, body any)
 		lookupAs   string
 		wantStatus int
+		wantCode   string
 		checkBody  func(t *testing.T, body map[string]any)
 	}{
 		{
@@ -65,6 +66,7 @@ func TestHandlePostMessage(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "missing_field",
 		},
 		{
 			name: "400 missing body",
@@ -75,6 +77,7 @@ func TestHandlePostMessage(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "missing_field",
 		},
 		{
 			name: "400 malformed JSON",
@@ -85,6 +88,7 @@ func TestHandlePostMessage(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "invalid_request_body",
 		},
 		{
 			name: "400 member not seated in the room",
@@ -95,6 +99,7 @@ func TestHandlePostMessage(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "member_not_found",
 		},
 		{
 			name: "404 for an unknown room ID",
@@ -104,6 +109,7 @@ func TestHandlePostMessage(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusNotFound,
+			wantCode:   "room_not_found",
 		},
 		{
 			name: "404 for a room owned by a different tenant",
@@ -114,6 +120,7 @@ func TestHandlePostMessage(t *testing.T) {
 			},
 			lookupAs:   tenantB,
 			wantStatus: http.StatusNotFound,
+			wantCode:   "room_not_found",
 		},
 		{
 			name: "409 posting to a terminated room",
@@ -127,6 +134,7 @@ func TestHandlePostMessage(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusConflict,
+			wantCode:   "room_terminated",
 		},
 		{
 			name: "409 exceeding the turn budget",
@@ -140,8 +148,13 @@ func TestHandlePostMessage(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusConflict,
+			wantCode:   "turn_budget_exceeded",
 		},
 		{
+			// No Authorization header at all, so the auth middleware itself
+			// refuses the request (401, no body, by its own documented
+			// contract) before the handler's own belt-and-braces tenant check
+			// ever runs.
 			name: "401 when no tenant is in context",
 			setup: func(t *testing.T, s room.Store) (string, any) {
 				t.Helper()
@@ -167,8 +180,14 @@ func TestHandlePostMessage(t *testing.T) {
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
-			if tt.checkBody != nil {
-				tt.checkBody(t, decodeBody(t, rec))
+			if tt.wantCode != "" || tt.checkBody != nil {
+				body2 := decodeBody(t, rec)
+				if tt.wantCode != "" && body2["code"] != tt.wantCode {
+					t.Errorf("code = %v, want %q", body2["code"], tt.wantCode)
+				}
+				if tt.checkBody != nil {
+					tt.checkBody(t, body2)
+				}
 			}
 		})
 	}

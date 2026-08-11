@@ -105,6 +105,46 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+// Code is a stable, machine-readable identifier for a Rooms API error. Unlike
+// the human-readable message alongside it, a Code is safe for a caller to
+// branch on: it does not change wording, and every value it can take is
+// declared as a constant below rather than as an inline string literal at a
+// call site.
+type Code string
+
+// The error codes every Rooms endpoint can return. A new failure path gets a
+// new constant here rather than an inline string — this is the one place they
+// are declared, and there is no "unknown" fallback: every writeError call
+// site names one of these.
+const (
+	CodeInvalidRequestBody  Code = "invalid_request_body"
+	CodeMissingField        Code = "missing_field"
+	CodeInvalidField        Code = "invalid_field"
+	CodeUnauthorized        Code = "unauthorized"
+	CodeRoomNotFound        Code = "room_not_found"
+	CodeRoomTerminated      Code = "room_terminated"
+	CodeTenantMismatch      Code = "tenant_mismatch"
+	CodeTurnBudgetExceeded  Code = "turn_budget_exceeded"
+	CodeTurnReserved        Code = "turn_reserved"
+	CodeMemberNotFound      Code = "member_not_found"
+	CodeDeliveryRejected    Code = "delivery_rejected"
+	CodeDeliveryUnconfirmed Code = "delivery_unconfirmed"
+	CodeDeliveryUnavailable Code = "delivery_unavailable"
+	CodeDeliveryUpstream    Code = "delivery_upstream_failure"
+)
+
+// errorResponse is the JSON shape of every Rooms error response. Error keeps
+// its existing meaning: a human-readable message, free to change wording
+// across releases. Code is a stable identifier a caller can branch on instead
+// of string-matching Error, and is always present. Reason is an optional,
+// finer-grained detail a given code may attach; nothing in this package sets
+// it yet, but the field exists so a future error path can.
+type errorResponse struct {
+	Error  string `json:"error"`
+	Code   Code   `json:"code"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func writeError(w http.ResponseWriter, status int, code Code, msg string) {
+	writeJSON(w, status, errorResponse{Error: msg, Code: code})
 }

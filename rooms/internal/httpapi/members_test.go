@@ -46,6 +46,7 @@ func TestHandleAddMember(t *testing.T) {
 		body       any
 		lookupAs   string
 		wantStatus int
+		wantCode   string
 		checkBody  func(t *testing.T, body map[string]any)
 		afterCheck func(t *testing.T, s room.Store, roomID string)
 	}{
@@ -80,6 +81,7 @@ func TestHandleAddMember(t *testing.T) {
 			body:       map[string]any{},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "missing_field",
 		},
 		{
 			name: "400 malformed JSON",
@@ -90,6 +92,7 @@ func TestHandleAddMember(t *testing.T) {
 			body:       []byte(`{"agent_id": `),
 			lookupAs:   tenantA,
 			wantStatus: http.StatusBadRequest,
+			wantCode:   "invalid_request_body",
 		},
 		{
 			name: "404 for an unknown room ID",
@@ -100,6 +103,7 @@ func TestHandleAddMember(t *testing.T) {
 			body:       map[string]any{"agent_id": "agt_1"},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusNotFound,
+			wantCode:   "room_not_found",
 		},
 		{
 			name: "404 for a room owned by a different tenant",
@@ -110,6 +114,7 @@ func TestHandleAddMember(t *testing.T) {
 			body:       map[string]any{"agent_id": "agt_1"},
 			lookupAs:   tenantB,
 			wantStatus: http.StatusNotFound,
+			wantCode:   "room_not_found",
 		},
 		{
 			name: "409 for a terminated room",
@@ -124,8 +129,13 @@ func TestHandleAddMember(t *testing.T) {
 			body:       map[string]any{"agent_id": "agt_1"},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusConflict,
+			wantCode:   "room_terminated",
 		},
 		{
+			// No Authorization header at all, so the auth middleware itself
+			// refuses the request (401, no body, by its own documented
+			// contract) before the handler's own belt-and-braces tenant check
+			// ever runs.
 			name: "401 when no tenant is in context",
 			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
@@ -249,6 +259,12 @@ func TestHandleAddMember(t *testing.T) {
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantCode != "" {
+				body := decodeBody(t, rec)
+				if body["code"] != tt.wantCode {
+					t.Errorf("code = %v, want %q", body["code"], tt.wantCode)
+				}
 			}
 			if tt.checkBody != nil {
 				tt.checkBody(t, decodeBody(t, rec))

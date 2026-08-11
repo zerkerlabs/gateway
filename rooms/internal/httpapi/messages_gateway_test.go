@@ -177,6 +177,9 @@ func TestHandlePostMessage_Addressed(t *testing.T) {
 		if strings.Contains(rec.Body.String(), "internal detail") {
 			t.Errorf("response body = %q, must not leak the raw upstream body", rec.Body.String())
 		}
+		if body := decodeBody(t, rec); body["code"] != "delivery_rejected" {
+			t.Errorf("code = %v, want %q", body["code"], "delivery_rejected")
+		}
 
 		get := requestAs(t, http.MethodGet, "/v1/rooms/"+roomID, nil, tenantA)
 		getRec := httptest.NewRecorder()
@@ -207,6 +210,9 @@ func TestHandlePostMessage_Addressed(t *testing.T) {
 		if rec.Code != http.StatusBadGateway {
 			t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusBadGateway, rec.Body.String())
 		}
+		if body := decodeBody(t, rec); body["code"] != "delivery_upstream_failure" {
+			t.Errorf("code = %v, want %q", body["code"], "delivery_upstream_failure")
+		}
 
 		get := requestAs(t, http.MethodGet, "/v1/rooms/"+roomID, nil, tenantA)
 		getRec := httptest.NewRecorder()
@@ -231,6 +237,9 @@ func TestHandlePostMessage_Addressed(t *testing.T) {
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+		}
+		if body := decodeBody(t, rec); body["code"] != "member_not_found" {
+			t.Errorf("code = %v, want %q", body["code"], "member_not_found")
 		}
 	})
 }
@@ -375,6 +384,9 @@ func TestHandlePostMessage_ConcurrentPostCannotStealAnInFlightTurn(t *testing.T)
 		t.Errorf("concurrent post status = %d, want %d — it took the turn an in-flight delivery was holding; body = %s",
 			concurrent.Code, http.StatusConflict, concurrent.Body.String())
 	}
+	if body := decodeBody(t, concurrent); body["code"] != "turn_reserved" {
+		t.Errorf("code = %v, want %q", body["code"], "turn_reserved")
+	}
 	if addressed.Code != http.StatusCreated {
 		t.Fatalf("addressed post status = %d, want %d; body = %s",
 			addressed.Code, http.StatusCreated, addressed.Body.String())
@@ -505,6 +517,9 @@ func TestHandlePostMessage_RefusesRoomFromAnotherGatewayTenant(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
 	}
+	if body := decodeBody(t, rec); body["code"] != "delivery_unavailable" {
+		t.Errorf("code = %v, want %q", body["code"], "delivery_unavailable")
+	}
 	if paths := gw.paths(); len(paths) != 0 {
 		t.Errorf("gateway paths = %v, want none — nothing may be sent for a tenant the credential cannot act for", paths)
 	}
@@ -564,6 +579,9 @@ func TestHandlePostMessage_UnconfirmedDeliveryEndsTheRequest(t *testing.T) {
 
 	if rec.Code != http.StatusGatewayTimeout {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusGatewayTimeout, rec.Body.String())
+	}
+	if body := decodeBody(t, rec); body["code"] != "delivery_unconfirmed" {
+		t.Errorf("code = %v, want %q", body["code"], "delivery_unconfirmed")
 	}
 	if elapsed > 10*confirmTimeout {
 		t.Errorf("request took %s, want it bounded by the ~%s confirmation budget", elapsed, confirmTimeout)
@@ -662,6 +680,9 @@ func TestHandlePostMessage_AcceptedThenFailedIsNotRecorded(t *testing.T) {
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusBadGateway, rec.Body.String())
+	}
+	if body := decodeBody(t, rec); body["code"] != "delivery_upstream_failure" {
+		t.Errorf("code = %v, want %q", body["code"], "delivery_upstream_failure")
 	}
 
 	getRec := httptest.NewRecorder()

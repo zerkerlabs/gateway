@@ -11,7 +11,7 @@ import (
 func (h *Handler) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantFromContext(r.Context())
 	if tenantID == "" {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "unauthorized")
 		return
 	}
 
@@ -20,7 +20,7 @@ func (h *Handler) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 	got, err := h.store.GetRoom(r.Context(), tenantID, roomID)
 	if err != nil {
 		if errors.Is(err, room.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "room not found")
+			writeError(w, http.StatusNotFound, CodeRoomNotFound, "room not found")
 			return
 		}
 		h.logger.Error("get room: store error", "err", err)
