@@ -38,7 +38,7 @@ type tenantMismatchStore struct {
 	room.Store
 }
 
-func (tenantMismatchStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string) (*room.Member, error) {
+func (tenantMismatchStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string, commitment room.ContextCommitment) (*room.Member, error) {
 	return nil, room.ErrTenantMismatch
 }
 
