@@ -313,9 +313,10 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 // against the fake only, and stay honest about their scope. Rooms v1 ships
 // behind the fake, so the fake's behaviour is still worth pinning.
 //
-// zerkerlabs/gateway-strategy#279 adds Visibility to the seam and teaches the
-// fake query-driven retrieval; these cases fold back into RunContract then,
-// and this function goes away.
+// Adding Visibility to the seam and teaching the fake query-driven retrieval
+// folds these cases back into RunContract and removes this function; that
+// work is tracked and is a prerequisite for wiring this client into
+// production, since until then member-private memory is not expressible.
 func RunVisibilityContract(t *testing.T, newStore func() memory.Store) {
 	t.Helper()
 

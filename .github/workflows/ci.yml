@@ -152,12 +152,24 @@ jobs:
       # (v0.1.10): v0.1.11 fixed a race where concurrent first-opens of the
       # same room database collided enabling SQLite WAL. These suites drive
       # the backend from parallel Go tests, which is exactly that workload.
+      # The URL carries a #sha256 fragment, which pip verifies before
+      # installing. A tag and even a release asset can be replaced in place;
+      # the digest cannot, so this is what actually pins the bytes rather
+      # than just the version string. Update it whenever the version moves.
       - name: Install zmem backend
         run: |
-          pip install "zerker-memory @ https://github.com/zerkerlabs/zmem/releases/download/v0.1.12/zerker_memory-0.1.12-py3-none-any.whl"
+          pip install "zerker-memory @ https://github.com/zerkerlabs/zmem/releases/download/v0.1.12/zerker_memory-0.1.12-py3-none-any.whl#sha256=ae75cb6e6018cd86edc247384e43c99d5c07a5968db674bfd62948b97b61dbe2"
 
+      # Masked before it is exported, so it stays redacted even if a later
+      # step echoes its environment. The token is ephemeral and only ever
+      # authenticates to a loopback backend that dies with the job, but
+      # "credentials never appear in logs" is an invariant worth holding
+      # everywhere rather than only where a leak would hurt.
       - name: Generate zmem service token
-        run: echo "ZMEM_SERVICE_TOKEN=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+        run: |
+          token="$(openssl rand -hex 32)"
+          echo "::add-mask::$token"
+          echo "ZMEM_SERVICE_TOKEN=$token" >> "$GITHUB_ENV"
 
       - name: Start zmem backend
         env:
