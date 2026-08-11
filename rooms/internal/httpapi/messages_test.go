@@ -181,12 +181,12 @@ func TestHandlePostMessage(t *testing.T) {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
 			if tt.wantCode != "" || tt.checkBody != nil {
-				body2 := decodeBody(t, rec)
-				if tt.wantCode != "" && body2["code"] != tt.wantCode {
-					t.Errorf("code = %v, want %q", body2["code"], tt.wantCode)
+				respBody := decodeBody(t, rec)
+				if tt.wantCode != "" && respBody["code"] != tt.wantCode {
+					t.Errorf("code = %v, want %q", respBody["code"], tt.wantCode)
 				}
 				if tt.checkBody != nil {
-					tt.checkBody(t, body2)
+					tt.checkBody(t, respBody)
 				}
 			}
 		})

@@ -28,6 +28,19 @@ func (erroringMemoryStore) Record(ctx context.Context, req memory.RecordRequest)
 	return memory.WriteResult{}, errors.New("memory backend unavailable")
 }
 
+// tenantMismatchStore wraps a room.Store and makes AddMember always fail with
+// room.ErrTenantMismatch. The handler always passes its own tenant as
+// AddMember's agentTenantID (rooms have no gateway client yet to resolve an
+// agent's owning tenant), so room.MemoryStore can never actually return this
+// error itself — this double is what lets a test reach that branch.
+type tenantMismatchStore struct {
+	room.Store
+}
+
+func (tenantMismatchStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string) (*room.Member, error) {
+	return nil, room.ErrTenantMismatch
+}
+
 func TestHandleAddMember(t *testing.T) {
 	t.Parallel()
 
@@ -38,6 +51,10 @@ func TestHandleAddMember(t *testing.T) {
 		// memory.Fake — for a case that needs a custom implementation
 		// (e.g. one that always errors).
 		memStore memory.Store
+		// wrapStore, if non-nil, wraps the fresh room.MemoryStore before it is
+		// handed to setup and the handler — for a case that needs a store
+		// double to reach a branch the real MemoryStore cannot take itself.
+		wrapStore func(room.Store) room.Store
 		// seedMemory, if non-nil, runs after setup has created the room, so
 		// it can seed the default memory.Fake for the room ID setup
 		// returned — a room ID only exists once setup runs. It is ignored
@@ -215,6 +232,18 @@ func TestHandleAddMember(t *testing.T) {
 			},
 		},
 		{
+			name: "400 agent belongs to a different tenant",
+			setup: func(t *testing.T, s room.Store) string {
+				t.Helper()
+				return mustCreateRoom(t, s, "goal").ID
+			},
+			wrapStore:  func(s room.Store) room.Store { return tenantMismatchStore{s} },
+			body:       map[string]any{"agent_id": "agt_1"},
+			lookupAs:   tenantA,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "tenant_mismatch",
+		},
+		{
 			name: "500 refuses the join when the memory read fails; no member is added",
 			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
@@ -247,7 +276,11 @@ func TestHandleAddMember(t *testing.T) {
 				fake = memory.NewFake()
 				memStore = fake
 			}
-			mux, store := newMuxWithMemory(t, memStore)
+			var store room.Store = room.NewMemoryStore()
+			if tt.wrapStore != nil {
+				store = tt.wrapStore(store)
+			}
+			mux := newMuxWithStore(t, store, memStore)
 			roomID := tt.setup(t, store)
 			if tt.seedMemory != nil {
 				tt.seedMemory(t, fake, roomID)
