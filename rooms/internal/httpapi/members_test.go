@@ -72,7 +72,10 @@ func (fixedMemoryStore) Record(ctx context.Context, req memory.RecordRequest) (m
 // withheld reason every entry agrees on is surfaced, but a divergent set (or
 // backend free-text abstention detail) never reaches the response — only the
 // Rooms-owned default does, using sentinel values recognizable enough that
-// their absence from the response body is a meaningful check.
+// their absence from the response body is a meaningful check. A final case
+// covers a State value outside those six: refusalFor whitelists only the
+// three seating states, so an unrecognized value refuses the join instead of
+// seating on it.
 func TestHandleAddMemberContextStates(t *testing.T) {
 	t.Parallel()
 
@@ -159,6 +162,13 @@ func TestHandleAddMemberContextStates(t *testing.T) {
 			wantStatus: http.StatusConflict,
 			wantCode:   "memory_budget_exhausted",
 			wantReason: "budget",
+		},
+		{
+			name:       "an unrecognized state refuses the join rather than seating on it",
+			result:     memory.ContextResult{State: memory.State("future_state")},
+			wantStatus: http.StatusConflict,
+			wantCode:   "memory_unrecognized_state",
+			wantReason: "unrecognized_state",
 		},
 	}
 

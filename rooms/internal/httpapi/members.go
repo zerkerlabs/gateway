@@ -110,11 +110,15 @@ const (
 	reasonMemoryBlocked         = "policy_withheld_all"
 	reasonMemoryAbstained       = "evidence_conflicted"
 	reasonMemoryBudgetExhausted = "budget_exhausted_all"
+	reasonMemoryUnrecognized    = "unrecognized_state"
 )
 
 // refusalFor reports the response Code and default reason for a memory.State
-// that must refuse a join, and whether state refuses at all — StateReady,
-// StatePartial, and StateEmpty do not, and refused is false for them.
+// that must refuse a join, and whether state refuses at all. Only
+// StateReady, StatePartial, and StateEmpty are whitelisted to seat; every
+// other value — including one outside the six documented states — refuses,
+// so an unrecognized or malformed state fails closed instead of seating a
+// member on an unknown basis.
 //
 // def is only the fallback: the collapse rule at the call site prefers a
 // reason every one of the backend's withheld entries agrees on, and falls
@@ -122,6 +126,8 @@ const (
 // handleAddMember.
 func refusalFor(state memory.State) (code Code, def string, refused bool) {
 	switch state {
+	case memory.StateReady, memory.StatePartial, memory.StateEmpty:
+		return "", "", false
 	case memory.StateBlocked:
 		return CodeMemoryBlocked, reasonMemoryBlocked, true
 	case memory.StateAbstained:
@@ -129,7 +135,7 @@ func refusalFor(state memory.State) (code Code, def string, refused bool) {
 	case memory.StateBudgetExhausted:
 		return CodeMemoryBudgetExhausted, reasonMemoryBudgetExhausted, true
 	default:
-		return "", "", false
+		return CodeMemoryUnrecognized, reasonMemoryUnrecognized, true
 	}
 }
 

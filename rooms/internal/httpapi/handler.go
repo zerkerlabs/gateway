@@ -134,6 +134,7 @@ const (
 	CodeMemoryBlocked         Code = "memory_blocked"
 	CodeMemoryAbstained       Code = "memory_abstained"
 	CodeMemoryBudgetExhausted Code = "memory_budget_exhausted"
+	CodeMemoryUnrecognized    Code = "memory_unrecognized_state"
 )
 
 // errorResponse is the JSON shape of every Rooms error response. Error keeps
