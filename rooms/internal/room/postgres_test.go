@@ -693,6 +693,31 @@ func TestPG_AddMember_TerminatedRoomRejected(t *testing.T) {
 	}
 }
 
+func TestPG_AddMember_DuplicateAgentRejected(t *testing.T) {
+	s, _ := newPGStore(t)
+	ctx := context.Background()
+	r, err := s.CreateRoom(ctx, tenantA, "goal")
+	if err != nil {
+		t.Fatalf("CreateRoom: %v", err)
+	}
+
+	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+
+	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil); !errors.Is(err, room.ErrAlreadyMember) {
+		t.Errorf("err = %v, want ErrAlreadyMember", err)
+	}
+
+	got, err := s.GetRoom(ctx, tenantA, r.ID)
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if len(got.Members) != 1 {
+		t.Errorf("Members = %v, want exactly 1 after rejected duplicate add", got.Members)
+	}
+}
+
 // ----------------------------------------------------------- AppendMessage ---
 
 func TestPG_AppendMessage_RoundTrip(t *testing.T) {

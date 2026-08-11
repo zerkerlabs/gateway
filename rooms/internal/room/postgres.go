@@ -8,10 +8,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/zerkerlabs/gateway/rooms/internal/resource"
 )
+
+// pgUniqueViolation is the PostgreSQL SQLSTATE code for unique_violation.
+const pgUniqueViolation = "23505"
 
 // PostgresStore is a PostgreSQL-backed, tenant-scoped implementation of most
 // of Store: the full read half (GetRoom, ListRooms, Messages, Events,
@@ -234,6 +238,10 @@ func (s *PostgresStore) AddMember(ctx context.Context, tenantID, roomID, agentID
 			`INSERT INTO room_members (id, room_id, tenant_id, agent_id, joined_at) VALUES ($1, $2, $3, $4, $5)`,
 			m.ID, roomID, tenantID, m.AgentID, m.JoinedAt,
 		); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+				return ErrAlreadyMember
+			}
 			return fmt.Errorf("room: insert member: %w", err)
 		}
 
