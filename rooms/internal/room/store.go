@@ -588,7 +588,7 @@ func (s *MemoryStore) Messages(ctx context.Context, tenantID, roomID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	return transcript(r), nil
+	return transcript(r.Events), nil
 }
 
 // Events implements Store.
@@ -612,12 +612,14 @@ func (s *MemoryStore) Events(ctx context.Context, tenantID, roomID string) ([]*E
 	return out, nil
 }
 
-// transcript replays r's event log into its ordered message history. A room
-// keeps no separate message list, so this is the only source of the
-// transcript. Caller must hold s.mu (any lock).
-func transcript(r *Room) []*Message {
-	msgs := make([]*Message, 0, len(r.Events))
-	for _, ev := range r.Events {
+// transcript replays events into their ordered message history: a room keeps
+// no separate message list, so this is the only source of the transcript.
+// Shared by MemoryStore (caller must hold s.mu, any lock) and PostgresStore,
+// so both implementations derive a room's messages the same way from the same
+// event log.
+func transcript(events []*Event) []*Message {
+	msgs := make([]*Message, 0, len(events))
+	for _, ev := range events {
 		if ev.Kind != EventMessagePosted {
 			continue
 		}

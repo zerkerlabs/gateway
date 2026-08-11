@@ -9,7 +9,7 @@ LDFLAGS := -X github.com/zerkerlabs/gateway/rooms/internal/version.Version=$(VER
 
 .DEFAULT_GOAL := check
 
-.PHONY: check tidy-check fmt-check vet lint test build run fmt tidy
+.PHONY: check tidy-check fmt-check vet lint test integration-test build run fmt tidy
 check: tidy-check fmt-check vet lint test build ## Full per-module gate
 
 tidy-check:
@@ -27,6 +27,9 @@ lint:
 
 test:
 	$(GO) test -race -count=1 ./...
+
+integration-test: ## Run integration tests (needs TEST_DATABASE_URL + a Postgres)
+	$(GO) test -tags=integration -race -count=1 ./...
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)

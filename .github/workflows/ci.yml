@@ -98,9 +98,9 @@ jobs:
         if: steps.changed.outputs.run == 'true'
         run: make -C www check
 
-  # The gateway's persistence suites are behind the `integration` build tag, so
-  # `make check` does not run them — they need a real Postgres. Without this job
-  # nothing exercises them at all.
+  # The gateway's and rooms' persistence suites are behind the `integration`
+  # build tag, so `make check` does not run them — they need a real Postgres.
+  # Without this job nothing exercises them at all.
   #
   # Deliberately NOT gated on `check`: the suites are independent of the unit
   # gate, and running them in parallel keeps total CI wall-clock down.
@@ -128,9 +128,9 @@ jobs:
         with:
           go-version: '1.26'
           cache: true
-          cache-dependency-path: gateway/go.sum
+          cache-dependency-path: '**/go.sum'
 
-      - name: Integration tests (race)
+      - name: Gateway integration tests (race)
         env:
           TEST_DATABASE_URL: postgres://zerker:zerker@localhost:5432/zerker_test
         # -p 1 runs one package at a time. The integration suites (agent,
@@ -138,3 +138,12 @@ jobs:
         # in per-test setup against the ONE TEST_DATABASE_URL, so concurrent
         # packages would wipe each other's rows mid-test. Serialize packages.
         run: make -C gateway integration-test
+
+      # Rooms migrates its own tables (rooms, room_members, room_events) into
+      # the same database; nothing in its schema or its schema_migrations
+      # version strings collides with the gateway's. Runs after the gateway
+      # suite rather than in parallel with it, for the same one-DB reason.
+      - name: Rooms integration tests (race)
+        env:
+          TEST_DATABASE_URL: postgres://zerker:zerker@localhost:5432/zerker_test
+        run: make -C rooms integration-test
