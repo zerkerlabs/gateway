@@ -742,7 +742,8 @@ func TestZMemClient_AcceptsCrossLanguageGoldenVector(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	result, err := fastZMemClient(t, srv.URL).PrepareContext(
-		context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"},
+	)
 	if err != nil {
 		t.Fatalf("PrepareContext rejected the backend's own published commitment vector: %v", err)
 	}
