@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -695,11 +697,68 @@ func TestZMemClient_WriteIncludesEventAndKeyAndSurfaces409AsInternalError(t *tes
 	}
 }
 
+// TestZMemClient_AcceptsCrossLanguageGoldenVector drives the backend's own
+// published commitment vector all the way through PrepareContext, so the
+// parity proven byte-for-byte in TestCanonicalJSON_MatchesCrossLanguageGoldenVector
+// is also proven through the path production actually takes — decode, strip
+// the digest field, canonicalize, hash, compare.
+//
+// The commitment is sent as the vector's canonical bytes with the digest
+// field appended at the end, which puts it out of sorted position on the
+// wire. That is deliberate: the client must re-canonicalize rather than hash
+// what it received, and a client that hashed the raw bytes would pass every
+// other test in this file and fail this one.
+func TestZMemClient_AcceptsCrossLanguageGoldenVector(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Clean("testdata/room_context_commitment_v1.json"))
+	if err != nil {
+		t.Fatalf("read golden vector: %v", err)
+	}
+	var v struct {
+		CanonicalJSON     string `json:"canonical_json"`
+		RoomContextDigest string `json:"room_context_digest"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("decode golden vector: %v", err)
+	}
+	inner, ok := strings.CutSuffix(v.CanonicalJSON, "}")
+	if !ok {
+		t.Fatalf("golden vector canonical_json is not a JSON object: %s", v.CanonicalJSON)
+	}
+	commitment := inner + `,"room_context_digest":"` + v.RoomContextDigest + `"}`
+
+	// The envelope's tenant is the client's configured tenant, not the
+	// vector's: the tenant inside a commitment is the backend's own record of
+	// what it prepared, while the assertion in PrepareContext is against the
+	// response envelope. Reusing the vector's tenant here would test the
+	// mismatch path instead of this one.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"tenant_id":"`+testTenantID+`","state":"ready","memories":[],`+
+			`"counts":{"retrieved":0,"admitted":0,"withheld":0,"budget_dropped":0},"omissions":{},`+
+			`"commitment":`+commitment+`}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	result, err := fastZMemClient(t, srv.URL).PrepareContext(
+		context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+	if err != nil {
+		t.Fatalf("PrepareContext rejected the backend's own published commitment vector: %v", err)
+	}
+	if result.Commitment.Digest != v.RoomContextDigest {
+		t.Errorf("Commitment.Digest = %q, want %q", result.Commitment.Digest, v.RoomContextDigest)
+	}
+}
+
 // TestZMemClient_CommitmentGoldenVectors pins commitment verification to
-// hand-verified, known-good digests rather than a self-consistency check
-// against this package's own canonicalizer. Vector 1 is the realistic
-// shape: every field ASCII-safe, matching what the contract expects in
-// practice today. Vector 2 is adversarial — non-ASCII text and HTML-special
+// hand-verified, known-good digests, and covers the failure modes the
+// backend's published vector cannot: that vector is a single valid
+// commitment, so everything about failing closed is pinned here. Vector 1 is
+// the realistic shape: every field ASCII-safe, matching what the contract
+// expects in practice today — the cross-language vector now covers the same
+// ground with more authority, and this one stays as a second, independently
+// derived witness. Vector 2 is adversarial — non-ASCII text and HTML-special
 // characters the contract says must never appear in a real commitment
 // field — and exists purely to prove the canonicalizer reproduces Python's
 // ensure_ascii=True, no-HTML-escaping bytes exactly, the way the ticket's
