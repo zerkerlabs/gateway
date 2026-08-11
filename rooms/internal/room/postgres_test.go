@@ -61,12 +61,14 @@ func newPGStore(t *testing.T) (*room.PostgresStore, *pgxpool.Pool) {
 	return room.NewPostgresStore(pool), pool
 }
 
-// The write half of Store (CreateRoom, AddMember, AppendMessage, ...) is a
-// separate, not-yet-implemented piece of work, so these tests seed rooms,
-// members, and events with direct SQL rather than through a Store. That is
-// also what makes them a faithful read-path test: they prove PostgresStore
-// reconstructs a room from exactly the rows a writer would have left behind,
-// not from some shortcut only its own writer would produce.
+// These read-path tests seed rooms, members, and events with direct SQL
+// rather than through a Store, even though the write half of Store
+// (CreateRoom, AddMember, AppendMessage, ...) is implemented further down in
+// this file. That is deliberate, not an oversight: seeding independently of
+// PostgresStore's own writer is what makes this a faithful read-path test —
+// it proves PostgresStore reconstructs a room from exactly the rows *any*
+// writer would have left behind, not from some shortcut only its own writer
+// produces.
 
 // seedRoom inserts a room row directly and returns the *room.Room the row
 // describes.
