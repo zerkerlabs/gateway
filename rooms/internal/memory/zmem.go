@@ -202,10 +202,23 @@ type prepareResponseWire struct {
 }
 
 type memoryWire struct {
-	ID         string    `json:"id"`
-	Content    string    `json:"content"`
-	Provenance string    `json:"provenance"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string         `json:"id"`
+	Content    string         `json:"content"`
+	Provenance provenanceWire `json:"provenance"`
+	CreatedAt  time.Time      `json:"created_at"`
+}
+
+// provenanceWire is the backend's provenance object. It carries a good deal
+// more than this seam exposes — event and receipt hashes, a merkle root, a
+// parent action ID — none of which memory.Memory has a field for, so only
+// actor_uri is read and the rest is discarded here rather than forwarded.
+//
+// actor_uri is the one field that answers the question memory.Provenance
+// asks ("where did this come from"): the backend sets it to a
+// service:// URI for content Rooms recorded as an accepted transition, and
+// an agent:// URI for content an agent proposed.
+type provenanceWire struct {
+	ActorURI string `json:"actor_uri"`
 }
 
 type countsWire struct {
@@ -301,7 +314,14 @@ func (c *ZMemClient) PrepareContext(ctx context.Context, req PrepareRequest) (Co
 		Commitment: Commitment{Digest: digest},
 	}
 	for i, m := range resp.Memories {
-		result.Memories[i] = Memory(m) // memoryWire and Memory share the same fields in the same order
+		result.Memories[i] = Memory{
+			ID:      m.ID,
+			Content: m.Content,
+			// Flattened, not converted: the backend's provenance is an
+			// object and this seam's is a short opaque string.
+			Provenance: m.Provenance.ActorURI,
+			CreatedAt:  m.CreatedAt,
+		}
 	}
 	return result, nil
 }

@@ -74,10 +74,24 @@ type prepareRequestIn struct {
 }
 
 type memoryOut struct {
-	ID         string    `json:"id"`
-	Content    string    `json:"content"`
-	Provenance string    `json:"provenance"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID      string `json:"id"`
+	Content string `json:"content"`
+	// An OBJECT, matching the real backend, not the flat string this fake
+	// used to send. A real ZMem sends provenance as a record of actor,
+	// event, and receipt hashes; sending a bare string here made the
+	// client's decoder look correct when it could not decode a real
+	// response at all. A fake that models the wire wrongly proves nothing.
+	Provenance provenanceOut `json:"provenance"`
+	CreatedAt  time.Time     `json:"created_at"`
+}
+
+type provenanceOut struct {
+	ActorURI     string `json:"actor_uri"`
+	CausedBy     string `json:"caused_by_event"`
+	EventHash    string `json:"event_hash"`
+	ReceiptHash  string `json:"receipt_hash"`
+	MerkleRoot   string `json:"merkle_root"`
+	ParentAction any    `json:"parent_action_id"`
 }
 
 type countsOut struct {
@@ -166,7 +180,19 @@ func (s *fakeZMemServer) handlePrepare(w http.ResponseWriter, r *http.Request) {
 		Counts:   countsOut(result.Counts),
 	}
 	for i, m := range result.Memories {
-		resp.Memories[i] = memoryOut{ID: m.ID, Content: m.Content, Provenance: m.Provenance, CreatedAt: m.CreatedAt}
+		resp.Memories[i] = memoryOut{
+			ID: m.ID, Content: m.Content, CreatedAt: m.CreatedAt,
+			// The extra fields are filler with the right shape: the point
+			// is that the client must dig actor_uri out of an object and
+			// ignore the rest, exactly as it must against a real backend.
+			Provenance: provenanceOut{
+				ActorURI:    m.Provenance,
+				CausedBy:    "evt_fake",
+				EventHash:   strings.Repeat("a", 64),
+				ReceiptHash: strings.Repeat("b", 64),
+				MerkleRoot:  strings.Repeat("c", 64),
+			},
+		}
 	}
 	for _, reason := range result.Omissions.Reasons {
 		resp.Omissions.Withheld = append(resp.Omissions.Withheld, omissionItemOut{MemoryID: "mem_redacted", Reason: reason, Rule: "internal_rule"})
@@ -326,6 +352,12 @@ func TestNewZMemClient_RequiresConfig(t *testing.T) {
 // its own fake backend instance, modeling how a real deployment is
 // tenant-local — two Rooms services never share a backend process, so two
 // independent clients never share state either.
+// It deliberately does NOT run memorytest.RunVisibilityContract. This
+// server is backed by memory.Fake, so it would pass — and passing would
+// assert that ZMemClient keeps member-private memory private, which is false
+// against a real backend for the reasons RunVisibilityContract documents.
+// Asserting it here is precisely the false confidence a fake-only suite
+// produces.
 func TestZMemClient_Contract(t *testing.T) {
 	t.Parallel()
 

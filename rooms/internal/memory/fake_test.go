@@ -17,6 +17,18 @@ func TestFake_Contract(t *testing.T) {
 	})
 }
 
+// TestFake_VisibilityContract pins the Fake's room-shared vs member-private
+// behaviour. Only the Fake runs this suite — see RunVisibilityContract for
+// why it is not part of the shared contract, and what has to change before
+// it can be.
+func TestFake_VisibilityContract(t *testing.T) {
+	t.Parallel()
+
+	memorytest.RunVisibilityContract(t, func() memory.Store {
+		return memory.NewFake()
+	})
+}
+
 // TestFake_ConcurrentWritesDoNotRace exercises the Fake's write and read
 // paths from many goroutines at once; run with -race (make check's test
 // target does).
