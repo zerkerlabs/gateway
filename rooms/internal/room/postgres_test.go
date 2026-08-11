@@ -101,12 +101,18 @@ func seedRoom(t *testing.T, pool *pgxpool.Pool, tenantID, goal string, turnBudge
 // *room.Member.
 func seedMember(t *testing.T, pool *pgxpool.Pool, tenantID, roomID, agentID string) *room.Member {
 	t.Helper()
+	return seedMemberAt(t, pool, tenantID, roomID, agentID, time.Now().UTC())
+}
+
+// seedMemberAt is seedMember with an explicit joined_at, so a test can insert
+// members in an order that differs from the order they joined in.
+func seedMemberAt(t *testing.T, pool *pgxpool.Pool, tenantID, roomID, agentID string, joinedAt time.Time) *room.Member {
+	t.Helper()
 
 	id, err := resource.New("mem")
 	if err != nil {
 		t.Fatalf("resource.New(mem): %v", err)
 	}
-	joinedAt := time.Now().UTC()
 
 	_, err = pool.Exec(
 		context.Background(), `
@@ -271,6 +277,42 @@ func TestPG_ListRooms_Empty(t *testing.T) {
 	}
 }
 
+// TestPG_GetRoom_MembersInJoinOrder proves loadMembers' ORDER BY actually
+// orders, rather than the rows happening to come back the way they went in.
+// The three members are INSERTed in an order deliberately unrelated to their
+// joined_at, so a query with no ORDER BY — or one ordering by id — would fail
+// this.
+func TestPG_GetRoom_MembersInJoinOrder(t *testing.T) {
+	s, pool := newPGStore(t)
+	r := seedRoom(t, pool, tenantA, "goal", 10)
+
+	base := time.Now().UTC().Truncate(time.Millisecond)
+
+	// Insert middle, then last, then first.
+	second := seedMemberAt(t, pool, tenantA, r.ID, "agt_second", base.Add(2*time.Second))
+	third := seedMemberAt(t, pool, tenantA, r.ID, "agt_third", base.Add(3*time.Second))
+	first := seedMemberAt(t, pool, tenantA, r.ID, "agt_first", base.Add(1*time.Second))
+
+	got, err := s.GetRoom(context.Background(), tenantA, r.ID)
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if len(got.Members) != 3 {
+		t.Fatalf("len(Members) = %d, want 3", len(got.Members))
+	}
+
+	want := []string{first.ID, second.ID, third.ID}
+	for i, wantID := range want {
+		if got.Members[i].ID != wantID {
+			gotIDs := make([]string, len(got.Members))
+			for j, m := range got.Members {
+				gotIDs[j] = m.AgentID
+			}
+			t.Fatalf("Members in %v, want join order [agt_first agt_second agt_third]", gotIDs)
+		}
+	}
+}
+
 // -------------------------------------------------------------- Messages ---
 
 func TestPG_Messages_ReplaysTranscriptFromEvents(t *testing.T) {
@@ -279,8 +321,8 @@ func TestPG_Messages_ReplaysTranscriptFromEvents(t *testing.T) {
 	member := seedMember(t, pool, tenantA, r.ID, "agt_1")
 
 	seedEvent(t, pool, tenantA, r.ID, memberJoinedEvent(1, member))
-	m1 := messagePostedEvent(2, member, "first")
-	m2 := messagePostedEvent(3, member, "second")
+	m1 := messagePostedEvent(t, 2, member, "first")
+	m2 := messagePostedEvent(t, 3, member, "second")
 	seedEvent(t, pool, tenantA, r.ID, m1)
 	seedEvent(t, pool, tenantA, r.ID, m2)
 
@@ -314,7 +356,7 @@ func TestPG_Events_SequenceOrder(t *testing.T) {
 	member := seedMember(t, pool, tenantA, r.ID, "agt_1")
 
 	seedEvent(t, pool, tenantA, r.ID, memberJoinedEvent(1, member))
-	seedEvent(t, pool, tenantA, r.ID, messagePostedEvent(2, member, "hello"))
+	seedEvent(t, pool, tenantA, r.ID, messagePostedEvent(t, 2, member, "hello"))
 
 	got, err := s.Events(context.Background(), tenantA, r.ID)
 	if err != nil {
@@ -343,7 +385,7 @@ func TestPG_Events_UnknownKindSkippedNotFatal(t *testing.T) {
 	seedEvent(t, pool, tenantA, r.ID, memberJoinedEvent(1, member))
 	seedRawEvent(t, pool, tenantA, r.ID, 2, "member_teleported",
 		[]byte(`{"sequence":2,"kind":"member_teleported","timestamp":"2026-08-10T12:00:00Z","payload_version":1,"payload":{}}`))
-	seedEvent(t, pool, tenantA, r.ID, messagePostedEvent(3, member, "still here"))
+	seedEvent(t, pool, tenantA, r.ID, messagePostedEvent(t, 3, member, "still here"))
 
 	got, err := s.Events(context.Background(), tenantA, r.ID)
 	if err != nil {
