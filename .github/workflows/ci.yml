@@ -130,6 +130,39 @@ jobs:
           cache: true
           cache-dependency-path: '**/go.sum'
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # zerker-memory ships `zmem serve` as a stdlib ThreadingHTTPServer, so
+      # standing up a real backend for the rooms memory client tests needs no
+      # container or compose file — just install it, start it on loopback,
+      # and poll /readyz. The version is pinned rather than floating so a
+      # zerker-memory release can't turn this job red with no local change to
+      # explain it; bump this deliberately, in its own commit.
+      - name: Install zmem backend
+        run: pip install "zerker-memory==0.1.10"
+
+      - name: Generate zmem service token
+        run: echo "ZMEM_SERVICE_TOKEN=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
+      - name: Start zmem backend
+        env:
+          ZMEM_TENANT_ID: tnt_rooms_ci
+        run: |
+          zmem --db "$RUNNER_TEMP/zmem-control.sqlite" serve \
+            --tenant-id "$ZMEM_TENANT_ID" --storage-root "$RUNNER_TEMP/zmem-rooms" \
+            --host 127.0.0.1 --port 8766 &
+          echo $! > "$RUNNER_TEMP/zmem.pid"
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8766/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "zmem backend did not become ready within 30s" >&2
+          exit 1
+
       - name: Gateway integration tests (race)
         env:
           TEST_DATABASE_URL: postgres://zerker:zerker@localhost:5432/zerker_test
@@ -143,7 +176,19 @@ jobs:
       # the same database; nothing in its schema or its schema_migrations
       # version strings collides with the gateway's. Runs after the gateway
       # suite rather than in parallel with it, for the same one-DB reason.
+      #
+      # ZMEM_TEST_* points the memory client's contract suite at the backend
+      # started above; see rooms/internal/memory/zmem_integration_test.go.
+      # That suite fails (rather than skips) if these are unset while CI is
+      # set, so a broken step here shows up as a red build, not a quiet skip.
       - name: Rooms integration tests (race)
         env:
           TEST_DATABASE_URL: postgres://zerker:zerker@localhost:5432/zerker_test
+          ZMEM_TEST_BASE_URL: http://127.0.0.1:8766
+          ZMEM_TEST_SERVICE_TOKEN: ${{ env.ZMEM_SERVICE_TOKEN }}
+          ZMEM_TEST_TENANT_ID: tnt_rooms_ci
         run: make -C rooms integration-test
+
+      - name: Stop zmem backend
+        if: always()
+        run: kill "$(cat "$RUNNER_TEMP/zmem.pid")" 2>/dev/null || true
