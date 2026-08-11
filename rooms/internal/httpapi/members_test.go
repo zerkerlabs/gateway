@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/zerkerlabs/gateway/rooms/internal/memory"
@@ -39,6 +40,168 @@ type tenantMismatchStore struct {
 
 func (tenantMismatchStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string) (*room.Member, error) {
 	return nil, room.ErrTenantMismatch
+}
+
+// fixedMemoryStore is a memory.Store whose PrepareContext always returns a
+// caller-supplied ContextResult, for tests that need exact control over
+// State, Counts, and Omissions beyond what memory.Fake's own admission logic
+// naturally produces — in particular, forcing StateBudgetExhausted and
+// shaping Omissions to exercise the reason collapse rule and redaction.
+type fixedMemoryStore struct {
+	result memory.ContextResult
+}
+
+func (s fixedMemoryStore) PrepareContext(ctx context.Context, req memory.PrepareRequest) (memory.ContextResult, error) {
+	return s.result, nil
+}
+
+func (fixedMemoryStore) Propose(ctx context.Context, req memory.ProposeRequest) (memory.WriteResult, error) {
+	return memory.WriteResult{}, errors.New("not implemented")
+}
+
+func (fixedMemoryStore) Record(ctx context.Context, req memory.RecordRequest) (memory.WriteResult, error) {
+	return memory.WriteResult{}, errors.New("not implemented")
+}
+
+// TestHandleAddMemberContextStates exercises every one of the six
+// PrepareContext states the memory backend can return, using
+// fixedMemoryStore to shape Counts and Omissions precisely: StateReady,
+// StatePartial, and StateEmpty seat the member; StateBlocked,
+// StateAbstained, and StateBudgetExhausted refuse the join with 409 before
+// any member is seated. It also asserts the redaction guarantees: a
+// withheld reason every entry agrees on is surfaced, but a divergent set (or
+// backend free-text abstention detail) never reaches the response — only the
+// Rooms-owned default does, using sentinel values recognizable enough that
+// their absence from the response body is a meaningful check.
+func TestHandleAddMemberContextStates(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		result     memory.ContextResult
+		wantStatus int
+		wantCode   string
+		wantReason string
+		wantSeated bool
+		mustAbsent []string // substrings that must not appear anywhere in the raw response body
+	}{
+		{
+			name:       "ready seats with the returned context",
+			result:     memory.ContextResult{State: memory.StateReady, Memories: []memory.Memory{{ID: "mem_1", Content: "fact"}}},
+			wantStatus: http.StatusCreated,
+			wantSeated: true,
+		},
+		{
+			name: "partial seats with the admitted subset",
+			result: memory.ContextResult{
+				State:     memory.StatePartial,
+				Memories:  []memory.Memory{{ID: "mem_1", Content: "fact"}},
+				Counts:    memory.Counts{Retrieved: 2, Admitted: 1, Withheld: 1},
+				Omissions: memory.Omissions{Reasons: []string{"policy_withheld"}},
+			},
+			wantStatus: http.StatusCreated,
+			wantSeated: true,
+		},
+		{
+			name:       "empty seats with no prior memory",
+			result:     memory.ContextResult{State: memory.StateEmpty},
+			wantStatus: http.StatusCreated,
+			wantSeated: true,
+		},
+		{
+			name: "blocked refuses the join, surfacing a unanimous withheld reason",
+			result: memory.ContextResult{
+				State:     memory.StateBlocked,
+				Counts:    memory.Counts{Retrieved: 1, Withheld: 1},
+				Omissions: memory.Omissions{Reasons: []string{"policy_withheld"}},
+			},
+			wantStatus: http.StatusConflict,
+			wantCode:   "memory_blocked",
+			wantReason: "policy_withheld",
+		},
+		{
+			name: "blocked falls back to the Rooms-owned default when withheld reasons diverge, without leaking them",
+			result: memory.ContextResult{
+				State:     memory.StateBlocked,
+				Counts:    memory.Counts{Retrieved: 2, Withheld: 2},
+				Omissions: memory.Omissions{Reasons: []string{"sentinel_mem_id_777", "sentinel_rule_predicate_x"}},
+			},
+			wantStatus: http.StatusConflict,
+			wantCode:   "memory_blocked",
+			wantReason: "policy_withheld_all",
+			mustAbsent: []string{"sentinel_mem_id_777", "sentinel_rule_predicate_x"},
+		},
+		{
+			name:       "blocked falls back to the Rooms-owned default with no withheld entries",
+			result:     memory.ContextResult{State: memory.StateBlocked},
+			wantStatus: http.StatusConflict,
+			wantCode:   "memory_blocked",
+			wantReason: "policy_withheld_all",
+		},
+		{
+			name: "abstained refuses the join without forwarding the abstention detail",
+			result: memory.ContextResult{
+				State:     memory.StateAbstained,
+				Omissions: memory.Omissions{Abstention: "leaked sentinel_mem_id_888 rule=sentinel_predicate_y"},
+			},
+			wantStatus: http.StatusConflict,
+			wantCode:   "memory_abstained",
+			wantReason: "evidence_conflicted",
+			mustAbsent: []string{"sentinel_mem_id_888", "sentinel_predicate_y"},
+		},
+		{
+			name: "budget_exhausted refuses the join",
+			result: memory.ContextResult{
+				State:     memory.StateBudgetExhausted,
+				Counts:    memory.Counts{Retrieved: 1, BudgetDropped: 1},
+				Omissions: memory.Omissions{Reasons: []string{"budget"}},
+			},
+			wantStatus: http.StatusConflict,
+			wantCode:   "memory_budget_exhausted",
+			wantReason: "budget",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var store room.Store = room.NewMemoryStore()
+			mux := newMuxWithStore(t, store, fixedMemoryStore{result: tt.result})
+			roomID := mustCreateRoom(t, store, "goal").ID
+
+			req := requestAs(t, http.MethodPost, "/v1/rooms/"+roomID+"/members", map[string]any{"agent_id": "agt_1"}, tenantA)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			raw := rec.Body.String()
+			if tt.wantCode != "" || tt.wantReason != "" {
+				body := decodeBody(t, rec)
+				if tt.wantCode != "" && body["code"] != tt.wantCode {
+					t.Errorf("code = %v, want %q", body["code"], tt.wantCode)
+				}
+				if tt.wantReason != "" && body["reason"] != tt.wantReason {
+					t.Errorf("reason = %v, want %q", body["reason"], tt.wantReason)
+				}
+			}
+			for _, s := range tt.mustAbsent {
+				if strings.Contains(raw, s) {
+					t.Errorf("response body leaked sentinel %q: %s", s, raw)
+				}
+			}
+
+			got, err := store.GetRoom(context.Background(), tenantA, roomID)
+			if err != nil {
+				t.Fatalf("GetRoom: %v", err)
+			}
+			if seated := len(got.Members) == 1; seated != tt.wantSeated {
+				t.Errorf("member seated = %v, want %v (members = %v)", seated, tt.wantSeated, got.Members)
+			}
+		})
+	}
 }
 
 func TestHandleAddMember(t *testing.T) {
