@@ -102,8 +102,51 @@ type Member struct {
 	// StartingContext is the onboarding context the member joined with: its
 	// memory scope's entries combined with any documents supplied on the
 	// add-member request (rooms/internal/memory). Assembling it is the
-	// caller's job — the store only carries whatever it is given.
+	// caller's job — the store only carries whatever it is given. It holds
+	// real content only while ContextReplayable is true.
 	StartingContext []string
+	// Context is the commitment recorded for this member's onboarding — see
+	// ContextCommitment. It is always populated, even for a member who
+	// joined with no admitted memory: a zero Admitted count is how "joined
+	// with genuinely no context" is told apart from "context not replayable"
+	// below.
+	Context ContextCommitment
+	// ContextReplayable reports whether StartingContext holds this member's
+	// actual onboarding content. It is true for a live, in-process member —
+	// one AddMember just returned, in the same process — and false for a
+	// member reconstructed by replaying a persisted event log, whose
+	// member_joined event never stored the content, only Context above. A
+	// false value paired with an empty StartingContext must never be read as
+	// "this member had no onboarding context" — check Context.Admitted
+	// instead.
+	ContextReplayable bool
+}
+
+// ContextCommitment is what a persisted member_joined event records about a
+// member's onboarding context in place of the context content itself: a
+// memory backend's commitment digest over what it admitted, the outcome
+// state its PrepareContext call returned, and the admitted/withheld/dropped
+// counts (rooms/internal/memory). It is enough to prove what a member was
+// onboarded with, and to re-derive it from the memory backend later, without
+// Rooms holding a durable copy of governed memory content it does not own.
+//
+// The zero value records a member with no governed-memory commitment at all
+// — every AddMember caller that has none to give (most tests, and any agent
+// added before onboarding is wired up to a real memory backend) passes it.
+type ContextCommitment struct {
+	// Digest is the memory backend's commitment digest, opaque to Rooms.
+	Digest string
+	// State is the memory backend's PrepareContext outcome for this member
+	// (e.g. "ready", "partial", "empty" — memory.State), carried as a plain
+	// string so this package's persisted format does not depend on the
+	// memory package's type.
+	State string
+	// Admitted, Withheld, and BudgetDropped mirror memory.Counts: how many
+	// entries the backend admitted into StartingContext, withheld by policy,
+	// and dropped for budget.
+	Admitted      int
+	Withheld      int
+	BudgetDropped int
 }
 
 // Message is one member's contribution to a room.
@@ -159,6 +202,12 @@ type Event struct {
 }
 
 // MemberJoinedPayload is the Payload of an EventMemberJoined event.
+//
+// Its persisted wire form (event_codec.go) deliberately omits
+// Member.StartingContext: onboarding content is governed memory-backend
+// material Rooms does not own a durable copy of. What survives to storage is
+// Member.Context — a commitment digest, counts, and backend state — never
+// the content itself.
 type MemberJoinedPayload struct {
 	Member *Member
 }

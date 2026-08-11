@@ -36,13 +36,16 @@ type Store interface {
 	// AddMember seats an agent in a room, carrying startingContext — the
 	// onboarding context the caller assembled from the agent's memory scope
 	// plus any documents supplied on the request (rooms/internal/memory); pass
-	// nil for a member with no onboarding context. tenantID scopes the room
-	// lookup — it returns ErrNotFound if roomID does not exist or belongs to
-	// another tenant. agentTenantID is the tenant that owns agentID; if it
-	// differs from the room's tenant, the add is rejected with
-	// ErrTenantMismatch (rooms are single-tenant). Returns ErrRoomTerminated if
-	// the room has already reached a terminal state.
-	AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string) (*Member, error)
+	// nil for a member with no onboarding context. commitment is what gets
+	// persisted for that context instead of its content — see
+	// ContextCommitment; pass the zero value when there is no memory-backend
+	// commitment to record. tenantID scopes the room lookup — it returns
+	// ErrNotFound if roomID does not exist or belongs to another tenant.
+	// agentTenantID is the tenant that owns agentID; if it differs from the
+	// room's tenant, the add is rejected with ErrTenantMismatch (rooms are
+	// single-tenant). Returns ErrRoomTerminated if the room has already
+	// reached a terminal state.
+	AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string, commitment ContextCommitment) (*Member, error)
 
 	// AppendMessage records a message in a room, authored by one of its
 	// members. Posting a message consumes one turn; if doing so would exceed
@@ -245,7 +248,7 @@ func (s *MemoryStore) ListRooms(ctx context.Context, tenantID string) ([]*Room, 
 }
 
 // AddMember implements Store.
-func (s *MemoryStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string) (*Member, error) {
+func (s *MemoryStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string, commitment ContextCommitment) (*Member, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -270,10 +273,12 @@ func (s *MemoryStore) AddMember(ctx context.Context, tenantID, roomID, agentID, 
 	}
 
 	m := &Member{
-		ID:              id,
-		AgentID:         agentID,
-		JoinedAt:        time.Now().UTC(),
-		StartingContext: append([]string(nil), startingContext...),
+		ID:                id,
+		AgentID:           agentID,
+		JoinedAt:          time.Now().UTC(),
+		StartingContext:   append([]string(nil), startingContext...),
+		Context:           commitment,
+		ContextReplayable: true,
 	}
 	r.Members = append(r.Members, m)
 	s.appendEvent(r, EventMemberJoined, MemberJoinedPayload{Member: m})

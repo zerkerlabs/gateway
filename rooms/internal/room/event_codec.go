@@ -41,29 +41,59 @@ type eventEnvelope struct {
 	Payload        json.RawMessage `json:"payload"`
 }
 
-// wireMember is the wire representation of a Member.
+// wireMember is the wire representation of a Member. StartingContext is
+// deliberately absent: it is the member's onboarding content, governed
+// memory-backend material Rooms does not persist a durable copy of (see
+// ContextCommitment in room.go). Only the commitment recorded for it is
+// written here.
 type wireMember struct {
-	ID              string    `json:"id"`
-	AgentID         string    `json:"agent_id"`
-	JoinedAt        time.Time `json:"joined_at"`
-	StartingContext []string  `json:"starting_context,omitempty"`
+	ID       string                `json:"id"`
+	AgentID  string                `json:"agent_id"`
+	JoinedAt time.Time             `json:"joined_at"`
+	Context  wireContextCommitment `json:"context"`
+}
+
+// wireContextCommitment is the wire representation of a ContextCommitment.
+type wireContextCommitment struct {
+	Digest        string `json:"digest,omitempty"`
+	State         string `json:"state,omitempty"`
+	Admitted      int    `json:"admitted"`
+	Withheld      int    `json:"withheld"`
+	BudgetDropped int    `json:"budget_dropped"`
 }
 
 func newWireMember(m *Member) wireMember {
 	return wireMember{
-		ID:              m.ID,
-		AgentID:         m.AgentID,
-		JoinedAt:        m.JoinedAt,
-		StartingContext: m.StartingContext,
+		ID:       m.ID,
+		AgentID:  m.AgentID,
+		JoinedAt: m.JoinedAt,
+		Context: wireContextCommitment{
+			Digest:        m.Context.Digest,
+			State:         m.Context.State,
+			Admitted:      m.Context.Admitted,
+			Withheld:      m.Context.Withheld,
+			BudgetDropped: m.Context.BudgetDropped,
+		},
 	}
 }
 
+// toMember reconstructs the Member a wireMember describes. The result always
+// has ContextReplayable=false and an empty StartingContext: a decoded event
+// came off a persisted log, which never carried onboarding content, only the
+// commitment recorded for it — see ContextCommitment.
 func (w wireMember) toMember() *Member {
 	return &Member{
-		ID:              w.ID,
-		AgentID:         w.AgentID,
-		JoinedAt:        w.JoinedAt,
-		StartingContext: w.StartingContext,
+		ID:       w.ID,
+		AgentID:  w.AgentID,
+		JoinedAt: w.JoinedAt,
+		Context: ContextCommitment{
+			Digest:        w.Context.Digest,
+			State:         w.Context.State,
+			Admitted:      w.Context.Admitted,
+			Withheld:      w.Context.Withheld,
+			BudgetDropped: w.Context.BudgetDropped,
+		},
+		ContextReplayable: false,
 	}
 }
 

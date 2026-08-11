@@ -205,17 +205,19 @@ func (s *PostgresStore) createRoom(ctx context.Context, tenantID, goal string, t
 }
 
 // AddMember implements the write half of Store.
-func (s *PostgresStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string) (*Member, error) {
+func (s *PostgresStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string, commitment ContextCommitment) (*Member, error) {
 	id, err := resource.New("mem")
 	if err != nil {
 		return nil, err
 	}
 
 	m := &Member{
-		ID:              id,
-		AgentID:         agentID,
-		JoinedAt:        time.Now().UTC(),
-		StartingContext: append([]string(nil), startingContext...),
+		ID:                id,
+		AgentID:           agentID,
+		JoinedAt:          time.Now().UTC(),
+		StartingContext:   append([]string(nil), startingContext...),
+		Context:           commitment,
+		ContextReplayable: true,
 	}
 
 	err = s.withTx(ctx, func(tx pgx.Tx) error {
@@ -538,18 +540,41 @@ func (s *PostgresStore) loadRoom(ctx context.Context, tenantID, roomID string) (
 // hydrate populates r.Members (in join order) and r.Events (the full log, in
 // sequence order) from Postgres.
 func (s *PostgresStore) hydrate(ctx context.Context, r *Room) error {
-	members, err := s.loadMembers(ctx, r.TenantID, r.ID)
-	if err != nil {
-		return err
-	}
-	r.Members = members
-
 	events, err := s.loadEvents(ctx, r.TenantID, r.ID)
 	if err != nil {
 		return err
 	}
 	r.Events = events
+
+	members, err := s.loadMembers(ctx, r.TenantID, r.ID)
+	if err != nil {
+		return err
+	}
+	applyContextCommitments(members, events)
+	r.Members = members
 	return nil
+}
+
+// applyContextCommitments backfills each member's onboarding-context
+// commitment from its EventMemberJoined event. room_members carries no
+// context column by design (rooms/db/migrations) — the commitment recorded
+// at join time survives a restart only in the event log, so replay is the
+// only place it comes back. Every member this touches is left with
+// ContextReplayable=false: room_members never stored the content itself, so
+// there is nothing here that could be live.
+func applyContextCommitments(members []*Member, events []*Event) {
+	commitments := make(map[string]ContextCommitment, len(members))
+	for _, ev := range events {
+		p, ok := ev.Payload.(MemberJoinedPayload)
+		if !ok {
+			continue
+		}
+		commitments[p.Member.ID] = p.Member.Context
+	}
+	for _, m := range members {
+		m.Context = commitments[m.ID]
+		m.ContextReplayable = false
+	}
 }
 
 // requireRoom reports whether roomID exists under tenantID, returning

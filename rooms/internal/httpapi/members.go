@@ -84,7 +84,20 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	member, err := h.store.AddMember(r.Context(), tenantID, roomID, req.AgentID, tenantID, onboardingContext(result, req.Documents))
+	// commitment is derived only from result — the memory backend's own
+	// output — never from req.Documents. Documents are ungoverned input
+	// supplied directly by the caller, not memory the backend admitted, so
+	// they must not be folded into what gets recorded as a governed-memory
+	// commitment.
+	commitment := room.ContextCommitment{
+		Digest:        result.Commitment.Digest,
+		State:         string(result.State),
+		Admitted:      result.Counts.Admitted,
+		Withheld:      result.Counts.Withheld,
+		BudgetDropped: result.Counts.BudgetDropped,
+	}
+
+	member, err := h.store.AddMember(r.Context(), tenantID, roomID, req.AgentID, tenantID, onboardingContext(result, req.Documents), commitment)
 	if err != nil {
 		switch {
 		case errors.Is(err, room.ErrNotFound):
