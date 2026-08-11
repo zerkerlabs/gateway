@@ -11,26 +11,38 @@ import (
 	"github.com/zerkerlabs/gateway/rooms/internal/room"
 )
 
-// erroringMemoryStore is a memory.Store whose Read always fails, used to
-// exercise onboarding's fail-closed path: a memory backend error must refuse
-// the join rather than seat a member with an empty context.
+// erroringMemoryStore is a memory.Store whose PrepareContext always fails,
+// used to exercise onboarding's fail-closed path: a memory backend error
+// must refuse the join rather than seat a member with an empty context.
 type erroringMemoryStore struct{}
 
-func (erroringMemoryStore) Read(ctx context.Context, scope memory.Scope) ([]memory.Entry, error) {
-	return nil, errors.New("memory backend unavailable")
+func (erroringMemoryStore) PrepareContext(ctx context.Context, req memory.PrepareRequest) (memory.ContextResult, error) {
+	return memory.ContextResult{}, errors.New("memory backend unavailable")
 }
 
-func (erroringMemoryStore) Append(ctx context.Context, scope memory.Scope, content string) (memory.Entry, error) {
-	return memory.Entry{}, errors.New("memory backend unavailable")
+func (erroringMemoryStore) Propose(ctx context.Context, req memory.ProposeRequest) (memory.WriteResult, error) {
+	return memory.WriteResult{}, errors.New("memory backend unavailable")
+}
+
+func (erroringMemoryStore) Record(ctx context.Context, req memory.RecordRequest) (memory.WriteResult, error) {
+	return memory.WriteResult{}, errors.New("memory backend unavailable")
 }
 
 func TestHandleAddMember(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		setup      func(t *testing.T, s room.Store) string // returns the room ID to target
-		memStore   memory.Store                            // nil uses a fresh memory.Fake
+		name  string
+		setup func(t *testing.T, s room.Store) string // returns the room ID to target
+		// memStore, if non-nil, entirely replaces the default fresh
+		// memory.Fake — for a case that needs a custom implementation
+		// (e.g. one that always errors).
+		memStore memory.Store
+		// seedMemory, if non-nil, runs after setup has created the room, so
+		// it can seed the default memory.Fake for the room ID setup
+		// returned — a room ID only exists once setup runs. It is ignored
+		// when memStore is set.
+		seedMemory func(t *testing.T, f *memory.Fake, roomID string)
 		body       any
 		lookupAs   string
 		wantStatus int
@@ -129,17 +141,22 @@ func TestHandleAddMember(t *testing.T) {
 				t.Helper()
 				return mustCreateRoom(t, s, "goal").ID
 			},
-			memStore: func() memory.Store {
-				f := memory.NewFake()
-				scope := memory.Scope{TenantID: tenantA, AgentID: "agt_1"}
-				if _, err := f.Append(context.Background(), scope, "prior fact 1"); err != nil {
-					panic(err)
+			seedMemory: func(t *testing.T, f *memory.Fake, roomID string) {
+				t.Helper()
+				ctx := context.Background()
+				if _, err := f.Record(ctx, memory.RecordRequest{
+					RoomID: roomID, AgentID: "agt_1", Content: "prior fact 1",
+					SourceEventID: "evt_1", IdempotencyKey: "key_1",
+				}); err != nil {
+					t.Fatalf("Record: %v", err)
 				}
-				if _, err := f.Append(context.Background(), scope, "prior fact 2"); err != nil {
-					panic(err)
+				if _, err := f.Record(ctx, memory.RecordRequest{
+					RoomID: roomID, AgentID: "agt_1", Content: "prior fact 2",
+					SourceEventID: "evt_2", IdempotencyKey: "key_2",
+				}); err != nil {
+					t.Fatalf("Record: %v", err)
 				}
-				return f
-			}(),
+			},
 			body:       map[string]any{"agent_id": "agt_1", "documents": []string{"doc A", "doc B"}},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusCreated,
@@ -215,11 +232,16 @@ func TestHandleAddMember(t *testing.T) {
 			t.Parallel()
 
 			memStore := tt.memStore
+			var fake *memory.Fake
 			if memStore == nil {
-				memStore = memory.NewFake()
+				fake = memory.NewFake()
+				memStore = fake
 			}
 			mux, store := newMuxWithMemory(t, memStore)
 			roomID := tt.setup(t, store)
+			if tt.seedMemory != nil {
+				tt.seedMemory(t, fake, roomID)
+			}
 
 			req := requestAs(t, http.MethodPost, "/v1/rooms/"+roomID+"/members", tt.body, tt.lookupAs)
 			rec := httptest.NewRecorder()

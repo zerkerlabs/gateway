@@ -2,14 +2,36 @@
 // implementation must satisfy. It is written against the memory.Store
 // interface, not any concrete implementation, so it runs unchanged against
 // memory.NewFake today and a real client later without modification.
+//
+// Two subtests — proving a non-chronological order survives, and driving
+// StateAbstained — need more than the Store interface can express: a real
+// backend derives both from data this suite has no way to seed through
+// PrepareContext, Propose, and Record alone. Those subtests type-assert for
+// the optional seeding hooks memory.Fake exposes and skip if a store does
+// not implement them, rather than widening the Store interface itself.
 package memorytest
 
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/zerkerlabs/gateway/rooms/internal/memory"
 )
+
+// orderSeeder is implemented by memory.Store implementations that support
+// installing a memory at an explicit CreatedAt, bypassing Propose and
+// Record. memory.Fake implements it.
+type orderSeeder interface {
+	Seed(roomID, agentID string, m memory.Memory)
+}
+
+// abstainForcer is implemented by memory.Store implementations that support
+// forcing StateAbstained for a (room, agent) pair. memory.Fake implements
+// it.
+type abstainForcer interface {
+	SetAbstain(roomID, agentID string)
+}
 
 // RunContract runs the full contract suite against implementations returned
 // by newStore, calling it once per behaviour so each case starts from a
@@ -17,85 +39,287 @@ import (
 func RunContract(t *testing.T, newStore func() memory.Store) {
 	t.Helper()
 
-	t.Run("read-after-write", func(t *testing.T) {
+	t.Run("PrepareContext for a room with no prior memory returns StateEmpty", func(t *testing.T) {
 		t.Parallel()
 
 		s := newStore()
-		scope := memory.Scope{TenantID: "tenant-a", AgentID: "agt_1"}
-
-		if _, err := s.Append(context.Background(), scope, "first"); err != nil {
-			t.Fatalf("Append: %v", err)
-		}
-		if _, err := s.Append(context.Background(), scope, "second"); err != nil {
-			t.Fatalf("Append: %v", err)
-		}
-
-		entries, err := s.Read(context.Background(), scope)
+		result, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
 		if err != nil {
-			t.Fatalf("Read: %v", err)
+			t.Fatalf("PrepareContext: %v", err)
 		}
-		if len(entries) != 2 {
-			t.Fatalf("len(entries) = %d, want 2", len(entries))
+		if result.State != memory.StateEmpty {
+			t.Errorf("State = %q, want %q", result.State, memory.StateEmpty)
 		}
-		if entries[0].Content != "first" || entries[1].Content != "second" {
-			t.Errorf("entries = %+v, want [first second] in append order", entries)
+		if len(result.Memories) != 0 {
+			t.Errorf("Memories = %+v, want empty", result.Memories)
 		}
 	})
 
-	t.Run("scope isolation between agents in the same tenant", func(t *testing.T) {
+	t.Run("Record makes content immediately admitted, returning StateReady", func(t *testing.T) {
 		t.Parallel()
 
 		s := newStore()
-		tenantID := "tenant-a"
-		scopeA := memory.Scope{TenantID: tenantID, AgentID: "agt_1"}
-		scopeB := memory.Scope{TenantID: tenantID, AgentID: "agt_2"}
-
-		if _, err := s.Append(context.Background(), scopeA, "agent-1-only"); err != nil {
-			t.Fatalf("Append: %v", err)
+		ctx := context.Background()
+		roomID := "rom_1"
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: roomID, AgentID: "agt_1", Content: "the room's accepted outcome",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Record: %v", err)
 		}
 
-		entriesB, err := s.Read(context.Background(), scopeB)
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
 		if err != nil {
-			t.Fatalf("Read: %v", err)
+			t.Fatalf("PrepareContext: %v", err)
 		}
-		if len(entriesB) != 0 {
-			t.Errorf("agt_2's scope = %+v, want empty (agt_1's entry leaked)", entriesB)
+		if result.State != memory.StateReady {
+			t.Fatalf("State = %q, want %q", result.State, memory.StateReady)
+		}
+		if len(result.Memories) != 1 || result.Memories[0].Content != "the room's accepted outcome" {
+			t.Errorf("Memories = %+v, want the recorded content", result.Memories)
+		}
+		if result.Counts.Retrieved != 1 || result.Counts.Admitted != 1 || result.Counts.Withheld != 0 || result.Counts.BudgetDropped != 0 {
+			t.Errorf("Counts = %+v, want {1 1 0 0}", result.Counts)
+		}
+		if result.Commitment.Digest == "" {
+			t.Error("Commitment.Digest is empty, want a non-empty attestation over the returned context")
 		}
 	})
 
-	t.Run("tenant isolation for the same agent ID", func(t *testing.T) {
+	t.Run("Propose quarantines content, returning StateBlocked with none admitted", func(t *testing.T) {
 		t.Parallel()
 
 		s := newStore()
-		agentID := "agt_shared"
-		scopeA := memory.Scope{TenantID: "tenant-a", AgentID: agentID}
-		scopeB := memory.Scope{TenantID: "tenant-b", AgentID: agentID}
-
-		if _, err := s.Append(context.Background(), scopeA, "tenant-a-only"); err != nil {
-			t.Fatalf("Append: %v", err)
+		ctx := context.Background()
+		roomID := "rom_1"
+		if _, err := s.Propose(ctx, memory.ProposeRequest{
+			RoomID: roomID, AgentID: "agt_1", Content: "an agent's unreviewed claim",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Propose: %v", err)
 		}
 
-		entriesB, err := s.Read(context.Background(), scopeB)
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
 		if err != nil {
-			t.Fatalf("Read: %v", err)
+			t.Fatalf("PrepareContext: %v", err)
 		}
-		if len(entriesB) != 0 {
-			t.Errorf("tenant-b's scope = %+v, want empty (tenant-a's entry leaked across tenants)", entriesB)
+		if result.State != memory.StateBlocked {
+			t.Fatalf("State = %q, want %q", result.State, memory.StateBlocked)
+		}
+		if len(result.Memories) != 0 {
+			t.Errorf("Memories = %+v, want empty — proposed content is not admitted", result.Memories)
+		}
+		if result.Counts.Retrieved != 1 || result.Counts.Withheld != 1 {
+			t.Errorf("Counts = %+v, want Retrieved=1 Withheld=1", result.Counts)
 		}
 	})
 
-	t.Run("reading an empty scope returns empty, not an error", func(t *testing.T) {
+	t.Run("mixing Record and Propose returns StatePartial", func(t *testing.T) {
 		t.Parallel()
 
 		s := newStore()
-		scope := memory.Scope{TenantID: "tenant-a", AgentID: "agt_never_written"}
-
-		entries, err := s.Read(context.Background(), scope)
-		if err != nil {
-			t.Fatalf("Read: %v, want a nil error for an empty scope", err)
+		ctx := context.Background()
+		roomID := "rom_1"
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: roomID, AgentID: "agt_1", Content: "accepted",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Record: %v", err)
 		}
-		if len(entries) != 0 {
-			t.Errorf("entries = %+v, want empty", entries)
+		if _, err := s.Propose(ctx, memory.ProposeRequest{
+			RoomID: roomID, AgentID: "agt_1", Content: "unreviewed",
+			SourceEventID: "evt_2", IdempotencyKey: "key_2",
+		}); err != nil {
+			t.Fatalf("Propose: %v", err)
+		}
+
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
+		if err != nil {
+			t.Fatalf("PrepareContext: %v", err)
+		}
+		if result.State != memory.StatePartial {
+			t.Fatalf("State = %q, want %q", result.State, memory.StatePartial)
+		}
+		if len(result.Memories) != 1 || result.Memories[0].Content != "accepted" {
+			t.Errorf("Memories = %+v, want only the recorded content", result.Memories)
+		}
+		if result.Counts.Retrieved != 2 || result.Counts.Admitted != 1 || result.Counts.Withheld != 1 {
+			t.Errorf("Counts = %+v, want Retrieved=2 Admitted=1 Withheld=1", result.Counts)
+		}
+	})
+
+	t.Run("a context budget too small for any recorded content returns StateBudgetExhausted", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		ctx := context.Background()
+		roomID := "rom_1"
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: roomID, AgentID: "agt_1", Content: "content too long for the budget",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", ContextBudgetTokens: 1})
+		if err != nil {
+			t.Fatalf("PrepareContext: %v", err)
+		}
+		if result.State != memory.StateBudgetExhausted {
+			t.Fatalf("State = %q, want %q", result.State, memory.StateBudgetExhausted)
+		}
+		if len(result.Memories) != 0 {
+			t.Errorf("Memories = %+v, want empty", result.Memories)
+		}
+		if result.Counts.BudgetDropped != 1 {
+			t.Errorf("Counts.BudgetDropped = %d, want 1", result.Counts.BudgetDropped)
+		}
+	})
+
+	t.Run("StateAbstained", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		forcer, ok := s.(abstainForcer)
+		if !ok {
+			t.Skip("store does not support forcing abstention")
+		}
+
+		roomID := "rom_1"
+		forcer.SetAbstain(roomID, "agt_1")
+
+		result, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
+		if err != nil {
+			t.Fatalf("PrepareContext: %v", err)
+		}
+		if result.State != memory.StateAbstained {
+			t.Fatalf("State = %q, want %q", result.State, memory.StateAbstained)
+		}
+		if result.Omissions.Abstention == "" {
+			t.Error("Omissions.Abstention is empty, want a reason")
+		}
+	})
+
+	t.Run("cross-tenant isolation: independent store instances never share state", func(t *testing.T) {
+		t.Parallel()
+
+		storeA := newStore()
+		storeB := newStore()
+		ctx := context.Background()
+		roomID, agentID := "rom_1", "agt_1"
+
+		if _, err := storeA.Record(ctx, memory.RecordRequest{
+			RoomID: roomID, AgentID: agentID, Content: "tenant-a-only",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+
+		result, err := storeB.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: agentID})
+		if err != nil {
+			t.Fatalf("PrepareContext: %v", err)
+		}
+		if result.State != memory.StateEmpty || len(result.Memories) != 0 {
+			t.Errorf("PrepareContext on a second store instance = %+v, want empty (first instance's memory leaked across tenants)", result)
+		}
+	})
+
+	t.Run("cross-agent isolation: member-private memory is not visible to another agent in the same room", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		ctx := context.Background()
+		roomID := "rom_1"
+
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: roomID, AgentID: "agt_1", Content: "private to agt_1",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_2"})
+		if err != nil {
+			t.Fatalf("PrepareContext: %v", err)
+		}
+		if result.State != memory.StateEmpty || len(result.Memories) != 0 {
+			t.Errorf("agt_2's PrepareContext = %+v, want empty (agt_1's private memory leaked)", result)
+		}
+	})
+
+	t.Run("room-shared memory is visible to every agent in the room", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		ctx := context.Background()
+		roomID := "rom_1"
+
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: roomID, Content: "shared with the whole room",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+
+		for _, agentID := range []string{"agt_1", "agt_2"} {
+			result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: agentID})
+			if err != nil {
+				t.Fatalf("PrepareContext(%s): %v", agentID, err)
+			}
+			if result.State != memory.StateReady || len(result.Memories) != 1 {
+				t.Errorf("PrepareContext(%s) = %+v, want the shared memory admitted", agentID, result)
+			}
+		}
+	})
+
+	t.Run("cross-room isolation: memory recorded in one room is not visible from another", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		ctx := context.Background()
+		agentID := "agt_1"
+
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: "rom_1", AgentID: agentID, Content: "rom_1-only",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_2", AgentID: agentID})
+		if err != nil {
+			t.Fatalf("PrepareContext: %v", err)
+		}
+		if result.State != memory.StateEmpty || len(result.Memories) != 0 {
+			t.Errorf("rom_2's PrepareContext = %+v, want empty (rom_1's memory leaked across rooms)", result)
+		}
+	})
+
+	t.Run("PrepareContext preserves the given order verbatim, not sorted chronologically", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		seeder, ok := s.(orderSeeder)
+		if !ok {
+			t.Skip("store does not support seeding an explicit order")
+		}
+
+		roomID := "rom_1"
+		now := time.Now()
+		// newer is seeded first even though its CreatedAt is later than
+		// older's — an oldest-first (or newest-first) chronological sort
+		// would place them in the opposite order from how they were seeded.
+		newer := memory.Memory{ID: "mem_newer", Content: "seeded first, timestamped later", CreatedAt: now}
+		older := memory.Memory{ID: "mem_older", Content: "seeded second, timestamped earlier", CreatedAt: now.Add(-time.Hour)}
+		seeder.Seed(roomID, "", newer)
+		seeder.Seed(roomID, "", older)
+
+		result, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
+		if err != nil {
+			t.Fatalf("PrepareContext: %v", err)
+		}
+		if len(result.Memories) != 2 || result.Memories[0].ID != "mem_newer" || result.Memories[1].ID != "mem_older" {
+			t.Errorf("Memories = %+v, want [mem_newer mem_older] in the order seeded, not chronological order", result.Memories)
 		}
 	})
 }
