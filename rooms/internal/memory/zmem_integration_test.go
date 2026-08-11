@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/zerkerlabs/gateway/rooms/internal/memory"
@@ -97,27 +98,44 @@ func newScopedStore(inner memory.Store) memory.Store {
 	return &scopedStore{Store: inner, prefix: hex.EncodeToString(b[:])}
 }
 
+// scope namespaces an opaque key — a source event ID or an idempotency key.
+// The backend constrains these only by length, so any separator works.
 func (s *scopedStore) scope(id string) string {
 	if id == "" {
 		return id
 	}
-	return s.prefix + "/" + id
+	return s.prefix + "_" + id
+}
+
+// scopeRoom namespaces a room ID, which the backend constrains by FORMAT and
+// not just by length: room_id must match ^rom_[A-Za-z0-9][A-Za-z0-9_-]{0,127}$.
+// So the prefix goes INSIDE the rom_ prefix rather than in front of it —
+// "rom_1" becomes "rom_<prefix>_1", not "<prefix>/rom_1", which the backend
+// rejects with invalid_request for both the leading prefix and the slash.
+func (s *scopedStore) scopeRoom(id string) string {
+	if id == "" {
+		return id
+	}
+	if rest, ok := strings.CutPrefix(id, "rom_"); ok {
+		return "rom_" + s.prefix + "_" + rest
+	}
+	return "rom_" + s.prefix + "_" + id
 }
 
 func (s *scopedStore) PrepareContext(ctx context.Context, req memory.PrepareRequest) (memory.ContextResult, error) {
-	req.RoomID = s.scope(req.RoomID)
+	req.RoomID = s.scopeRoom(req.RoomID)
 	return s.Store.PrepareContext(ctx, req)
 }
 
 func (s *scopedStore) Propose(ctx context.Context, req memory.ProposeRequest) (memory.WriteResult, error) {
-	req.RoomID = s.scope(req.RoomID)
+	req.RoomID = s.scopeRoom(req.RoomID)
 	req.SourceEventID = s.scope(req.SourceEventID)
 	req.IdempotencyKey = s.scope(req.IdempotencyKey)
 	return s.Store.Propose(ctx, req)
 }
 
 func (s *scopedStore) Record(ctx context.Context, req memory.RecordRequest) (memory.WriteResult, error) {
-	req.RoomID = s.scope(req.RoomID)
+	req.RoomID = s.scopeRoom(req.RoomID)
 	req.SourceEventID = s.scope(req.SourceEventID)
 	req.IdempotencyKey = s.scope(req.IdempotencyKey)
 	return s.Store.Record(ctx, req)

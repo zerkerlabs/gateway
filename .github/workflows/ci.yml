@@ -137,11 +137,24 @@ jobs:
       # zerker-memory ships `zmem serve` as a stdlib ThreadingHTTPServer, so
       # standing up a real backend for the rooms memory client tests needs no
       # container or compose file — just install it, start it on loopback,
-      # and poll /readyz. The version is pinned rather than floating so a
-      # zerker-memory release can't turn this job red with no local change to
-      # explain it; bump this deliberately, in its own commit.
+      # and poll /readyz.
+      #
+      # It is installed from its GitHub release wheel, not from PyPI: the
+      # project publishes releases as tagged GitHub assets and the name
+      # `zerker-memory` is not registered on PyPI at all, so `pip install
+      # zerker-memory` resolves to nothing rather than to an older version.
+      # The URL pins an immutable asset, which also keeps the version fixed
+      # rather than floating — a zerker-memory release cannot turn this job
+      # red with no local change to explain it. Bump it deliberately, in its
+      # own commit.
+      #
+      # v0.1.12 rather than the earliest release carrying the Rooms contract
+      # (v0.1.10): v0.1.11 fixed a race where concurrent first-opens of the
+      # same room database collided enabling SQLite WAL. These suites drive
+      # the backend from parallel Go tests, which is exactly that workload.
       - name: Install zmem backend
-        run: pip install "zerker-memory==0.1.10"
+        run: |
+          pip install "zerker-memory @ https://github.com/zerkerlabs/zmem/releases/download/v0.1.12/zerker_memory-0.1.12-py3-none-any.whl"
 
       - name: Generate zmem service token
         run: echo "ZMEM_SERVICE_TOKEN=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
