@@ -27,7 +27,7 @@ type postMessageRequest struct {
 func (h *Handler) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantFromContext(r.Context())
 	if tenantID == "" {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "unauthorized")
 		return
 	}
 
@@ -35,16 +35,16 @@ func (h *Handler) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 
 	var req postMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, CodeInvalidRequestBody, "invalid request body")
 		return
 	}
 
 	if req.MemberID == "" {
-		writeError(w, http.StatusBadRequest, "member_id is required")
+		writeError(w, http.StatusBadRequest, CodeMissingField, "member_id is required")
 		return
 	}
 	if req.Body == "" {
-		writeError(w, http.StatusBadRequest, "body is required")
+		writeError(w, http.StatusBadRequest, CodeMissingField, "body is required")
 		return
 	}
 
@@ -81,18 +81,18 @@ func (h *Handler) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) writePostFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, room.ErrNotFound):
-		writeError(w, http.StatusNotFound, "room not found")
+		writeError(w, http.StatusNotFound, CodeRoomNotFound, "room not found")
 	case errors.Is(err, room.ErrRoomTerminated):
-		writeError(w, http.StatusConflict, "room is terminated")
+		writeError(w, http.StatusConflict, CodeRoomTerminated, "room is terminated")
 	case errors.Is(err, room.ErrTurnBudgetExceeded):
-		writeError(w, http.StatusConflict, "room turn budget exceeded")
+		writeError(w, http.StatusConflict, CodeTurnBudgetExceeded, "room turn budget exceeded")
 	case errors.Is(err, room.ErrTurnReserved):
 		// Not out of turns — the remaining ones are held by a delivery still
 		// in flight. The room is still open, so this is worth retrying, unlike
 		// an exhausted budget.
-		writeError(w, http.StatusConflict, "the room's remaining turns are in flight; retry once delivery completes")
+		writeError(w, http.StatusConflict, CodeTurnReserved, "the room's remaining turns are in flight; retry once delivery completes")
 	case errors.Is(err, room.ErrMemberNotFound):
-		writeError(w, http.StatusBadRequest, "member not found in room")
+		writeError(w, http.StatusBadRequest, CodeMemberNotFound, "member not found in room")
 	default:
 		h.logger.Error("post message: store error", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -195,9 +195,9 @@ func (h *Handler) deliverToMember(w http.ResponseWriter, r *http.Request, tenant
 	if err != nil {
 		switch {
 		case errors.Is(err, room.ErrNotFound):
-			writeError(w, http.StatusNotFound, "room not found")
+			writeError(w, http.StatusNotFound, CodeRoomNotFound, "room not found")
 		case errors.Is(err, room.ErrMemberNotFound):
-			writeError(w, http.StatusBadRequest, "to_member_id not found in room")
+			writeError(w, http.StatusBadRequest, CodeMemberNotFound, "to_member_id not found in room")
 		default:
 			h.logger.Error("post message: resolve recipient", "err", err)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -269,21 +269,21 @@ func (h *Handler) deliverToMember(w http.ResponseWriter, r *http.Request, tenant
 	// (AGENTS.md invariant #3).
 	switch class {
 	case gateway.ErrorClassCallerError:
-		writeError(w, http.StatusUnprocessableEntity, "message could not be delivered: the gateway rejected the call")
+		writeError(w, http.StatusUnprocessableEntity, CodeDeliveryRejected, "message could not be delivered: the gateway rejected the call")
 	case gateway.ErrorClassUnconfirmed:
 		// The call was accepted but its outcome is unknown. Reported
 		// distinctly from a failure: it may have reached the recipient, so the
 		// caller must not assume it can safely retry as if nothing happened.
-		writeError(w, http.StatusGatewayTimeout, "message delivery could not be confirmed: the call was accepted but did not complete in time")
+		writeError(w, http.StatusGatewayTimeout, CodeDeliveryUnconfirmed, "message delivery could not be confirmed: the call was accepted but did not complete in time")
 	case gateway.ErrorClassTenantMismatch:
 		// Nothing was sent: this deployment's gateway credential acts for a
 		// different tenant, so the call could only have gone out misattributed.
 		// A deployment problem, not a request problem — hence 5xx.
 		h.logger.Error("post message: gateway client cannot act for this tenant",
 			"tenant", tenantID, "room", roomID)
-		writeError(w, http.StatusInternalServerError, "addressed messages are not available for this tenant")
+		writeError(w, http.StatusInternalServerError, CodeDeliveryUnavailable, "addressed messages are not available for this tenant")
 	default:
-		writeError(w, http.StatusBadGateway, "message could not be delivered: gateway upstream failure")
+		writeError(w, http.StatusBadGateway, CodeDeliveryUpstream, "message could not be delivered: gateway upstream failure")
 	}
 	return false
 }

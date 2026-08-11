@@ -116,6 +116,30 @@ func newMuxWithReceipts(t *testing.T, memoryStore memory.Store, gatewayClient ht
 	return authMiddleware(mux), store, h
 }
 
+// newMuxWithStore is newMuxWithMemory with a caller-supplied room.Store in
+// place of a fresh MemoryStore, for a test that needs a store double to reach
+// a branch the real MemoryStore cannot take itself.
+func newMuxWithStore(t *testing.T, store room.Store, memoryStore memory.Store) http.Handler {
+	t.Helper()
+	h := httpapi.NewHandler(store, memoryStore, unreachableGateway{t}, receipt.NewFake(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	return authMiddleware(mux)
+}
+
+// newMuxWithoutAuth is newMux without the auth middleware wrapped around it,
+// for a test that needs to reach a handler's own tenant-in-context check
+// directly — normally the middleware refuses an unauthenticated request
+// before any handler runs, so that check is otherwise unreachable.
+func newMuxWithoutAuth(t *testing.T) http.Handler {
+	t.Helper()
+	store := room.NewMemoryStore()
+	h := httpapi.NewHandler(store, memory.NewFake(), unreachableGateway{t}, receipt.NewFake(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	return mux
+}
+
 // requestAs returns a request to path with body, authenticated as tenantID
 // with a freshly minted bearer token. An empty tenantID sends no Authorization
 // header, which the middleware refuses. A nil body sends no request body; a
@@ -188,4 +212,28 @@ func mustAddMember(t *testing.T, s room.Store, roomID, agentID string) *room.Mem
 		t.Fatalf("AddMember: %v", err)
 	}
 	return m
+}
+
+// TestHandlerUnauthorizedWithoutAuthMiddleware exercises a handler's own
+// tenant-in-context check directly. In every other test an unauthenticated
+// request never reaches a handler at all — the auth middleware refuses it
+// first — so this is the only way to cover the writeError(...,
+// CodeUnauthorized, ...) branch a handler carries as its own belt-and-braces
+// check. POST /v1/rooms stands in for the five handlers that share this
+// identical check.
+func TestHandlerUnauthorizedWithoutAuthMiddleware(t *testing.T) {
+	t.Parallel()
+
+	mux := newMuxWithoutAuth(t)
+	req := request(t, http.MethodPost, "/v1/rooms", map[string]any{"goal": "goal"})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	body := decodeBody(t, rec)
+	if body["code"] != "unauthorized" {
+		t.Errorf("code = %v, want %q", body["code"], "unauthorized")
+	}
 }

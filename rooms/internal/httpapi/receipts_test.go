@@ -39,6 +39,7 @@ func TestHandleGetReceipts(t *testing.T) {
 		setup      func(t *testing.T, s room.Store, em *receipt.Fake) string // returns the room ID to request
 		lookupAs   string
 		wantStatus int
+		wantCode   string
 		checkBody  func(t *testing.T, body map[string]any)
 	}{
 		{
@@ -121,6 +122,7 @@ func TestHandleGetReceipts(t *testing.T) {
 			},
 			lookupAs:   tenantA,
 			wantStatus: http.StatusNotFound,
+			wantCode:   "room_not_found",
 		},
 		{
 			name: "404 for a room owned by a different tenant, identical to a missing room",
@@ -132,8 +134,13 @@ func TestHandleGetReceipts(t *testing.T) {
 			},
 			lookupAs:   tenantB,
 			wantStatus: http.StatusNotFound,
+			wantCode:   "room_not_found",
 		},
 		{
+			// No Authorization header at all, so the auth middleware itself
+			// refuses the request (401, no body, by its own documented
+			// contract) before the handler's own belt-and-braces tenant check
+			// ever runs.
 			name: "401 when no tenant is in context",
 			setup: func(t *testing.T, s room.Store, em *receipt.Fake) string {
 				t.Helper()
@@ -160,8 +167,14 @@ func TestHandleGetReceipts(t *testing.T) {
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
-			if tt.checkBody != nil {
-				tt.checkBody(t, decodeBody(t, rec))
+			if tt.wantCode != "" || tt.checkBody != nil {
+				body := decodeBody(t, rec)
+				if tt.wantCode != "" && body["code"] != tt.wantCode {
+					t.Errorf("code = %v, want %q", body["code"], tt.wantCode)
+				}
+				if tt.checkBody != nil {
+					tt.checkBody(t, body)
+				}
 			}
 		})
 	}

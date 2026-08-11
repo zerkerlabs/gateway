@@ -20,7 +20,7 @@ import (
 func (h *Handler) handleCompleteRoom(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantFromContext(r.Context())
 	if tenantID == "" {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "unauthorized")
 		return
 	}
 
@@ -30,9 +30,9 @@ func (h *Handler) handleCompleteRoom(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, room.ErrNotFound):
-			writeError(w, http.StatusNotFound, "room not found")
+			writeError(w, http.StatusNotFound, CodeRoomNotFound, "room not found")
 		case errors.Is(err, room.ErrRoomTerminated):
-			writeError(w, http.StatusConflict, "room is already terminated")
+			writeError(w, http.StatusConflict, CodeRoomTerminated, "room is already terminated")
 		default:
 			h.logger.Error("complete room: store error", "err", err)
 			w.WriteHeader(http.StatusInternalServerError)
