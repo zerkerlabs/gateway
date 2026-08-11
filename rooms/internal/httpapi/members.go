@@ -17,12 +17,12 @@ type addMemberRequest struct {
 	Documents []string `json:"documents"`
 }
 
-// handleAddMember onboards and seats an agent in a room. Onboarding reads the
-// agent's memory scope and combines it with the request's documents into the
-// member's starting context. Rooms are single-tenant in v1 (there is no
-// gateway client yet to resolve an agent's owning tenant — that lands with
-// the proxy client), so the added agent is assumed to belong to the caller's
-// own tenant, same as the room it joins.
+// handleAddMember onboards and seats an agent in a room. Onboarding prepares
+// the room's governed memory context for the agent and combines it with the
+// request's documents into the member's starting context. Rooms are
+// single-tenant in v1 (there is no gateway client yet to resolve an agent's
+// owning tenant — that lands with the proxy client), so the added agent is
+// assumed to belong to the caller's own tenant, same as the room it joins.
 func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantFromContext(r.Context())
 	if tenantID == "" {
@@ -43,18 +43,24 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Onboarding fails closed: a memory read error refuses the join before any
-	// member is seated. A member that believes it was onboarded but holds an
-	// empty context would produce confidently wrong work, which is worse than
-	// an obvious error here.
-	entries, err := h.memoryStore.Read(r.Context(), memory.Scope{TenantID: tenantID, AgentID: req.AgentID})
+	// Onboarding fails closed: a memory preparation error refuses the join
+	// before any member is seated. A member that believes it was onboarded but
+	// holds an empty context would produce confidently wrong work, which is
+	// worse than an obvious error here.
+	//
+	// Purpose, Risk, and ContextBudgetTokens are room and tenant policy inputs
+	// this handler does not yet wire up, and the result's State is not yet
+	// branched on (ready vs. partial vs. a refusal state) — both are a
+	// separate change. This call exists so the join path builds against the
+	// new seam.
+	result, err := h.memoryStore.PrepareContext(r.Context(), memory.PrepareRequest{RoomID: roomID, AgentID: req.AgentID})
 	if err != nil {
-		h.logger.Error("add member: onboarding memory read failed", "err", err)
+		h.logger.Error("add member: onboarding memory preparation failed", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	member, err := h.store.AddMember(r.Context(), tenantID, roomID, req.AgentID, tenantID, onboardingContext(entries, req.Documents))
+	member, err := h.store.AddMember(r.Context(), tenantID, roomID, req.AgentID, tenantID, onboardingContext(result, req.Documents))
 	if err != nil {
 		switch {
 		case errors.Is(err, room.ErrNotFound):
@@ -73,13 +79,13 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toMemberResponse(member))
 }
 
-// onboardingContext combines a member's memory entries with caller-supplied
-// documents into a single ordered starting context: the member's own memory
-// first, then the documents supplied for this room.
-func onboardingContext(entries []memory.Entry, documents []string) []string {
-	ctx := make([]string, 0, len(entries)+len(documents))
-	for _, e := range entries {
-		ctx = append(ctx, e.Content)
+// onboardingContext combines a member's prepared memory with caller-supplied
+// documents into a single ordered starting context: the room's admitted
+// memory first, then the documents supplied for this room.
+func onboardingContext(result memory.ContextResult, documents []string) []string {
+	ctx := make([]string, 0, len(result.Memories)+len(documents))
+	for _, m := range result.Memories {
+		ctx = append(ctx, m.Content)
 	}
 	ctx = append(ctx, documents...)
 	return ctx
