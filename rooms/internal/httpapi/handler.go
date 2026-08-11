@@ -117,28 +117,31 @@ type Code string
 // are declared, and there is no "unknown" fallback: every writeError call
 // site names one of these.
 const (
-	CodeInvalidRequestBody  Code = "invalid_request_body"
-	CodeMissingField        Code = "missing_field"
-	CodeInvalidField        Code = "invalid_field"
-	CodeUnauthorized        Code = "unauthorized"
-	CodeRoomNotFound        Code = "room_not_found"
-	CodeRoomTerminated      Code = "room_terminated"
-	CodeTenantMismatch      Code = "tenant_mismatch"
-	CodeTurnBudgetExceeded  Code = "turn_budget_exceeded"
-	CodeTurnReserved        Code = "turn_reserved"
-	CodeMemberNotFound      Code = "member_not_found"
-	CodeDeliveryRejected    Code = "delivery_rejected"
-	CodeDeliveryUnconfirmed Code = "delivery_unconfirmed"
-	CodeDeliveryUnavailable Code = "delivery_unavailable"
-	CodeDeliveryUpstream    Code = "delivery_upstream_failure"
+	CodeInvalidRequestBody    Code = "invalid_request_body"
+	CodeMissingField          Code = "missing_field"
+	CodeInvalidField          Code = "invalid_field"
+	CodeUnauthorized          Code = "unauthorized"
+	CodeRoomNotFound          Code = "room_not_found"
+	CodeRoomTerminated        Code = "room_terminated"
+	CodeTenantMismatch        Code = "tenant_mismatch"
+	CodeTurnBudgetExceeded    Code = "turn_budget_exceeded"
+	CodeTurnReserved          Code = "turn_reserved"
+	CodeMemberNotFound        Code = "member_not_found"
+	CodeDeliveryRejected      Code = "delivery_rejected"
+	CodeDeliveryUnconfirmed   Code = "delivery_unconfirmed"
+	CodeDeliveryUnavailable   Code = "delivery_unavailable"
+	CodeDeliveryUpstream      Code = "delivery_upstream_failure"
+	CodeMemoryBlocked         Code = "memory_blocked"
+	CodeMemoryAbstained       Code = "memory_abstained"
+	CodeMemoryBudgetExhausted Code = "memory_budget_exhausted"
+	CodeMemoryUnrecognized    Code = "memory_unrecognized_state"
 )
 
 // errorResponse is the JSON shape of every Rooms error response. Error keeps
 // its existing meaning: a human-readable message, free to change wording
 // across releases. Code is a stable identifier a caller can branch on instead
 // of string-matching Error, and is always present. Reason is an optional,
-// finer-grained detail a given code may attach; nothing in this package sets
-// it yet, but the field exists so a future error path can.
+// finer-grained detail a given code may attach.
 type errorResponse struct {
 	Error  string `json:"error"`
 	Code   Code   `json:"code"`
@@ -147,4 +150,11 @@ type errorResponse struct {
 
 func writeError(w http.ResponseWriter, status int, code Code, msg string) {
 	writeJSON(w, status, errorResponse{Error: msg, Code: code})
+}
+
+// writeErrorWithReason is writeError with the response's optional Reason
+// set, for a code whose refusal carries a finer-grained detail beyond the
+// human-readable message.
+func writeErrorWithReason(w http.ResponseWriter, status int, code Code, msg, reason string) {
+	writeJSON(w, status, errorResponse{Error: msg, Code: code, Reason: reason})
 }
