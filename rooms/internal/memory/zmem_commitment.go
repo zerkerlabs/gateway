@@ -82,9 +82,10 @@ func verifyCommitment(raw json.RawMessage) (string, error) {
 // canonicalJSON renders v — decoded from JSON with json.Number preserved so
 // integers round-trip exactly — into the precise byte sequence Python's
 // json.dumps(v, sort_keys=True, separators=(",", ":")) would produce:
-// object keys sorted, no insignificant whitespace, every rune at or above
-// U+0080 escaped to \uXXXX (Python's ensure_ascii=True default, which Go's
-// encoder does not replicate), and none of '<', '>', '&' escaped
+// object keys sorted, no insignificant whitespace, every rune outside the
+// printable ASCII range 0x20-0x7E escaped to \uXXXX (Python's
+// ensure_ascii=True default, which Go's encoder does not replicate), and
+// none of '<', '>', '&' escaped
 // (encoding/json's default HTML-escaping, which Python's encoder has no
 // equivalent of). A client verifying a backend's commitment must reproduce
 // these bytes exactly, or a correct digest reads as a mismatch — see the
@@ -155,11 +156,12 @@ func writeCanonicalObject(buf *bytes.Buffer, obj map[string]any) error {
 
 // writeCanonicalString escapes s the way Python's json.dumps does with its
 // defaults: '"' and '\\' get their short escapes, the standard single-letter
-// control-character escapes are used where they apply, every other rune
-// below U+0020 becomes \u00XX, and every rune at or above U+0080 becomes
-// \uXXXX — a surrogate pair for runes above the Basic Multilingual Plane.
-// Nothing else is escaped: unlike encoding/json's default, '<', '>', and
-// '&' pass through unescaped, because Python's encoder never touches them.
+// control-character escapes are used where they apply, and every other rune
+// outside the printable ASCII range 0x20-0x7E — including U+007F (DEL) and
+// everything at or above U+0080 — becomes \uXXXX, a surrogate pair for runes
+// above the Basic Multilingual Plane. Nothing else is escaped: unlike
+// encoding/json's default, '<', '>', and '&' pass through unescaped, because
+// Python's encoder never touches them.
 func writeCanonicalString(buf *bytes.Buffer, s string) {
 	buf.WriteByte('"')
 	for _, r := range s {
@@ -182,7 +184,7 @@ func writeCanonicalString(buf *bytes.Buffer, s string) {
 			switch {
 			case r < 0x20:
 				fmt.Fprintf(buf, `\u%04x`, r)
-			case r < 0x80:
+			case r < 0x7F:
 				buf.WriteRune(r)
 			case r <= 0xFFFF:
 				fmt.Fprintf(buf, `\u%04x`, r)

@@ -798,6 +798,14 @@ func TestZMemClient_CommitmentGoldenVectors(t *testing.T) {
 			wantDigest: "sha256:196091d6e1a2e970d2c1b97fc6b9eecff7071a973d5a6381b604b0e3226f71f4",
 		},
 		{
+			// U+007F (DEL) is the one rune Python's ensure_ascii=True
+			// escapes that isn't below U+0020 or above U+007F — a
+			// boundary the other vectors don't exercise.
+			name:       "DEL (U+007F) is escaped like Python's ensure_ascii, not passed through raw",
+			body:       envelope(`{"a":"x` + "\x7f" + `y","room_context_digest":"sha256:c9e3ded1fa20734945dca083e6baa4bdb42fbd54728fff7b3e776363a52bc7b9"}`),
+			wantDigest: "sha256:c9e3ded1fa20734945dca083e6baa4bdb42fbd54728fff7b3e776363a52bc7b9",
+		},
+		{
 			name:      "missing digest field fails closed",
 			body:      envelope(`{"agent_id":"agt_1"}`),
 			wantErr:   true,

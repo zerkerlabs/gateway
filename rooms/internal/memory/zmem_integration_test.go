@@ -35,6 +35,15 @@ const ciMarkerEnv = "CI"
 // these, so a missing one there means the job is broken, not that no
 // backend is available — and a broken step that only produces a skip is
 // indistinguishable from a green run.
+//
+// RunContract's StateAbstained and order-preservation subtests type-assert
+// for optional hooks (orderSeeder, abstainForcer) that neither ZMemClient
+// nor scopedStore implements, so both subtests skip here exactly as they do
+// in the fake-server contract test. Abstention and ranked-order preservation
+// are still covered against ZMemClient, just against fakeZMemServer rather
+// than a real backend — see TestZMemClient_DrivesEachState and
+// TestZMemClient_PreservesReturnedOrder in zmem_test.go.
+
 func TestZMemClient_Contract_Integration(t *testing.T) {
 	baseURL := os.Getenv("ZMEM_TEST_BASE_URL")
 	token := os.Getenv("ZMEM_TEST_SERVICE_TOKEN")

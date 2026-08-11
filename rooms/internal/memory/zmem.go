@@ -119,6 +119,14 @@ type ZMemConfig struct {
 // ZMemClient is the real Store implementation, speaking authenticated JSON
 // HTTP to a tenant-local backend deployment. See the package doc for the
 // contract it implements and why the seam looks the way it does.
+//
+// Tenant identity is asserted only on PrepareContext, whose response carries
+// a tenant_id field to check against ZMemConfig.TenantID. Propose and
+// Record responses carry no tenant field for this client to check, so a
+// misconfigured BaseURL pointed at the wrong tenant's deployment would fail
+// closed on reads but could write proposed or recorded content into the
+// wrong tenant. Writes rely entirely on the backend being deployed
+// tenant-local, as the package doc describes, for their isolation.
 type ZMemClient struct {
 	baseURL      string
 	serviceToken string
