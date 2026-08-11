@@ -73,6 +73,10 @@ var ErrTurnReserved = errors.New("room turns are reserved by a delivery in fligh
 // hand back a turn that is not held.
 var ErrReservationNotHeld = errors.New("turn reservation is not outstanding")
 
+// ErrAlreadyMember is returned when adding an agent to a room it is already
+// seated in.
+var ErrAlreadyMember = errors.New("agent is already a member of this room")
+
 // DefaultTurnBudget is the turn budget assigned to a room created without an
 // explicit one. It bounds how many message-posting turns a room's members may
 // spend before the room is abandoned rather than left to loop indefinitely.
