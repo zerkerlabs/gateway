@@ -46,6 +46,21 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The room is fetched before onboarding so membershipDigest and
+	// roomStateDigest can be computed over the room state that is actually
+	// asking for context — the state before this join, since the member
+	// being seated is not yet a member.
+	got, err := h.store.GetRoom(r.Context(), tenantID, roomID)
+	if err != nil {
+		if errors.Is(err, room.ErrNotFound) {
+			writeError(w, http.StatusNotFound, CodeRoomNotFound, "room not found")
+			return
+		}
+		h.logger.Error("add member: room lookup failed", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	// Onboarding fails closed: a memory preparation error refuses the join
 	// before any member is seated. A member that believes it was onboarded but
 	// holds an empty context would produce confidently wrong work, which is
@@ -57,7 +72,12 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	//
 	// Purpose, Risk, and ContextBudgetTokens are room and tenant policy inputs
 	// this handler does not yet wire up — a separate change.
-	result, err := h.memoryStore.PrepareContext(r.Context(), memory.PrepareRequest{RoomID: roomID, AgentID: req.AgentID})
+	result, err := h.memoryStore.PrepareContext(r.Context(), memory.PrepareRequest{
+		RoomID:           roomID,
+		AgentID:          req.AgentID,
+		MembershipDigest: membershipDigest(got.Members),
+		RoomStateDigest:  roomStateDigest(got),
+	})
 	if err != nil {
 		h.logger.Error("add member: onboarding memory preparation failed", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)

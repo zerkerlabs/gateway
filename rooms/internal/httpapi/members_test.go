@@ -5,12 +5,28 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/zerkerlabs/gateway/rooms/internal/memory"
 	"github.com/zerkerlabs/gateway/rooms/internal/room"
 )
+
+var digestFormat = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// capturingMemoryStore wraps a *memory.Fake and records the PrepareRequest of
+// its most recent PrepareContext call, so a test can inspect exactly what
+// handleAddMember sent upstream.
+type capturingMemoryStore struct {
+	*memory.Fake
+	lastPrepareRequest memory.PrepareRequest
+}
+
+func (s *capturingMemoryStore) PrepareContext(ctx context.Context, req memory.PrepareRequest) (memory.ContextResult, error) {
+	s.lastPrepareRequest = req
+	return s.Fake.PrepareContext(ctx, req)
+}
 
 // erroringMemoryStore is a memory.Store whose PrepareContext always fails,
 // used to exercise onboarding's fail-closed path: a memory backend error
@@ -335,6 +351,56 @@ func assertMemberContext(t *testing.T, body map[string]any, wantState string, wa
 		if reasons[i] != want {
 			t.Errorf("context.omission_reasons[%d] = %v, want %v", i, reasons[i], want)
 		}
+	}
+}
+
+// TestHandleAddMemberSendsDigests asserts that every context-preparation
+// request handleAddMember issues carries a membership_digest and
+// room_state_digest in the "sha256:<64 hex>" format the backend expects, and
+// that adding a second member changes the digest a subsequent join sends —
+// the same room, asked about twice, is no longer the same membership.
+func TestHandleAddMemberSendsDigests(t *testing.T) {
+	t.Parallel()
+
+	store := room.NewMemoryStore()
+	capturing := &capturingMemoryStore{Fake: memory.NewFake()}
+	mux := newMuxWithStore(t, store, capturing)
+	roomID := mustCreateRoom(t, store, "goal").ID
+
+	req1 := requestAs(t, http.MethodPost, "/v1/rooms/"+roomID+"/members", map[string]any{"agent_id": "agt_1"}, tenantA)
+	rec1 := httptest.NewRecorder()
+	mux.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusCreated {
+		t.Fatalf("first add-member status = %d, want %d; body = %s", rec1.Code, http.StatusCreated, rec1.Body.String())
+	}
+	firstMembership := capturing.lastPrepareRequest.MembershipDigest
+	firstRoomState := capturing.lastPrepareRequest.RoomStateDigest
+	if !digestFormat.MatchString(firstMembership) {
+		t.Errorf("MembershipDigest = %q, want sha256:<64 hex>", firstMembership)
+	}
+	if !digestFormat.MatchString(firstRoomState) {
+		t.Errorf("RoomStateDigest = %q, want sha256:<64 hex>", firstRoomState)
+	}
+
+	req2 := requestAs(t, http.MethodPost, "/v1/rooms/"+roomID+"/members", map[string]any{"agent_id": "agt_2"}, tenantA)
+	rec2 := httptest.NewRecorder()
+	mux.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusCreated {
+		t.Fatalf("second add-member status = %d, want %d; body = %s", rec2.Code, http.StatusCreated, rec2.Body.String())
+	}
+	secondMembership := capturing.lastPrepareRequest.MembershipDigest
+	secondRoomState := capturing.lastPrepareRequest.RoomStateDigest
+	if !digestFormat.MatchString(secondMembership) {
+		t.Errorf("MembershipDigest = %q, want sha256:<64 hex>", secondMembership)
+	}
+	if !digestFormat.MatchString(secondRoomState) {
+		t.Errorf("RoomStateDigest = %q, want sha256:<64 hex>", secondRoomState)
+	}
+	if firstMembership == secondMembership {
+		t.Error("MembershipDigest did not change after the room gained a member")
+	}
+	if firstRoomState == secondRoomState {
+		t.Error("RoomStateDigest did not change after the room gained a member's join event")
 	}
 }
 
