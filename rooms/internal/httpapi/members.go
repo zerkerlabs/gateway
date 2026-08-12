@@ -92,9 +92,11 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	commitment := room.ContextCommitment{
 		Digest:        result.Commitment.Digest,
 		State:         string(result.State),
+		Retrieved:     result.Counts.Retrieved,
 		Admitted:      result.Counts.Admitted,
 		Withheld:      result.Counts.Withheld,
 		BudgetDropped: result.Counts.BudgetDropped,
+		Reasons:       result.Omissions.Reasons,
 	}
 
 	member, err := h.store.AddMember(r.Context(), tenantID, roomID, req.AgentID, tenantID, onboardingContext(result, req.Documents), commitment)

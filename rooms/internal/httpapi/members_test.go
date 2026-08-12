@@ -214,6 +214,129 @@ func TestHandleAddMemberContextStates(t *testing.T) {
 	}
 }
 
+// TestHandleAddMemberContextResponse asserts the shape of the context object
+// the add-member response carries for every state that seats a member —
+// ready, partial, and empty — and that GET /v1/rooms/{rom_id} reports the
+// identical context for that same member afterward. It also asserts that
+// StartingContext itself never appears in either response: surfacing that
+// memory was omitted must never require making the memory readable.
+func TestHandleAddMemberContextResponse(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		result      memory.ContextResult
+		wantState   string
+		wantCounts  map[string]any
+		wantReasons []any
+	}{
+		{
+			name:        "ready reports zero omissions",
+			result:      memory.ContextResult{State: memory.StateReady, Memories: []memory.Memory{{ID: "mem_1", Content: "fact"}}, Counts: memory.Counts{Retrieved: 1, Admitted: 1}},
+			wantState:   "ready",
+			wantCounts:  map[string]any{"retrieved": float64(1), "admitted": float64(1), "withheld": float64(0), "budget_dropped": float64(0)},
+			wantReasons: []any{},
+		},
+		{
+			name: "partial reports counts and deduplicated bounded reasons",
+			result: memory.ContextResult{
+				State:     memory.StatePartial,
+				Memories:  []memory.Memory{{ID: "mem_1", Content: "fact"}},
+				Counts:    memory.Counts{Retrieved: 12, Admitted: 7, Withheld: 4, BudgetDropped: 1},
+				Omissions: memory.Omissions{Reasons: []string{"policy_withheld", "budget"}},
+			},
+			wantState:   "partial",
+			wantCounts:  map[string]any{"retrieved": float64(12), "admitted": float64(7), "withheld": float64(4), "budget_dropped": float64(1)},
+			wantReasons: []any{"policy_withheld", "budget"},
+		},
+		{
+			name:        "empty reports zero counts, not an absent object",
+			result:      memory.ContextResult{State: memory.StateEmpty},
+			wantState:   "empty",
+			wantCounts:  map[string]any{"retrieved": float64(0), "admitted": float64(0), "withheld": float64(0), "budget_dropped": float64(0)},
+			wantReasons: []any{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var store room.Store = room.NewMemoryStore()
+			mux := newMuxWithStore(t, store, fixedMemoryStore{result: tt.result})
+			roomID := mustCreateRoom(t, store, "goal").ID
+
+			addReq := requestAs(t, http.MethodPost, "/v1/rooms/"+roomID+"/members", map[string]any{"agent_id": "agt_1"}, tenantA)
+			addRec := httptest.NewRecorder()
+			mux.ServeHTTP(addRec, addReq)
+			if addRec.Code != http.StatusCreated {
+				t.Fatalf("add-member status = %d, want %d; body = %s", addRec.Code, http.StatusCreated, addRec.Body.String())
+			}
+			if strings.Contains(addRec.Body.String(), "starting_context") {
+				t.Fatalf("add-member response exposes starting_context: %s", addRec.Body.String())
+			}
+			assertMemberContext(t, decodeBody(t, addRec), tt.wantState, tt.wantCounts, tt.wantReasons)
+
+			getReq := requestAs(t, http.MethodGet, "/v1/rooms/"+roomID, nil, tenantA)
+			getRec := httptest.NewRecorder()
+			mux.ServeHTTP(getRec, getReq)
+			if getRec.Code != http.StatusOK {
+				t.Fatalf("get-room status = %d, want %d; body = %s", getRec.Code, http.StatusOK, getRec.Body.String())
+			}
+			if strings.Contains(getRec.Body.String(), "starting_context") {
+				t.Fatalf("get-room response exposes starting_context: %s", getRec.Body.String())
+			}
+			members, ok := decodeBody(t, getRec)["members"].([]any)
+			if !ok || len(members) != 1 {
+				t.Fatalf("members = %v, want a single member", members)
+			}
+			member, ok := members[0].(map[string]any)
+			if !ok {
+				t.Fatalf("members[0] = %v, want an object", members[0])
+			}
+			assertMemberContext(t, member, tt.wantState, tt.wantCounts, tt.wantReasons)
+		})
+	}
+}
+
+// assertMemberContext checks the "context" object of a memberResponse —
+// either the add-member response body itself or one entry of a room-get
+// response's "members" array — against the expected state, counts, and
+// omission reasons.
+func assertMemberContext(t *testing.T, body map[string]any, wantState string, wantCounts map[string]any, wantReasons []any) {
+	t.Helper()
+
+	ctx, ok := body["context"].(map[string]any)
+	if !ok {
+		t.Fatalf("context = %v, want an object", body["context"])
+	}
+	if ctx["state"] != wantState {
+		t.Errorf("context.state = %v, want %q", ctx["state"], wantState)
+	}
+	counts, ok := ctx["counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("context.counts = %v, want an object", ctx["counts"])
+	}
+	for k, want := range wantCounts {
+		if counts[k] != want {
+			t.Errorf("context.counts.%s = %v, want %v", k, counts[k], want)
+		}
+	}
+	reasons, ok := ctx["omission_reasons"].([]any)
+	if !ok {
+		t.Fatalf("context.omission_reasons = %v, want an array", ctx["omission_reasons"])
+	}
+	if len(reasons) != len(wantReasons) {
+		t.Errorf("context.omission_reasons = %v, want %v", reasons, wantReasons)
+		return
+	}
+	for i, want := range wantReasons {
+		if reasons[i] != want {
+			t.Errorf("context.omission_reasons[%d] = %v, want %v", i, reasons[i], want)
+		}
+	}
+}
+
 func TestHandleAddMember(t *testing.T) {
 	t.Parallel()
 

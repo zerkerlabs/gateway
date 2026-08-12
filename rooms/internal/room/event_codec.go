@@ -55,11 +55,13 @@ type wireMember struct {
 
 // wireContextCommitment is the wire representation of a ContextCommitment.
 type wireContextCommitment struct {
-	Digest        string `json:"digest,omitempty"`
-	State         string `json:"state,omitempty"`
-	Admitted      int    `json:"admitted"`
-	Withheld      int    `json:"withheld"`
-	BudgetDropped int    `json:"budget_dropped"`
+	Digest        string   `json:"digest,omitempty"`
+	State         string   `json:"state,omitempty"`
+	Retrieved     int      `json:"retrieved"`
+	Admitted      int      `json:"admitted"`
+	Withheld      int      `json:"withheld"`
+	BudgetDropped int      `json:"budget_dropped"`
+	Reasons       []string `json:"reasons,omitempty"`
 }
 
 func newWireMember(m *Member) wireMember {
@@ -70,9 +72,11 @@ func newWireMember(m *Member) wireMember {
 		Context: wireContextCommitment{
 			Digest:        m.Context.Digest,
 			State:         m.Context.State,
+			Retrieved:     m.Context.Retrieved,
 			Admitted:      m.Context.Admitted,
 			Withheld:      m.Context.Withheld,
 			BudgetDropped: m.Context.BudgetDropped,
+			Reasons:       m.Context.Reasons,
 		},
 	}
 }
@@ -89,9 +93,11 @@ func (w wireMember) toMember() *Member {
 		Context: ContextCommitment{
 			Digest:        w.Context.Digest,
 			State:         w.Context.State,
+			Retrieved:     w.Context.Retrieved,
 			Admitted:      w.Context.Admitted,
 			Withheld:      w.Context.Withheld,
 			BudgetDropped: w.Context.BudgetDropped,
+			Reasons:       w.Context.Reasons,
 		},
 		ContextReplayable: false,
 	}

@@ -8,6 +8,7 @@ package roomtest
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -264,16 +265,18 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 			commitment := room.ContextCommitment{
 				Digest:        "sha256:" + strings.Repeat("ab", 32),
 				State:         "partial",
+				Retrieved:     3,
 				Admitted:      2,
 				Withheld:      1,
 				BudgetDropped: 3,
+				Reasons:       []string{"policy_withheld"},
 			}
 
 			m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, commitment)
 			if err != nil {
 				t.Fatalf("AddMember: %v", err)
 			}
-			if m.Context != commitment {
+			if !reflect.DeepEqual(m.Context, commitment) {
 				t.Errorf("Context = %+v, want %+v", m.Context, commitment)
 			}
 			if !m.ContextReplayable {

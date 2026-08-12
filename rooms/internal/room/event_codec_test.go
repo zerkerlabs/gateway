@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -49,9 +50,11 @@ func sampleEvent(kind room.EventKind) *room.Event {
 				Context: room.ContextCommitment{
 					Digest:        "sha256:" + strings.Repeat("ab", 32),
 					State:         "partial",
+					Retrieved:     4,
 					Admitted:      2,
 					Withheld:      1,
 					BudgetDropped: 3,
+					Reasons:       []string{"policy_withheld", "budget"},
 				},
 				ContextReplayable: true,
 			},
@@ -379,7 +382,7 @@ func assertMembersEqual(t *testing.T, want, got *room.Member) {
 	if !got.JoinedAt.Equal(want.JoinedAt) {
 		t.Errorf("Member.JoinedAt = %v, want %v", got.JoinedAt, want.JoinedAt)
 	}
-	if got.Context != want.Context {
+	if !reflect.DeepEqual(got.Context, want.Context) {
 		t.Errorf("Member.Context = %+v, want %+v", got.Context, want.Context)
 	}
 	if got.ContextReplayable {
@@ -448,7 +451,7 @@ func TestMarshalEvent_MemberJoined_DropsOnboardingContext(t *testing.T) {
 		t.Error("decoded ContextReplayable = true, want false")
 	}
 	wantCommitment := room.ContextCommitment{Digest: "sha256:" + strings.Repeat("cd", 32), State: "ready", Admitted: 1}
-	if payload.Member.Context != wantCommitment {
+	if !reflect.DeepEqual(payload.Member.Context, wantCommitment) {
 		t.Errorf("decoded Context = %+v, want %+v", payload.Member.Context, wantCommitment)
 	}
 }
