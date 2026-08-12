@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -33,7 +34,11 @@ type storedMemory struct {
 	Memory
 	// agentID scopes this memory to one member's private partition within
 	// its room; empty means room-shared, visible to every agent's
-	// PrepareContext call for that room.
+	// PrepareContext call for that room. Propose and Record derive it from
+	// the request's Visibility, not from AgentID directly — AgentID is
+	// always the contributor and is required regardless of visibility, so a
+	// room-shared write still names who wrote it, it just is not scoped to
+	// them here.
 	agentID string
 	// eligible is fixed at write time: Record and Seed are eligible for
 	// admission, Propose never is — proposed content is quarantined pending
@@ -47,7 +52,10 @@ type storedMemory struct {
 // single simulated tenant the same way a real deployment is. Two Fake
 // instances never share state, even given identical room and agent IDs.
 //
-// The fake has no ranking or policy engine: PrepareContext admits eligible
+// The fake has no ranking or policy engine, but it is purpose-sensitive: a
+// memory whose content shares no token with the request's Purpose is never
+// retrieved at all, the same as a real backend's retrieval query returning
+// nothing relevant. Among what matches, PrepareContext admits eligible
 // memories in write order up to the requested budget and computes State from
 // the result — except StateAbstained, which is a policy judgment about
 // conflicting evidence no fake can derive from content, so a test drives it
@@ -97,6 +105,9 @@ func (f *Fake) PrepareContext(ctx context.Context, req PrepareRequest) (ContextR
 	if err := ctx.Err(); err != nil {
 		return ContextResult{}, err
 	}
+	if req.Purpose == "" {
+		return ContextResult{}, ErrPurposeRequired
+	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -116,6 +127,13 @@ func (f *Fake) PrepareContext(ctx context.Context, req PrepareRequest) (ContextR
 	var budgetSpent int
 	for _, m := range f.memories[req.RoomID] {
 		if m.agentID != "" && m.agentID != req.AgentID {
+			continue
+		}
+		if !matchesPurpose(m.Content, req.Purpose) {
+			// Not retrieved at all: a real backend's retrieval query found
+			// nothing relevant here, which is a different outcome from
+			// finding it and withholding it, and must not be counted as
+			// either.
 			continue
 		}
 		result.Counts.Retrieved++
@@ -162,6 +180,26 @@ func stateFor(c Counts) State {
 	}
 }
 
+// matchesPurpose reports whether content is relevant to purpose, standing in
+// for a real backend's FTS retrieval: purpose is split into lowercase word
+// tokens, and content matches if it contains any one of them as a substring.
+// This has none of a real backend's ranking, but it is enough to make the
+// fake reject what a real retrieval query would never surface, which is the
+// property that matters here — see the package doc.
+func matchesPurpose(content, purpose string) bool {
+	lowerContent := strings.ToLower(content)
+	for _, tok := range strings.Fields(strings.ToLower(purpose)) {
+		tok = strings.Trim(tok, ".,!?;:\"'()")
+		if tok == "" {
+			continue
+		}
+		if strings.Contains(lowerContent, tok) {
+			return true
+		}
+	}
+	return false
+}
+
 func sortedReasons(set map[string]struct{}) []string {
 	out := make([]string, 0, len(set))
 	for r := range set {
@@ -188,19 +226,30 @@ func commitmentFor(roomID, agentID string, result ContextResult) Commitment {
 // rather than admitting it — Propose never makes content authoritative on
 // its own.
 func (f *Fake) Propose(ctx context.Context, req ProposeRequest) (WriteResult, error) {
-	return f.write(ctx, req.RoomID, req.AgentID, req.Content, "proposed", false)
+	return f.write(ctx, req.RoomID, req.AgentID, req.Visibility, req.Content, "proposed", false)
 }
 
 // Record implements Store: it records content as an accepted transition,
 // active immediately — Record is for content Rooms itself is asserting, so
 // it carries no review step.
 func (f *Fake) Record(ctx context.Context, req RecordRequest) (WriteResult, error) {
-	return f.write(ctx, req.RoomID, req.AgentID, req.Content, "recorded", true)
+	return f.write(ctx, req.RoomID, req.AgentID, req.Visibility, req.Content, "recorded", true)
 }
 
-func (f *Fake) write(ctx context.Context, roomID, agentID, content, provenance string, eligible bool) (WriteResult, error) {
+func (f *Fake) write(ctx context.Context, roomID, agentID string, visibility Visibility, content, provenance string, eligible bool) (WriteResult, error) {
 	if err := ctx.Err(); err != nil {
 		return WriteResult{}, err
+	}
+	if agentID == "" {
+		return WriteResult{}, ErrAgentIDRequired
+	}
+
+	// scopeAgentID is the storedMemory visibility scope, not the
+	// contributor: room-shared content is still attributed to agentID, it is
+	// just not restricted to their own PrepareContext calls.
+	scopeAgentID := ""
+	if visibility == VisibilityMember {
+		scopeAgentID = agentID
 	}
 
 	f.mu.Lock()
@@ -210,7 +259,7 @@ func (f *Fake) write(ctx context.Context, roomID, agentID, content, provenance s
 	result := WriteResult{ID: fmt.Sprintf("mem_%d", f.nextID), CreatedAt: time.Now().UTC()}
 	f.memories[roomID] = append(f.memories[roomID], storedMemory{
 		Memory:   Memory{ID: result.ID, Content: content, Provenance: provenance, CreatedAt: result.CreatedAt},
-		agentID:  agentID,
+		agentID:  scopeAgentID,
 		eligible: eligible,
 	})
 	return result, nil

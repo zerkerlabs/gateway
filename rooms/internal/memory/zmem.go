@@ -77,6 +77,11 @@ const (
 	// ErrorClassContentTooLarge means content exceeded MaxContentChars.
 	// Checked locally before sending, so this is never discovered as a 4xx.
 	ErrorClassContentTooLarge ErrorClass = "content_too_large"
+	// ErrorClassInvalidRequest means a required field — PrepareRequest.Purpose
+	// or a write request's AgentID — was empty. Checked locally before
+	// sending, the same as ErrorClassContentTooLarge, so this is never
+	// discovered as a backend 400.
+	ErrorClassInvalidRequest ErrorClass = "invalid_request"
 )
 
 // ClientError is returned by ZMemClient methods when a call does not
@@ -251,13 +256,18 @@ type omissionItemWire struct {
 }
 
 // writeRequestWire is the POST body for memoriesProposePath and
-// memoriesRecordPath.
+// memoriesRecordPath. AgentID has no omitempty: it is required, and an empty
+// one never reaches this struct — see ZMemClient.write.
 type writeRequestWire struct {
-	RoomID         string `json:"room_id"`
-	AgentID        string `json:"agent_id,omitempty"`
-	Content        string `json:"content"`
-	SourceEventID  string `json:"source_event_id"`
-	IdempotencyKey string `json:"idempotency_key"`
+	RoomID  string `json:"room_id"`
+	AgentID string `json:"agent_id"`
+	Content string `json:"content"`
+	// Visibility is left absent, not sent as "room", when the request used
+	// the zero value — the backend's own default is "room", so an absent
+	// field and an explicit "room" mean the same thing on the wire.
+	Visibility     Visibility `json:"visibility,omitempty"`
+	SourceEventID  string     `json:"source_event_id"`
+	IdempotencyKey string     `json:"idempotency_key"`
 }
 
 type writeResponseWire struct {
@@ -273,6 +283,10 @@ type writeResponseWire struct {
 // a caller can always tell "the backend answered" from "something failed"
 // by checking the error alone.
 func (c *ZMemClient) PrepareContext(ctx context.Context, req PrepareRequest) (ContextResult, error) {
+	if req.Purpose == "" {
+		return ContextResult{}, &ClientError{Class: ErrorClassInvalidRequest}
+	}
+
 	// PrepareRequest and prepareRequestWire share the same fields in the same
 	// order, so this is a plain conversion rather than a field-by-field copy.
 	body, err := json.Marshal(prepareRequestWire(req))
@@ -384,12 +398,15 @@ func (c *ZMemClient) Record(ctx context.Context, req RecordRequest) (WriteResult
 	return c.write(ctx, memoriesRecordPath, writeRequestWire(req))
 }
 
-// write is the shared body of Propose and Record: validate content length,
-// send the request, and reclassify a 409 as ErrorClassIdempotencyConflict —
-// req.IdempotencyKey was reused for content that does not match what it was
-// first used for, which is this client's bug to fix, not a caller error to
-// retry around.
+// write is the shared body of Propose and Record: validate AgentID and
+// content length, send the request, and reclassify a 409 as
+// ErrorClassIdempotencyConflict — req.IdempotencyKey was reused for content
+// that does not match what it was first used for, which is this client's bug
+// to fix, not a caller error to retry around.
 func (c *ZMemClient) write(ctx context.Context, path string, wire writeRequestWire) (WriteResult, error) {
+	if wire.AgentID == "" {
+		return WriteResult{}, &ClientError{Class: ErrorClassInvalidRequest}
+	}
 	if n := utf8.RuneCountInString(wire.Content); n > MaxContentChars {
 		return WriteResult{}, &ClientError{Class: ErrorClassContentTooLarge}
 	}

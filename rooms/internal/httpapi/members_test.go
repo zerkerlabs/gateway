@@ -535,7 +535,11 @@ func TestHandleAddMember(t *testing.T) {
 			name: "201 onboards a member from memory entries plus documents",
 			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
-				return mustCreateRoom(t, s, "goal").ID
+				// The goal shares a term with the seeded memory below: Purpose
+				// is a retrieval query, and a Fake that ignored it would pass
+				// this test regardless — this keeps the goal realistic instead
+				// of accidentally proving nothing.
+				return mustCreateRoom(t, s, "recall the prior facts").ID
 			},
 			seedMemory: func(t *testing.T, f *memory.Fake, roomID string) {
 				t.Helper()

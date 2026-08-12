@@ -17,18 +17,6 @@ func TestFake_Contract(t *testing.T) {
 	})
 }
 
-// TestFake_VisibilityContract pins the Fake's room-shared vs member-private
-// behaviour. Only the Fake runs this suite — see RunVisibilityContract for
-// why it is not part of the shared contract, and what has to change before
-// it can be.
-func TestFake_VisibilityContract(t *testing.T) {
-	t.Parallel()
-
-	memorytest.RunVisibilityContract(t, func() memory.Store {
-		return memory.NewFake()
-	})
-}
-
 // TestFake_ConcurrentWritesDoNotRace exercises the Fake's write and read
 // paths from many goroutines at once; run with -race (make check's test
 // target does).
@@ -52,12 +40,39 @@ func TestFake_ConcurrentWritesDoNotRace(t *testing.T) {
 	}
 	wg.Wait()
 
-	result, err := f.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: roomID, AgentID: agentID})
+	result, err := f.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: roomID, AgentID: agentID, Purpose: "entry"})
 	if err != nil {
 		t.Fatalf("PrepareContext: %v", err)
 	}
 	if len(result.Memories) != n {
 		t.Errorf("len(Memories) = %d, want %d", len(result.Memories), n)
+	}
+}
+
+// TestFake_PurposeSensitiveRetrieval pins the false-confidence bug a
+// purpose-blind fake used to produce: a memory whose content shares no term
+// with the request's Purpose must not come back, the same as it would not
+// against a real backend's FTS retrieval.
+func TestFake_PurposeSensitiveRetrieval(t *testing.T) {
+	t.Parallel()
+
+	f := memory.NewFake()
+	ctx := context.Background()
+	roomID := "rom_1"
+
+	if _, err := f.Record(ctx, memory.RecordRequest{
+		RoomID: roomID, AgentID: "agt_1", Content: "the deployment runbook for the payments service",
+		SourceEventID: "evt_1", IdempotencyKey: "key_1",
+	}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", Purpose: "quarterly gardening notes"})
+	if err != nil {
+		t.Fatalf("PrepareContext: %v", err)
+	}
+	if result.State != memory.StateEmpty || len(result.Memories) != 0 {
+		t.Errorf("PrepareContext with an unrelated purpose = %+v, want empty — a Fake that ignores Purpose is not a valid stand-in for a real backend", result)
 	}
 }
 
@@ -73,7 +88,7 @@ func TestFake_DrivesEachState(t *testing.T) {
 	t.Run(string(memory.StateEmpty), func(t *testing.T) {
 		t.Parallel()
 		f := memory.NewFake()
-		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -88,7 +103,7 @@ func TestFake_DrivesEachState(t *testing.T) {
 		if _, err := f.Record(ctx, memory.RecordRequest{RoomID: "rom_1", AgentID: "agt_1", Content: "fact", SourceEventID: "evt_1", IdempotencyKey: "key_1"}); err != nil {
 			t.Fatalf("Record: %v", err)
 		}
-		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "fact"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -106,7 +121,7 @@ func TestFake_DrivesEachState(t *testing.T) {
 		if _, err := f.Propose(ctx, memory.ProposeRequest{RoomID: "rom_1", AgentID: "agt_1", Content: "unreviewed", SourceEventID: "evt_2", IdempotencyKey: "key_2"}); err != nil {
 			t.Fatalf("Propose: %v", err)
 		}
-		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "accepted unreviewed"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -121,7 +136,7 @@ func TestFake_DrivesEachState(t *testing.T) {
 		if _, err := f.Propose(ctx, memory.ProposeRequest{RoomID: "rom_1", AgentID: "agt_1", Content: "unreviewed", SourceEventID: "evt_1", IdempotencyKey: "key_1"}); err != nil {
 			t.Fatalf("Propose: %v", err)
 		}
-		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "unreviewed"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -134,7 +149,7 @@ func TestFake_DrivesEachState(t *testing.T) {
 		t.Parallel()
 		f := memory.NewFake()
 		f.SetAbstain("rom_1", "agt_1")
-		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -149,7 +164,7 @@ func TestFake_DrivesEachState(t *testing.T) {
 		if _, err := f.Record(ctx, memory.RecordRequest{RoomID: "rom_1", AgentID: "agt_1", Content: "too long for the budget", SourceEventID: "evt_1", IdempotencyKey: "key_1"}); err != nil {
 			t.Fatalf("Record: %v", err)
 		}
-		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", ContextBudgetTokens: 1})
+		result, err := f.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "budget", ContextBudgetTokens: 1})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
