@@ -1,0 +1,28 @@
+{
+  "schema": "zerker.room_memory_context_commitment_golden.v1",
+  "material": {
+    "schema": "zerker.room_memory_context_commitment.v1",
+    "tenant_id": "tnt_123",
+    "room_id": "rom_alpha",
+    "agent_id": "agt_cursor",
+    "request_id": "req_01",
+    "purpose_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "risk": "medium",
+    "context_budget_tokens": 2000,
+    "membership_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "room_state_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "zmem_action_id": "act_example",
+    "zmem_context_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "memory_merkle_root": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "event_merkle_root": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "selected_memory_ids": [
+      "mem_alpha",
+      "mem_beta"
+    ],
+    "state": "partial",
+    "created_at": "2026-08-10T20:45:26Z"
+  },
+  "canonical_json": "{\"agent_id\":\"agt_cursor\",\"context_budget_tokens\":2000,\"created_at\":\"2026-08-10T20:45:26Z\",\"event_merkle_root\":\"sha256:7777777777777777777777777777777777777777777777777777777777777777\",\"membership_digest\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"memory_merkle_root\":\"sha256:6666666666666666666666666666666666666666666666666666666666666666\",\"policy_digest\":\"sha256:5555555555555555555555555555555555555555555555555555555555555555\",\"purpose_hash\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"request_id\":\"req_01\",\"risk\":\"medium\",\"room_id\":\"rom_alpha\",\"room_state_digest\":\"sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"schema\":\"zerker.room_memory_context_commitment.v1\",\"selected_memory_ids\":[\"mem_alpha\",\"mem_beta\"],\"state\":\"partial\",\"tenant_id\":\"tnt_123\",\"zmem_action_id\":\"act_example\",\"zmem_context_digest\":\"sha256:4444444444444444444444444444444444444444444444444444444444444444\"}",
+  "room_context_digest": "sha256:982645b5bc5bb58c59bc6a379675aa3cb3c474a5368b5815a73ecce1bddded15"
+}

@@ -1,7 +1,7 @@
 // Package memorytest holds the contract test suite every memory.Store
 // implementation must satisfy. It is written against the memory.Store
-// interface, not any concrete implementation, so it runs unchanged against
-// memory.NewFake today and a real client later without modification.
+// interface, not any concrete implementation, so it runs against
+// memory.NewFake and against a real backend client alike.
 //
 // Two subtests — proving a non-chronological order survives, and driving
 // StateAbstained — need more than the Store interface can express: a real
@@ -9,6 +9,21 @@
 // PrepareContext, Propose, and Record alone. Those subtests type-assert for
 // the optional seeding hooks memory.Fake exposes and skip if a store does
 // not implement them, rather than widening the Store interface itself.
+//
+// # Purpose is a retrieval query, not a label
+//
+// A real backend retrieves against PrepareRequest.Purpose — it is the search
+// query, not descriptive metadata. Content whose text shares no term with
+// the purpose is not retrieved at all, and the call returns StateEmpty. The
+// fake ignores Purpose and returns everything in the room, so a suite that
+// left Purpose blank would pass against the fake and fail against every real
+// backend. Every case below therefore states a purpose that shares a term
+// with the content it just wrote, the way a real caller would.
+//
+// # What this suite does NOT cover
+//
+// Room-shared versus member-private visibility is not here; see
+// RunVisibilityContract for why it cannot currently be a shared contract.
 package memorytest
 
 import (
@@ -43,7 +58,7 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 		t.Parallel()
 
 		s := newStore()
-		result, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -68,7 +83,7 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 			t.Fatalf("Record: %v", err)
 		}
 
-		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", Purpose: "the accepted outcome"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -99,7 +114,7 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 			t.Fatalf("Propose: %v", err)
 		}
 
-		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", Purpose: "the unreviewed claim"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -121,26 +136,26 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 		ctx := context.Background()
 		roomID := "rom_1"
 		if _, err := s.Record(ctx, memory.RecordRequest{
-			RoomID: roomID, AgentID: "agt_1", Content: "accepted",
+			RoomID: roomID, AgentID: "agt_1", Content: "accepted decision",
 			SourceEventID: "evt_1", IdempotencyKey: "key_1",
 		}); err != nil {
 			t.Fatalf("Record: %v", err)
 		}
 		if _, err := s.Propose(ctx, memory.ProposeRequest{
-			RoomID: roomID, AgentID: "agt_1", Content: "unreviewed",
+			RoomID: roomID, AgentID: "agt_1", Content: "unreviewed decision",
 			SourceEventID: "evt_2", IdempotencyKey: "key_2",
 		}); err != nil {
 			t.Fatalf("Propose: %v", err)
 		}
 
-		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", Purpose: "decision"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
 		if result.State != memory.StatePartial {
 			t.Fatalf("State = %q, want %q", result.State, memory.StatePartial)
 		}
-		if len(result.Memories) != 1 || result.Memories[0].Content != "accepted" {
+		if len(result.Memories) != 1 || result.Memories[0].Content != "accepted decision" {
 			t.Errorf("Memories = %+v, want only the recorded content", result.Memories)
 		}
 		if result.Counts.Retrieved != 2 || result.Counts.Admitted != 1 || result.Counts.Withheld != 1 {
@@ -161,7 +176,7 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 			t.Fatalf("Record: %v", err)
 		}
 
-		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", ContextBudgetTokens: 1})
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", Purpose: "the budget content", ContextBudgetTokens: 1})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -188,7 +203,7 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 		roomID := "rom_1"
 		forcer.SetAbstain(roomID, "agt_1")
 
-		result, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
+		result, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", Purpose: "anything at all"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -215,60 +230,12 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 			t.Fatalf("Record: %v", err)
 		}
 
-		result, err := storeB.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: agentID})
+		result, err := storeB.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: agentID, Purpose: "tenant-a-only"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
 		if result.State != memory.StateEmpty || len(result.Memories) != 0 {
 			t.Errorf("PrepareContext on a second store instance = %+v, want empty (first instance's memory leaked across tenants)", result)
-		}
-	})
-
-	t.Run("cross-agent isolation: member-private memory is not visible to another agent in the same room", func(t *testing.T) {
-		t.Parallel()
-
-		s := newStore()
-		ctx := context.Background()
-		roomID := "rom_1"
-
-		if _, err := s.Record(ctx, memory.RecordRequest{
-			RoomID: roomID, AgentID: "agt_1", Content: "private to agt_1",
-			SourceEventID: "evt_1", IdempotencyKey: "key_1",
-		}); err != nil {
-			t.Fatalf("Record: %v", err)
-		}
-
-		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_2"})
-		if err != nil {
-			t.Fatalf("PrepareContext: %v", err)
-		}
-		if result.State != memory.StateEmpty || len(result.Memories) != 0 {
-			t.Errorf("agt_2's PrepareContext = %+v, want empty (agt_1's private memory leaked)", result)
-		}
-	})
-
-	t.Run("room-shared memory is visible to every agent in the room", func(t *testing.T) {
-		t.Parallel()
-
-		s := newStore()
-		ctx := context.Background()
-		roomID := "rom_1"
-
-		if _, err := s.Record(ctx, memory.RecordRequest{
-			RoomID: roomID, Content: "shared with the whole room",
-			SourceEventID: "evt_1", IdempotencyKey: "key_1",
-		}); err != nil {
-			t.Fatalf("Record: %v", err)
-		}
-
-		for _, agentID := range []string{"agt_1", "agt_2"} {
-			result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: agentID})
-			if err != nil {
-				t.Fatalf("PrepareContext(%s): %v", agentID, err)
-			}
-			if result.State != memory.StateReady || len(result.Memories) != 1 {
-				t.Errorf("PrepareContext(%s) = %+v, want the shared memory admitted", agentID, result)
-			}
 		}
 	})
 
@@ -286,7 +253,7 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 			t.Fatalf("Record: %v", err)
 		}
 
-		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_2", AgentID: agentID})
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_2", AgentID: agentID, Purpose: "rom_1-only"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -314,12 +281,90 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 		seeder.Seed(roomID, "", newer)
 		seeder.Seed(roomID, "", older)
 
-		result, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1"})
+		result, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", Purpose: "seeded"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
 		if len(result.Memories) != 2 || result.Memories[0].ID != "mem_newer" || result.Memories[1].ID != "mem_older" {
 			t.Errorf("Memories = %+v, want [mem_newer mem_older] in the order seeded, not chronological order", result.Memories)
+		}
+	})
+}
+
+// RunVisibilityContract pins how a Store decides room-shared versus
+// member-private memory: a write with a blank AgentID is the room speaking and
+// is visible to everyone, a write carrying an AgentID is that member's and is
+// visible only to them.
+//
+// This is deliberately NOT part of RunContract, and only memory.Fake runs it.
+// It is not a shared contract, because the seam cannot currently express
+// visibility to a real backend at all:
+//
+//   - ZMem requires agent_id on every write and rejects a blank one, so "the
+//     room speaking" has no wire representation. It decides visibility from an
+//     explicit visibility field ("room" by default, "member") that
+//     RecordRequest and ProposeRequest have no field for and never send.
+//   - Every write through ZMemClient therefore lands room-visible, and the
+//     member-private case below is not merely unproven against a real backend,
+//     it is false of one.
+//
+// Keeping these cases in RunContract would have asserted, on every run, a
+// privacy property that production does not have — so they live here, run
+// against the fake only, and stay honest about their scope. Rooms v1 ships
+// behind the fake, so the fake's behaviour is still worth pinning.
+//
+// Adding Visibility to the seam and teaching the fake query-driven retrieval
+// folds these cases back into RunContract and removes this function; that
+// work is tracked and is a prerequisite for wiring this client into
+// production, since until then member-private memory is not expressible.
+func RunVisibilityContract(t *testing.T, newStore func() memory.Store) {
+	t.Helper()
+
+	t.Run("cross-agent isolation: member-private memory is not visible to another agent in the same room", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		ctx := context.Background()
+		roomID := "rom_1"
+
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: roomID, AgentID: "agt_1", Content: "private to agt_1",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+
+		result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_2", Purpose: "private to agt_1"})
+		if err != nil {
+			t.Fatalf("PrepareContext: %v", err)
+		}
+		if result.State != memory.StateEmpty || len(result.Memories) != 0 {
+			t.Errorf("agt_2's PrepareContext = %+v, want empty (agt_1's private memory leaked)", result)
+		}
+	})
+
+	t.Run("room-shared memory is visible to every agent in the room", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		ctx := context.Background()
+		roomID := "rom_1"
+
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: roomID, Content: "shared with the whole room",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+
+		for _, agentID := range []string{"agt_1", "agt_2"} {
+			result, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: agentID, Purpose: "shared with the whole room"})
+			if err != nil {
+				t.Fatalf("PrepareContext(%s): %v", agentID, err)
+			}
+			if result.State != memory.StateReady || len(result.Memories) != 1 {
+				t.Errorf("PrepareContext(%s) = %+v, want the shared memory admitted", agentID, result)
+			}
 		}
 	})
 }
