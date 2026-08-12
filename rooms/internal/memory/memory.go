@@ -45,6 +45,13 @@ var ErrPurposeRequired = errors.New("memory: purpose is required")
 // write a blank AgentID could ever be valid for.
 var ErrAgentIDRequired = errors.New("memory: agent id is required")
 
+// ErrInvalidVisibility is returned by Propose and Record when the request's
+// Visibility is set to a value other than the zero value, VisibilityRoom, or
+// VisibilityMember. Visibility is a closed set — see its doc — so an
+// implementation must reject anything else rather than silently treating an
+// unrecognized value as room-shared.
+var ErrInvalidVisibility = errors.New(`memory: visibility must be "", "room", or "member"`)
+
 // State is the outcome of a PrepareContext call: what the backend was able
 // to do with a room's governed memory for the agent that asked. It is a
 // closed set — exactly these six values — so a caller can branch on it
@@ -164,13 +171,29 @@ type Visibility string
 
 const (
 	// VisibilityRoom means the memory is room-shared: visible to every
-	// member's PrepareContext call in the room it was written to. It is the
-	// zero value, so a request that leaves Visibility unset defaults to it.
+	// member's PrepareContext call in the room it was written to. A request
+	// that leaves Visibility unset (the empty string, Go's zero value for
+	// Visibility) defaults to this behavior, the same as setting it
+	// explicitly to VisibilityRoom.
 	VisibilityRoom Visibility = "room"
 	// VisibilityMember means the memory is private to the writing AgentID:
 	// visible only to that agent's own PrepareContext calls in the room.
 	VisibilityMember Visibility = "member"
 )
+
+// validVisibility reports whether v is one Propose and Record must accept:
+// the unset zero value, VisibilityRoom, or VisibilityMember. Any other value
+// is a caller bug that must be rejected with ErrInvalidVisibility (Fake) or
+// ErrorClassInvalidRequest (ZMemClient) rather than silently treated as
+// room-shared.
+func validVisibility(v Visibility) bool {
+	switch v {
+	case "", VisibilityRoom, VisibilityMember:
+		return true
+	default:
+		return false
+	}
+}
 
 // ProposeRequest submits agent-authored content as a candidate memory. It is
 // quarantined until reviewed — calling Propose vouches for nothing beyond

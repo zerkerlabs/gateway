@@ -407,6 +407,9 @@ func (c *ZMemClient) write(ctx context.Context, path string, wire writeRequestWi
 	if wire.AgentID == "" {
 		return WriteResult{}, &ClientError{Class: ErrorClassInvalidRequest}
 	}
+	if !validVisibility(wire.Visibility) {
+		return WriteResult{}, &ClientError{Class: ErrorClassInvalidRequest}
+	}
 	if n := utf8.RuneCountInString(wire.Content); n > MaxContentChars {
 		return WriteResult{}, &ClientError{Class: ErrorClassContentTooLarge}
 	}

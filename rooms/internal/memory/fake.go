@@ -243,6 +243,9 @@ func (f *Fake) write(ctx context.Context, roomID, agentID string, visibility Vis
 	if agentID == "" {
 		return WriteResult{}, ErrAgentIDRequired
 	}
+	if !validVisibility(visibility) {
+		return WriteResult{}, ErrInvalidVisibility
+	}
 
 	// scopeAgentID is the storedMemory visibility scope, not the
 	// contributor: room-shared content is still attributed to agentID, it is

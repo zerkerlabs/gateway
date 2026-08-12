@@ -322,6 +322,28 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 		}
 	})
 
+	t.Run("Propose and Record reject an unrecognized Visibility value", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		ctx := context.Background()
+		const bogus memory.Visibility = "everyone"
+		if _, err := s.Propose(ctx, memory.ProposeRequest{
+			RoomID: "rom_1", AgentID: "agt_1", Content: "bogus visibility",
+			Visibility:    bogus,
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err == nil {
+			t.Fatal("Propose: err = nil, want an error for an unrecognized Visibility")
+		}
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: "rom_1", AgentID: "agt_1", Content: "bogus visibility",
+			Visibility:    bogus,
+			SourceEventID: "evt_2", IdempotencyKey: "key_2",
+		}); err == nil {
+			t.Fatal("Record: err = nil, want an error for an unrecognized Visibility")
+		}
+	})
+
 	t.Run("cross-agent isolation: member-private memory is not visible to another agent in the same room", func(t *testing.T) {
 		t.Parallel()
 
