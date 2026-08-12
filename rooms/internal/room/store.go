@@ -33,11 +33,14 @@ type Store interface {
 	// ListRooms returns every room belonging to tenantID.
 	ListRooms(ctx context.Context, tenantID string) ([]*Room, error)
 
-	// AddMember seats an agent in a room, carrying startingContext — the
-	// onboarding context the caller assembled from the agent's memory scope
-	// plus any documents supplied on the request (rooms/internal/memory); pass
-	// nil for a member with no onboarding context. commitment is what gets
-	// persisted for that context instead of its content — see
+	// AddMember seats an agent in a room, carrying admittedMemory — the
+	// room-scoped memory a governed memory backend admitted for this agent
+	// on join (rooms/internal/memory) — and callerDocuments — the onboarding
+	// material supplied directly on the request — as separate slices; pass
+	// nil for either with nothing to give. The two are never merged: one is
+	// policy-approved, the other is ungoverned caller input, and nothing
+	// downstream can tell them apart once combined. commitment is what gets
+	// persisted for the onboarding context instead of its content — see
 	// ContextCommitment; pass the zero value when there is no memory-backend
 	// commitment to record. tenantID scopes the room lookup — it returns
 	// ErrNotFound if roomID does not exist or belongs to another tenant.
@@ -45,7 +48,7 @@ type Store interface {
 	// room's tenant, the add is rejected with ErrTenantMismatch (rooms are
 	// single-tenant). Returns ErrRoomTerminated if the room has already
 	// reached a terminal state.
-	AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string, commitment ContextCommitment) (*Member, error)
+	AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, admittedMemory, callerDocuments []string, commitment ContextCommitment) (*Member, error)
 
 	// AppendMessage records a message in a room, authored by one of its
 	// members. Posting a message consumes one turn; if doing so would exceed
@@ -248,7 +251,7 @@ func (s *MemoryStore) ListRooms(ctx context.Context, tenantID string) ([]*Room, 
 }
 
 // AddMember implements Store.
-func (s *MemoryStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string, commitment ContextCommitment) (*Member, error) {
+func (s *MemoryStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, admittedMemory, callerDocuments []string, commitment ContextCommitment) (*Member, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -276,7 +279,8 @@ func (s *MemoryStore) AddMember(ctx context.Context, tenantID, roomID, agentID, 
 		ID:                id,
 		AgentID:           agentID,
 		JoinedAt:          time.Now().UTC(),
-		StartingContext:   append([]string(nil), startingContext...),
+		AdmittedMemory:    append([]string(nil), admittedMemory...),
+		CallerDocuments:   append([]string(nil), callerDocuments...),
 		Context:           commitment,
 		ContextReplayable: true,
 	}
@@ -711,8 +715,11 @@ func cloneRoom(r *Room) *Room {
 
 func cloneMember(m *Member) *Member {
 	c := *m
-	if m.StartingContext != nil {
-		c.StartingContext = append([]string(nil), m.StartingContext...)
+	if m.AdmittedMemory != nil {
+		c.AdmittedMemory = append([]string(nil), m.AdmittedMemory...)
+	}
+	if m.CallerDocuments != nil {
+		c.CallerDocuments = append([]string(nil), m.CallerDocuments...)
 	}
 	return &c
 }

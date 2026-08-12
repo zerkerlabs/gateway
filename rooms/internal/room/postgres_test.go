@@ -479,7 +479,7 @@ func TestPG_TurnAccountingMatchesMemoryStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoomWithBudget: %v", err)
 	}
-	memMember, err := mem.AddMember(ctx, tenantA, memRoom.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+	memMember, err := mem.AddMember(ctx, tenantA, memRoom.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -614,7 +614,7 @@ func TestPG_AddMember_RoundTrip(t *testing.T) {
 		t.Fatalf("CreateRoom: %v", err)
 	}
 
-	m, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, []string{"onboarding doc"}, room.ContextCommitment{})
+	m, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, []string{"admitted memory"}, []string{"onboarding doc"}, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -646,13 +646,16 @@ func TestPG_AddMember_RoundTrip(t *testing.T) {
 
 // TestPG_AddMember_ContextCommitmentPersistedNotContent is the acceptance
 // check for the member_joined payload shape end to end against Postgres: a
-// member's onboarding content stays live in the process that added it, but
-// only its commitment — a digest, a state, and admitted/withheld/dropped
-// counts — is ever written to room_events. Replaying the room afterward (a
-// fresh GetRoom, which reloads from room_members and room_events rather than
-// any in-process state) must reproduce that commitment without the content,
-// and must mark the reloaded member's context as not replayable rather than
-// leaving it indistinguishable from a member who joined with none.
+// member's onboarding content — admitted memory and caller documents alike —
+// stays live in the process that added it, but only its commitment — a
+// digest, a state, and admitted/withheld/dropped counts — is ever written to
+// room_events. Replaying the room afterward (a fresh GetRoom, which reloads
+// from room_members and room_events rather than any in-process state) must
+// reproduce that commitment without the content, and must mark the reloaded
+// member's context as not replayable rather than leaving it indistinguishable
+// from a member who joined with none. It also asserts the two kinds of
+// onboarding content stay distinguishable through every layer they pass
+// through, not just combined into one dropped blob.
 func TestPG_AddMember_ContextCommitmentPersistedNotContent(t *testing.T) {
 	s, pool := newPGStore(t)
 	ctx := context.Background()
@@ -671,27 +674,35 @@ func TestPG_AddMember_ContextCommitmentPersistedNotContent(t *testing.T) {
 		BudgetDropped: 3,
 		Reasons:       []string{"policy_withheld", "budget"},
 	}
-	m, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, []string{sentinelOnboardingContext}, commitment)
+	m, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA,
+		[]string{sentinelOnboardingContext}, []string{sentinelCallerDocument}, commitment)
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
 	// Live, in-process: the member returned by AddMember itself still carries
-	// its real onboarding content.
-	if len(m.StartingContext) != 1 || m.StartingContext[0] != sentinelOnboardingContext {
-		t.Fatalf("live StartingContext = %v, want [%q]", m.StartingContext, sentinelOnboardingContext)
+	// its real onboarding content, admitted memory and caller documents kept
+	// apart in their own fields.
+	if len(m.AdmittedMemory) != 1 || m.AdmittedMemory[0] != sentinelOnboardingContext {
+		t.Fatalf("live AdmittedMemory = %v, want [%q]", m.AdmittedMemory, sentinelOnboardingContext)
+	}
+	if len(m.CallerDocuments) != 1 || m.CallerDocuments[0] != sentinelCallerDocument {
+		t.Fatalf("live CallerDocuments = %v, want [%q]", m.CallerDocuments, sentinelCallerDocument)
 	}
 	if !m.ContextReplayable {
 		t.Error("live member ContextReplayable = false, want true")
 	}
 
-	// The raw persisted payload must never contain the sentinel, only the
+	// The raw persisted payload must never contain either sentinel, only the
 	// commitment.
 	var payload []byte
 	if err := pool.QueryRow(ctx, `SELECT payload FROM room_events WHERE room_id=$1 AND kind='member_joined'`, r.ID).Scan(&payload); err != nil {
 		t.Fatalf("select room_events.payload: %v", err)
 	}
 	if strings.Contains(string(payload), sentinelOnboardingContext) {
-		t.Fatalf("room_events.payload contains the onboarding-context sentinel: %s", payload)
+		t.Fatalf("room_events.payload contains the admitted-memory sentinel: %s", payload)
+	}
+	if strings.Contains(string(payload), sentinelCallerDocument) {
+		t.Fatalf("room_events.payload contains the caller-document sentinel: %s", payload)
 	}
 	if !strings.Contains(string(payload), commitment.Digest) {
 		t.Errorf("room_events.payload missing the commitment digest: %s", payload)
@@ -709,8 +720,11 @@ func TestPG_AddMember_ContextCommitmentPersistedNotContent(t *testing.T) {
 		t.Fatalf("Members = %+v, want 1", got.Members)
 	}
 	replayed := got.Members[0]
-	if len(replayed.StartingContext) != 0 {
-		t.Errorf("replayed StartingContext = %v, want empty", replayed.StartingContext)
+	if len(replayed.AdmittedMemory) != 0 {
+		t.Errorf("replayed AdmittedMemory = %v, want empty", replayed.AdmittedMemory)
+	}
+	if len(replayed.CallerDocuments) != 0 {
+		t.Errorf("replayed CallerDocuments = %v, want empty", replayed.CallerDocuments)
 	}
 	if replayed.ContextReplayable {
 		t.Error("replayed member ContextReplayable = true, want false")
@@ -728,7 +742,7 @@ func TestPG_AddMember_CrossTenantAgentRejected(t *testing.T) {
 		t.Fatalf("CreateRoom: %v", err)
 	}
 
-	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantB, nil, room.ContextCommitment{}); !errors.Is(err, room.ErrTenantMismatch) {
+	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantB, nil, nil, room.ContextCommitment{}); !errors.Is(err, room.ErrTenantMismatch) {
 		t.Errorf("err = %v, want ErrTenantMismatch", err)
 	}
 
@@ -749,7 +763,7 @@ func TestPG_AddMember_CrossTenantRoomNotFound(t *testing.T) {
 		t.Fatalf("CreateRoom: %v", err)
 	}
 
-	if _, err := s.AddMember(ctx, tenantB, r.ID, "agt_1", tenantB, nil, room.ContextCommitment{}); !errors.Is(err, room.ErrNotFound) {
+	if _, err := s.AddMember(ctx, tenantB, r.ID, "agt_1", tenantB, nil, nil, room.ContextCommitment{}); !errors.Is(err, room.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
@@ -765,7 +779,7 @@ func TestPG_AddMember_TerminatedRoomRejected(t *testing.T) {
 		t.Fatalf("CompleteRoom: %v", err)
 	}
 
-	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_late", tenantA, nil, room.ContextCommitment{}); !errors.Is(err, room.ErrRoomTerminated) {
+	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_late", tenantA, nil, nil, room.ContextCommitment{}); !errors.Is(err, room.ErrRoomTerminated) {
 		t.Errorf("err = %v, want ErrRoomTerminated", err)
 	}
 }
@@ -778,11 +792,11 @@ func TestPG_AddMember_DuplicateAgentRejected(t *testing.T) {
 		t.Fatalf("CreateRoom: %v", err)
 	}
 
-	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{}); err != nil {
+	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{}); err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
 
-	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{}); !errors.Is(err, room.ErrAlreadyMember) {
+	if _, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{}); !errors.Is(err, room.ErrAlreadyMember) {
 		t.Errorf("err = %v, want ErrAlreadyMember", err)
 	}
 
@@ -804,7 +818,7 @@ func TestPG_AppendMessage_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
 	}
-	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -875,7 +889,7 @@ func TestPG_AppendMessage_MemberFromAnotherRoomRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
 	}
-	member, err := s.AddMember(ctx, tenantA, r1.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+	member, err := s.AddMember(ctx, tenantA, r1.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -915,7 +929,7 @@ func TestPG_AppendMessage_TurnBudgetExhaustionAbandonsRoom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoomWithBudget: %v", err)
 	}
-	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -973,7 +987,7 @@ func TestPG_AppendMessage_ConcurrentSequencesContiguous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoomWithBudget: %v", err)
 	}
-	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -1028,7 +1042,7 @@ func TestPG_AppendMessage_ConcurrentPostsWithOneTurnLeft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoomWithBudget: %v", err)
 	}
-	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -1092,7 +1106,7 @@ func TestPG_AppendMessage_RolledBackTransactionLeavesNoGap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
 	}
-	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+	member, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -1193,11 +1207,11 @@ func TestPG_RecordDeliveryFailure_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
 	}
-	sender, err := s.AddMember(ctx, tenantA, r.ID, "agt_sender", tenantA, nil, room.ContextCommitment{})
+	sender, err := s.AddMember(ctx, tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
-	recipient, err := s.AddMember(ctx, tenantA, r.ID, "agt_recipient", tenantA, nil, room.ContextCommitment{})
+	recipient, err := s.AddMember(ctx, tenantA, r.ID, "agt_recipient", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
@@ -1250,11 +1264,11 @@ func TestPG_RecordDelivery_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
 	}
-	sender, err := s.AddMember(ctx, tenantA, r.ID, "agt_sender", tenantA, nil, room.ContextCommitment{})
+	sender, err := s.AddMember(ctx, tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
-	recipient, err := s.AddMember(ctx, tenantA, r.ID, "agt_recipient", tenantA, nil, room.ContextCommitment{})
+	recipient, err := s.AddMember(ctx, tenantA, r.ID, "agt_recipient", tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}

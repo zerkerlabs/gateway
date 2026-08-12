@@ -205,7 +205,7 @@ func (s *PostgresStore) createRoom(ctx context.Context, tenantID, goal string, t
 }
 
 // AddMember implements the write half of Store.
-func (s *PostgresStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string, commitment ContextCommitment) (*Member, error) {
+func (s *PostgresStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, admittedMemory, callerDocuments []string, commitment ContextCommitment) (*Member, error) {
 	id, err := resource.New("mem")
 	if err != nil {
 		return nil, err
@@ -215,7 +215,8 @@ func (s *PostgresStore) AddMember(ctx context.Context, tenantID, roomID, agentID
 		ID:                id,
 		AgentID:           agentID,
 		JoinedAt:          time.Now().UTC(),
-		StartingContext:   append([]string(nil), startingContext...),
+		AdmittedMemory:    append([]string(nil), admittedMemory...),
+		CallerDocuments:   append([]string(nil), callerDocuments...),
 		Context:           commitment,
 		ContextReplayable: true,
 	}

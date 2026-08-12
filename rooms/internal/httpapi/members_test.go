@@ -38,7 +38,7 @@ type tenantMismatchStore struct {
 	room.Store
 }
 
-func (tenantMismatchStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, startingContext []string, commitment room.ContextCommitment) (*room.Member, error) {
+func (tenantMismatchStore) AddMember(ctx context.Context, tenantID, roomID, agentID, agentTenantID string, admittedMemory, callerDocuments []string, commitment room.ContextCommitment) (*room.Member, error) {
 	return nil, room.ErrTenantMismatch
 }
 
@@ -218,8 +218,9 @@ func TestHandleAddMemberContextStates(t *testing.T) {
 // the add-member response carries for every state that seats a member —
 // ready, partial, and empty — and that GET /v1/rooms/{rom_id} reports the
 // identical context for that same member afterward. It also asserts that
-// StartingContext itself never appears in either response: surfacing that
-// memory was omitted must never require making the memory readable.
+// AdmittedMemory and CallerDocuments themselves never appear in either
+// response: surfacing that memory was omitted must never require making the
+// memory readable.
 func TestHandleAddMemberContextResponse(t *testing.T) {
 	t.Parallel()
 
@@ -459,6 +460,12 @@ func TestHandleAddMember(t *testing.T) {
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
+			// The acceptance check for keeping admitted memory and caller
+			// documents apart: a member onboards with both governed memory
+			// (seeded into the fake backend, so it is policy-admitted) and
+			// caller-supplied documents (ungoverned request input), and the
+			// two must remain distinguishable in the stored member, not
+			// merged into one list.
 			name: "201 onboards a member from memory entries plus documents",
 			setup: func(t *testing.T, s room.Store) string {
 				t.Helper()
@@ -492,14 +499,25 @@ func TestHandleAddMember(t *testing.T) {
 				if len(got.Members) != 1 {
 					t.Fatalf("Members = %v, want a single member", got.Members)
 				}
-				want := []string{"prior fact 1", "prior fact 2", "doc A", "doc B"}
-				got0 := got.Members[0].StartingContext
-				if len(got0) != len(want) {
-					t.Fatalf("StartingContext = %v, want %v", got0, want)
+				member := got.Members[0]
+
+				wantMemory := []string{"prior fact 1", "prior fact 2"}
+				if len(member.AdmittedMemory) != len(wantMemory) {
+					t.Fatalf("AdmittedMemory = %v, want %v", member.AdmittedMemory, wantMemory)
 				}
-				for i := range want {
-					if got0[i] != want[i] {
-						t.Errorf("StartingContext[%d] = %q, want %q", i, got0[i], want[i])
+				for i := range wantMemory {
+					if member.AdmittedMemory[i] != wantMemory[i] {
+						t.Errorf("AdmittedMemory[%d] = %q, want %q", i, member.AdmittedMemory[i], wantMemory[i])
+					}
+				}
+
+				wantDocuments := []string{"doc A", "doc B"}
+				if len(member.CallerDocuments) != len(wantDocuments) {
+					t.Fatalf("CallerDocuments = %v, want %v", member.CallerDocuments, wantDocuments)
+				}
+				for i := range wantDocuments {
+					if member.CallerDocuments[i] != wantDocuments[i] {
+						t.Errorf("CallerDocuments[%d] = %q, want %q", i, member.CallerDocuments[i], wantDocuments[i])
 					}
 				}
 			},
@@ -522,8 +540,11 @@ func TestHandleAddMember(t *testing.T) {
 				if len(got.Members) != 1 {
 					t.Fatalf("Members = %v, want a single member", got.Members)
 				}
-				if len(got.Members[0].StartingContext) != 0 {
-					t.Errorf("StartingContext = %v, want empty", got.Members[0].StartingContext)
+				if len(got.Members[0].AdmittedMemory) != 0 {
+					t.Errorf("AdmittedMemory = %v, want empty", got.Members[0].AdmittedMemory)
+				}
+				if len(got.Members[0].CallerDocuments) != 0 {
+					t.Errorf("CallerDocuments = %v, want empty", got.Members[0].CallerDocuments)
 				}
 			},
 		},

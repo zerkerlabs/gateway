@@ -41,11 +41,12 @@ type eventEnvelope struct {
 	Payload        json.RawMessage `json:"payload"`
 }
 
-// wireMember is the wire representation of a Member. StartingContext is
-// deliberately absent: it is the member's onboarding content, governed
-// memory-backend material Rooms does not persist a durable copy of (see
-// ContextCommitment in room.go). Only the commitment recorded for it is
-// written here.
+// wireMember is the wire representation of a Member. AdmittedMemory and
+// CallerDocuments are deliberately absent: they are the member's onboarding
+// content — governed memory-backend material and ungoverned caller input,
+// respectively — neither of which Rooms persists a durable copy of (see
+// ContextCommitment in room.go). Only the commitment recorded for the
+// onboarding context is written here.
 type wireMember struct {
 	ID       string                `json:"id"`
 	AgentID  string                `json:"agent_id"`
@@ -82,9 +83,9 @@ func newWireMember(m *Member) wireMember {
 }
 
 // toMember reconstructs the Member a wireMember describes. The result always
-// has ContextReplayable=false and an empty StartingContext: a decoded event
-// came off a persisted log, which never carried onboarding content, only the
-// commitment recorded for it — see ContextCommitment.
+// has ContextReplayable=false and empty AdmittedMemory and CallerDocuments:
+// a decoded event came off a persisted log, which never carried onboarding
+// content, only the commitment recorded for it — see ContextCommitment.
 func (w wireMember) toMember() *Member {
 	return &Member{
 		ID:       w.ID,

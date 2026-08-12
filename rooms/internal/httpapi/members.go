@@ -18,8 +18,11 @@ type addMemberRequest struct {
 }
 
 // handleAddMember onboards and seats an agent in a room. Onboarding prepares
-// the room's governed memory context for the agent and combines it with the
-// request's documents into the member's starting context. Rooms are
+// the room's governed memory context for the agent and carries it alongside
+// the request's documents as the member's starting context — the two are
+// kept as separate fields throughout, never merged, since one is
+// policy-approved and the other is ungoverned caller input (see
+// room.Member.AdmittedMemory and room.Member.CallerDocuments). Rooms are
 // single-tenant in v1 (there is no gateway client yet to resolve an agent's
 // owning tenant — that lands with the proxy client), so the added agent is
 // assumed to belong to the caller's own tenant, same as the room it joins.
@@ -99,7 +102,7 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		Reasons:       result.Omissions.Reasons,
 	}
 
-	member, err := h.store.AddMember(r.Context(), tenantID, roomID, req.AgentID, tenantID, onboardingContext(result, req.Documents), commitment)
+	member, err := h.store.AddMember(r.Context(), tenantID, roomID, req.AgentID, tenantID, admittedMemory(result), req.Documents, commitment)
 	if err != nil {
 		switch {
 		case errors.Is(err, room.ErrNotFound):
@@ -154,14 +157,15 @@ func refusalFor(state memory.State) (code Code, def string, refused bool) {
 	}
 }
 
-// onboardingContext combines a member's prepared memory with caller-supplied
-// documents into a single ordered starting context: the room's admitted
-// memory first, then the documents supplied for this room.
-func onboardingContext(result memory.ContextResult, documents []string) []string {
-	ctx := make([]string, 0, len(result.Memories)+len(documents))
-	for _, m := range result.Memories {
-		ctx = append(ctx, m.Content)
+// admittedMemory extracts the content the memory backend admitted for this
+// member, preserving the backend's returned order. It is passed to
+// room.Store.AddMember separately from the request's documents — the two
+// must never be combined into one list, since only this one has passed
+// policy.
+func admittedMemory(result memory.ContextResult) []string {
+	ctx := make([]string, len(result.Memories))
+	for i, m := range result.Memories {
+		ctx[i] = m.Content
 	}
-	ctx = append(ctx, documents...)
 	return ctx
 }

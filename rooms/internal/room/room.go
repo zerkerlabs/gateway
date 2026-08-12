@@ -99,26 +99,34 @@ type Member struct {
 	ID       string
 	AgentID  string // the agt_-prefixed gateway agent this member represents
 	JoinedAt time.Time
-	// StartingContext is the onboarding context the member joined with: its
-	// memory scope's entries combined with any documents supplied on the
-	// add-member request (rooms/internal/memory). Assembling it is the
-	// caller's job — the store only carries whatever it is given. It holds
-	// real content only while ContextReplayable is true.
-	StartingContext []string
+	// AdmittedMemory is the room-scoped memory a governed memory backend
+	// admitted for this member on join (rooms/internal/memory). It has
+	// passed policy — every entry is something the backend was willing to
+	// hand back for this agent, for this task, at this moment. It holds real
+	// content only while ContextReplayable is true.
+	AdmittedMemory []string
+	// CallerDocuments is the onboarding material supplied directly on the
+	// add-member request. It is ungoverned input — nothing has reviewed or
+	// admitted it — and is kept separate from AdmittedMemory for exactly
+	// that reason: nothing downstream can tell a policy-approved memory
+	// entry from an unreviewed caller document unless they arrive as
+	// distinct fields. It holds real content only while ContextReplayable is
+	// true.
+	CallerDocuments []string
 	// Context is the commitment recorded for this member's onboarding — see
 	// ContextCommitment. It is always populated, even for a member who
 	// joined with no admitted memory: a zero Admitted count is how "joined
 	// with genuinely no context" is told apart from "context not replayable"
 	// below.
 	Context ContextCommitment
-	// ContextReplayable reports whether StartingContext holds this member's
-	// actual onboarding content. It is true for a live, in-process member —
-	// one AddMember just returned, in the same process — and false for a
-	// member reconstructed by replaying a persisted event log, whose
-	// member_joined event never stored the content, only Context above. A
-	// false value paired with an empty StartingContext must never be read as
-	// "this member had no onboarding context" — check Context.Admitted
-	// instead.
+	// ContextReplayable reports whether AdmittedMemory and CallerDocuments
+	// hold this member's actual onboarding content. It is true for a live,
+	// in-process member — one AddMember just returned, in the same process —
+	// and false for a member reconstructed by replaying a persisted event
+	// log, whose member_joined event never stored that content, only
+	// Context above. A false value paired with empty AdmittedMemory and
+	// CallerDocuments must never be read as "this member had no onboarding
+	// context" — check Context.Admitted instead.
 	ContextReplayable bool
 }
 
@@ -143,7 +151,7 @@ type ContextCommitment struct {
 	State string
 	// Retrieved, Admitted, Withheld, and BudgetDropped mirror memory.Counts:
 	// how many entries the backend considered before applying policy or
-	// budget, how many ended up in StartingContext, and how many did not,
+	// budget, how many ended up in AdmittedMemory, and how many did not,
 	// partitioned by why.
 	Retrieved     int
 	Admitted      int
@@ -211,10 +219,11 @@ type Event struct {
 // MemberJoinedPayload is the Payload of an EventMemberJoined event.
 //
 // Its persisted wire form (event_codec.go) deliberately omits
-// Member.StartingContext: onboarding content is governed memory-backend
-// material Rooms does not own a durable copy of. What survives to storage is
-// Member.Context — a commitment digest, counts, and backend state — never
-// the content itself.
+// Member.AdmittedMemory and Member.CallerDocuments: onboarding content is
+// either governed memory-backend material Rooms does not own a durable copy
+// of, or ungoverned caller input Rooms does not persist either. What
+// survives to storage is Member.Context — a commitment digest, counts, and
+// backend state — never the content itself.
 type MemberJoinedPayload struct {
 	Member *Member
 }
