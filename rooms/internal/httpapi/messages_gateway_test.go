@@ -501,11 +501,11 @@ func TestHandlePostMessage_RefusesRoomFromAnotherGatewayTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
 	}
-	sender, err := store.AddMember(ctx, tenantB, r.ID, "agt_sender", tenantB, nil, room.ContextCommitment{})
+	sender, err := store.AddMember(ctx, tenantB, r.ID, "agt_sender", tenantB, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
-	recipient, err := store.AddMember(ctx, tenantB, r.ID, "agt_recipient", tenantB, nil, room.ContextCommitment{})
+	recipient, err := store.AddMember(ctx, tenantB, r.ID, "agt_recipient", tenantB, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}

@@ -207,7 +207,7 @@ func mustCreateRoom(t *testing.T, s room.Store, goal string) *room.Room {
 
 func mustAddMember(t *testing.T, s room.Store, roomID, agentID string) *room.Member {
 	t.Helper()
-	m, err := s.AddMember(context.Background(), tenantA, roomID, agentID, tenantA, nil, room.ContextCommitment{})
+	m, err := s.AddMember(context.Background(), tenantA, roomID, agentID, tenantA, nil, nil, room.ContextCommitment{})
 	if err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}

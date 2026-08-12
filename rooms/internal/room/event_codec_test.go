@@ -41,12 +41,14 @@ func sampleEvent(kind room.EventKind) *room.Event {
 			Member: &room.Member{
 				ID:      "mem_123",
 				AgentID: "agt_456",
-				// StartingContext deliberately holds sentinel content
-				// (sentinelOnboardingContext below): it must never survive a
+				// AdmittedMemory and CallerDocuments deliberately hold
+				// sentinel content (sentinelOnboardingContext and
+				// sentinelCallerDocument below): neither must ever survive a
 				// marshal/unmarshal round trip — see
 				// TestMarshalEvent_MemberJoined_DropsOnboardingContext.
 				JoinedAt:        fixedTimestamp,
-				StartingContext: []string{sentinelOnboardingContext, "line two"},
+				AdmittedMemory:  []string{sentinelOnboardingContext, "line two"},
+				CallerDocuments: []string{sentinelCallerDocument},
 				Context: room.ContextCommitment{
 					Digest:        "sha256:" + strings.Repeat("ab", 32),
 					State:         "partial",
@@ -366,10 +368,10 @@ func assertEventsEqual(t *testing.T, want, got *room.Event) {
 }
 
 // assertMembersEqual compares two Members field by field, except
-// StartingContext and ContextReplayable: a Member decoded off the wire never
-// carries onboarding content, however it was assembled before marshaling —
-// see TestMarshalEvent_MemberJoined_DropsOnboardingContext, which checks that
-// asymmetry directly.
+// AdmittedMemory, CallerDocuments, and ContextReplayable: a Member decoded
+// off the wire never carries onboarding content, however it was assembled
+// before marshaling — see TestMarshalEvent_MemberJoined_DropsOnboardingContext,
+// which checks that asymmetry directly.
 func assertMembersEqual(t *testing.T, want, got *room.Member) {
 	t.Helper()
 
@@ -388,24 +390,34 @@ func assertMembersEqual(t *testing.T, want, got *room.Member) {
 	if got.ContextReplayable {
 		t.Error("Member.ContextReplayable = true for a decoded event, want false")
 	}
-	if len(got.StartingContext) != 0 {
-		t.Errorf("Member.StartingContext = %v, want empty (never persisted)", got.StartingContext)
+	if len(got.AdmittedMemory) != 0 {
+		t.Errorf("Member.AdmittedMemory = %v, want empty (never persisted)", got.AdmittedMemory)
+	}
+	if len(got.CallerDocuments) != 0 {
+		t.Errorf("Member.CallerDocuments = %v, want empty (never persisted)", got.CallerDocuments)
 	}
 }
 
-// sentinelOnboardingContext is recognizable onboarding content used to prove
-// it never reaches a persisted event's wire bytes. Also used by
+// sentinelOnboardingContext is recognizable admitted-memory content used to
+// prove it never reaches a persisted event's wire bytes. Also used by
 // postgres_test.go (integration-tagged, same package) to check the same
 // thing end to end against room_events.payload.
 const sentinelOnboardingContext = "SENTINEL: this member's real onboarding content must never be persisted"
 
+// sentinelCallerDocument is recognizable caller-document content, distinct
+// from sentinelOnboardingContext, used alongside it to prove admitted memory
+// and caller documents both drop from persisted wire bytes and stay
+// distinguishable from each other everywhere they do survive. Also used by
+// postgres_test.go.
+const sentinelCallerDocument = "SENTINEL: this member's real caller document must never be persisted"
+
 // TestMarshalEvent_MemberJoined_DropsOnboardingContext is the acceptance
-// check for the member_joined payload shape: onboarding context is governed
-// memory-backend content Rooms does not own a durable copy of, so it must
-// never reach room_events.payload, however recognizable the content. This
-// proves it at the wire-bytes level, not just by checking the decoded
-// struct — a leak that survived marshaling but got dropped on decode would
-// still have written the content to storage.
+// check for the member_joined payload shape: onboarding context — admitted
+// memory and caller documents alike — is content Rooms does not own a
+// durable copy of, so neither must ever reach room_events.payload, however
+// recognizable the content. This proves it at the wire-bytes level, not just
+// by checking the decoded struct — a leak that survived marshaling but got
+// dropped on decode would still have written the content to storage.
 func TestMarshalEvent_MemberJoined_DropsOnboardingContext(t *testing.T) {
 	t.Parallel()
 
@@ -418,7 +430,8 @@ func TestMarshalEvent_MemberJoined_DropsOnboardingContext(t *testing.T) {
 				ID:                "mem_123",
 				AgentID:           "agt_456",
 				JoinedAt:          fixedTimestamp,
-				StartingContext:   []string{sentinelOnboardingContext},
+				AdmittedMemory:    []string{sentinelOnboardingContext},
+				CallerDocuments:   []string{sentinelCallerDocument},
 				Context:           room.ContextCommitment{Digest: "sha256:" + strings.Repeat("cd", 32), State: "ready", Admitted: 1},
 				ContextReplayable: true,
 			},
@@ -430,10 +443,16 @@ func TestMarshalEvent_MemberJoined_DropsOnboardingContext(t *testing.T) {
 		t.Fatalf("MarshalEvent: %v", err)
 	}
 	if strings.Contains(string(data), sentinelOnboardingContext) {
-		t.Fatalf("marshaled event bytes contain the onboarding-context sentinel: %s", data)
+		t.Fatalf("marshaled event bytes contain the admitted-memory sentinel: %s", data)
+	}
+	if strings.Contains(string(data), sentinelCallerDocument) {
+		t.Fatalf("marshaled event bytes contain the caller-document sentinel: %s", data)
 	}
 	if strings.Contains(string(data), "starting_context") {
 		t.Fatalf("marshaled event bytes contain a starting_context field: %s", data)
+	}
+	if strings.Contains(string(data), "admitted_memory") || strings.Contains(string(data), "caller_documents") {
+		t.Fatalf("marshaled event bytes contain an admitted_memory or caller_documents field: %s", data)
 	}
 
 	got, err := room.UnmarshalEvent(data)
@@ -444,8 +463,11 @@ func TestMarshalEvent_MemberJoined_DropsOnboardingContext(t *testing.T) {
 	if !ok {
 		t.Fatalf("Payload type = %T, want room.MemberJoinedPayload", got.Payload)
 	}
-	if len(payload.Member.StartingContext) != 0 {
-		t.Errorf("decoded StartingContext = %v, want empty", payload.Member.StartingContext)
+	if len(payload.Member.AdmittedMemory) != 0 {
+		t.Errorf("decoded AdmittedMemory = %v, want empty", payload.Member.AdmittedMemory)
+	}
+	if len(payload.Member.CallerDocuments) != 0 {
+		t.Errorf("decoded CallerDocuments = %v, want empty", payload.Member.CallerDocuments)
 	}
 	if payload.Member.ContextReplayable {
 		t.Error("decoded ContextReplayable = true, want false")

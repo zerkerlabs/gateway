@@ -202,7 +202,7 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 			s := newStore()
 			r := mustCreateRoom(t, s, tenantA, "goal")
 
-			m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+			m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 			if err != nil {
 				t.Fatalf("AddMember: %v", err)
 			}
@@ -231,7 +231,7 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 			s := newStore()
 			r := mustCreateRoom(t, s, tenantA, "goal")
 
-			_, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantB, nil, room.ContextCommitment{})
+			_, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantB, nil, nil, room.ContextCommitment{})
 			if !errors.Is(err, room.ErrTenantMismatch) {
 				t.Errorf("err = %v, want ErrTenantMismatch", err)
 			}
@@ -251,7 +251,7 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 			s := newStore()
 			r := mustCreateRoom(t, s, tenantA, "goal")
 
-			_, err := s.AddMember(context.Background(), tenantB, r.ID, "agt_1", tenantB, nil, room.ContextCommitment{})
+			_, err := s.AddMember(context.Background(), tenantB, r.ID, "agt_1", tenantB, nil, nil, room.ContextCommitment{})
 			if !errors.Is(err, room.ErrNotFound) {
 				t.Errorf("err = %v, want ErrNotFound", err)
 			}
@@ -272,7 +272,7 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 				Reasons:       []string{"policy_withheld"},
 			}
 
-			m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, commitment)
+			m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, commitment)
 			if err != nil {
 				t.Fatalf("AddMember: %v", err)
 			}
@@ -284,30 +284,41 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 			}
 		})
 
-		t.Run("carries the caller-supplied starting context", func(t *testing.T) {
+		t.Run("keeps admitted memory and caller documents distinguishable", func(t *testing.T) {
 			t.Parallel()
 
 			s := newStore()
 			r := mustCreateRoom(t, s, tenantA, "goal")
-			startingContext := []string{"memory entry", "onboarding doc"}
+			admittedMemory := []string{"memory entry"}
+			callerDocuments := []string{"onboarding doc"}
 
-			m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, startingContext, room.ContextCommitment{})
+			m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, admittedMemory, callerDocuments, room.ContextCommitment{})
 			if err != nil {
 				t.Fatalf("AddMember: %v", err)
 			}
-			if !slices.Equal(m.StartingContext, startingContext) {
-				t.Errorf("StartingContext = %v, want %v", m.StartingContext, startingContext)
+			if !slices.Equal(m.AdmittedMemory, admittedMemory) {
+				t.Errorf("AdmittedMemory = %v, want %v", m.AdmittedMemory, admittedMemory)
+			}
+			if !slices.Equal(m.CallerDocuments, callerDocuments) {
+				t.Errorf("CallerDocuments = %v, want %v", m.CallerDocuments, callerDocuments)
 			}
 
-			// Mutating the caller's slice after the call must not leak into the
-			// store (same isolation guarantee as testReturnedValuesAreIsolated).
-			startingContext[0] = "mutated"
+			// Mutating the caller's slices after the call must not leak into
+			// the store (same isolation guarantee as
+			// testReturnedValuesAreIsolated), and the two fields must stay
+			// distinguishable through a fresh read, not just on the value
+			// AddMember handed back.
+			admittedMemory[0] = "mutated"
+			callerDocuments[0] = "mutated"
 			got, err := s.GetRoom(context.Background(), tenantA, r.ID)
 			if err != nil {
 				t.Fatalf("GetRoom: %v", err)
 			}
-			if got.Members[0].StartingContext[0] != "memory entry" {
-				t.Errorf("stored StartingContext[0] = %q, want %q (caller mutation leaked into store)", got.Members[0].StartingContext[0], "memory entry")
+			if got.Members[0].AdmittedMemory[0] != "memory entry" {
+				t.Errorf("stored AdmittedMemory[0] = %q, want %q (caller mutation leaked into store)", got.Members[0].AdmittedMemory[0], "memory entry")
+			}
+			if got.Members[0].CallerDocuments[0] != "onboarding doc" {
+				t.Errorf("stored CallerDocuments[0] = %q, want %q (caller mutation leaked into store)", got.Members[0].CallerDocuments[0], "onboarding doc")
 			}
 		})
 	})
@@ -323,7 +334,7 @@ func testReturnedValuesAreIsolated(t *testing.T, newStore func() room.Store) {
 
 		s := newStore()
 		r := mustCreateRoom(t, s, tenantA, "goal")
-		if _, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{}); err != nil {
+		if _, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{}); err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
 
@@ -351,7 +362,7 @@ func testAppendMessageRoundTrip(t *testing.T, newStore func() room.Store) {
 
 		s := newStore()
 		r := mustCreateRoom(t, s, tenantA, "goal")
-		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -422,7 +433,7 @@ func testAppendMessageMemberFromAnotherRoomRejected(t *testing.T, newStore func(
 		r1 := mustCreateRoom(t, s, tenantA, "first")
 		r2 := mustCreateRoom(t, s, tenantA, "second")
 
-		member, err := s.AddMember(context.Background(), tenantA, r1.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+		member, err := s.AddMember(context.Background(), tenantA, r1.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -448,7 +459,7 @@ func testAppendMessageConcurrentDoNotRace(t *testing.T, newStore func() room.Sto
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
 		}
-		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -519,7 +530,7 @@ func testEventsSequenceNumbering(t *testing.T, newStore func() room.Store) {
 
 		s := newStore()
 		r := mustCreateRoom(t, s, tenantA, "goal")
-		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -573,7 +584,7 @@ func testMessagesReplaysTranscriptFromEvents(t *testing.T, newStore func() room.
 
 		s := newStore()
 		r := mustCreateRoom(t, s, tenantA, "goal")
-		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -623,7 +634,7 @@ func testAppendMessageTurnBudgetExhaustionAbandonsRoom(t *testing.T, newStore fu
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
 		}
-		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -714,7 +725,7 @@ func testMemberAgentID(t *testing.T, newStore func() room.Store) {
 
 		s := newStore()
 		r := mustCreateRoom(t, s, tenantA, "goal")
-		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, room.ContextCommitment{})
+		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -757,11 +768,11 @@ func testRecordDeliveryFailure(t *testing.T, newStore func() room.Store) {
 
 		s := newStore()
 		r := mustCreateRoom(t, s, tenantA, "goal")
-		sender, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, room.ContextCommitment{})
+		sender, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
-		recipient, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_recipient", tenantA, nil, room.ContextCommitment{})
+		recipient, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_recipient", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -853,7 +864,7 @@ func testTerminatedRoomRejectsAppends(t *testing.T, newStore func() room.Store) 
 				name: "abandoned via turn budget exhaustion",
 				terminate: func(t *testing.T, s room.Store, roomID string) {
 					t.Helper()
-					member, err := s.AddMember(context.Background(), tenantA, roomID, "agt_budget_burner", tenantA, nil, room.ContextCommitment{})
+					member, err := s.AddMember(context.Background(), tenantA, roomID, "agt_budget_burner", tenantA, nil, nil, room.ContextCommitment{})
 					if err != nil {
 						t.Fatalf("AddMember: %v", err)
 					}
@@ -880,7 +891,7 @@ func testTerminatedRoomRejectsAppends(t *testing.T, newStore func() room.Store) 
 				}
 				tt.terminate(t, s, r.ID)
 
-				member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_late", tenantA, nil, room.ContextCommitment{})
+				member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_late", tenantA, nil, nil, room.ContextCommitment{})
 				if err == nil {
 					t.Errorf("AddMember on terminated room: got member %+v, want ErrRoomTerminated", member)
 				} else if !errors.Is(err, room.ErrRoomTerminated) {
@@ -964,7 +975,7 @@ func testReserveTurnRunsTheSameChecksAsAppendMessage(t *testing.T, newStore func
 				if err != nil {
 					t.Fatalf("CreateRoomWithBudget: %v", err)
 				}
-				m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, room.ContextCommitment{})
+				m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 				if err != nil {
 					t.Fatalf("AddMember: %v", err)
 				}
@@ -997,7 +1008,7 @@ func testReserveTurnOutOfTurnsAbandonsTheRoomLikeAppendMessage(t *testing.T, new
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
 		}
-		m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, room.ContextCommitment{})
+		m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -1035,7 +1046,7 @@ func testReserveTurnHoldsTheTurnUntilResolved(t *testing.T, newStore func() room
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
 		}
-		m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, room.ContextCommitment{})
+		m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -1093,11 +1104,11 @@ func testCommitTurnRecordsTheMessageEvenIfTheRoomTerminatedMeanwhile(t *testing.
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
 		}
-		sender, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, room.ContextCommitment{})
+		sender, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
-		recipient, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_recipient", tenantA, nil, room.ContextCommitment{})
+		recipient, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_recipient", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
 			t.Fatalf("AddMember: %v", err)
 		}
@@ -1157,7 +1168,7 @@ func testReservationResolvesOnlyOnce(t *testing.T, newStore func() room.Store) {
 
 				s := newStore()
 				r := mustCreateRoom(t, s, tenantA, "goal")
-				m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, room.ContextCommitment{})
+				m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 				if err != nil {
 					t.Fatalf("AddMember: %v", err)
 				}

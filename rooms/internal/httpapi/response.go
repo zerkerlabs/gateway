@@ -20,10 +20,10 @@ type roomResponse struct {
 	Transcript []messageResponse `json:"transcript"`
 }
 
-// memberResponse is the JSON representation of a Member. StartingContext is
-// deliberately absent: it is governed memory-backend content Rooms does not
-// expose over the API. Context surfaces only that an omission happened and
-// why in bounded terms — never the withheld memory itself.
+// memberResponse is the JSON representation of a Member. AdmittedMemory and
+// CallerDocuments are deliberately absent: they are onboarding content Rooms
+// does not expose over the API. Context surfaces only that an omission
+// happened and why in bounded terms — never the withheld memory itself.
 type memberResponse struct {
 	ID       string          `json:"id"`
 	AgentID  string          `json:"agent_id"`
