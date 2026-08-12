@@ -43,6 +43,9 @@ type Handler struct {
 	// drain them before the process exits — an emitter goroutine must not
 	// outlive the service.
 	emitWG sync.WaitGroup
+	// proposeWG tracks in-flight message-proposal goroutines (proposeMessage)
+	// so Shutdown can drain them the same way it drains emitWG.
+	proposeWG sync.WaitGroup
 	// shutdownCtx is cancelled by Shutdown so an in-flight emission aborts
 	// promptly instead of running out its own timeout.
 	shutdownCtx    context.Context
@@ -68,16 +71,17 @@ func NewHandler(store room.Store, memoryStore memory.Store, gatewayClient Gatewa
 	}
 }
 
-// Shutdown cancels any in-flight receipt emission and waits for its
-// goroutines to finish, so none outlives the service. ctx bounds the wait;
-// if its deadline expires before every goroutine has drained, Shutdown
-// returns ctx.Err().
+// Shutdown cancels any in-flight receipt emission or message proposal and
+// waits for their goroutines to finish, so none outlives the service. ctx
+// bounds the wait; if its deadline expires before every goroutine has
+// drained, Shutdown returns ctx.Err().
 func (h *Handler) Shutdown(ctx context.Context) error {
 	h.shutdownCancel()
 
 	done := make(chan struct{})
 	go func() {
 		h.emitWG.Wait()
+		h.proposeWG.Wait()
 		close(done)
 	}()
 
