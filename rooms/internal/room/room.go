@@ -141,12 +141,19 @@ type ContextCommitment struct {
 	// string so this package's persisted format does not depend on the
 	// memory package's type.
 	State string
-	// Admitted, Withheld, and BudgetDropped mirror memory.Counts: how many
-	// entries the backend admitted into StartingContext, withheld by policy,
-	// and dropped for budget.
+	// Retrieved, Admitted, Withheld, and BudgetDropped mirror memory.Counts:
+	// how many entries the backend considered before applying policy or
+	// budget, how many ended up in StartingContext, and how many did not,
+	// partitioned by why.
+	Retrieved     int
 	Admitted      int
 	Withheld      int
 	BudgetDropped int
+	// Reasons mirrors memory.Omissions.Reasons: the bounded, deduplicated
+	// set of reasons memory was withheld or dropped for budget. Like
+	// Omissions.Reasons, it never carries a per-memory identifier or an
+	// internal policy rule name.
+	Reasons []string
 }
 
 // Message is one member's contribution to a room.

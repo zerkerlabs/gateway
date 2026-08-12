@@ -20,11 +20,35 @@ type roomResponse struct {
 	Transcript []messageResponse `json:"transcript"`
 }
 
-// memberResponse is the JSON representation of a Member.
+// memberResponse is the JSON representation of a Member. StartingContext is
+// deliberately absent: it is governed memory-backend content Rooms does not
+// expose over the API. Context surfaces only that an omission happened and
+// why in bounded terms — never the withheld memory itself.
 type memberResponse struct {
-	ID       string    `json:"id"`
-	AgentID  string    `json:"agent_id"`
-	JoinedAt time.Time `json:"joined_at"`
+	ID       string          `json:"id"`
+	AgentID  string          `json:"agent_id"`
+	JoinedAt time.Time       `json:"joined_at"`
+	Context  contextResponse `json:"context"`
+}
+
+// contextResponse is the JSON representation of a room.ContextCommitment: a
+// member's onboarding-context outcome without the context content itself.
+// It is present for every State, ready and empty included, so a caller never
+// has to infer the outcome from a field's absence.
+type contextResponse struct {
+	State           string         `json:"state"`
+	Counts          countsResponse `json:"counts"`
+	OmissionReasons []string       `json:"omission_reasons"`
+}
+
+// countsResponse is the JSON representation of a room.ContextCommitment's
+// counts: how many memories the backend considered, how many were admitted,
+// and how many were not, partitioned by why.
+type countsResponse struct {
+	Retrieved     int `json:"retrieved"`
+	Admitted      int `json:"admitted"`
+	Withheld      int `json:"withheld"`
+	BudgetDropped int `json:"budget_dropped"`
 }
 
 // messageResponse is the JSON representation of a Message. ToMemberID is
@@ -62,10 +86,24 @@ func toRoomResponse(r *room.Room, transcript []*room.Message) roomResponse {
 }
 
 func toMemberResponse(m *room.Member) memberResponse {
+	reasons := m.Context.Reasons
+	if reasons == nil {
+		reasons = []string{}
+	}
 	return memberResponse{
 		ID:       m.ID,
 		AgentID:  m.AgentID,
 		JoinedAt: m.JoinedAt,
+		Context: contextResponse{
+			State: m.Context.State,
+			Counts: countsResponse{
+				Retrieved:     m.Context.Retrieved,
+				Admitted:      m.Context.Admitted,
+				Withheld:      m.Context.Withheld,
+				BudgetDropped: m.Context.BudgetDropped,
+			},
+			OmissionReasons: reasons,
+		},
 	}
 }
 

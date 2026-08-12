@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -664,9 +665,11 @@ func TestPG_AddMember_ContextCommitmentPersistedNotContent(t *testing.T) {
 	commitment := room.ContextCommitment{
 		Digest:        "sha256:" + strings.Repeat("ab", 32),
 		State:         "partial",
+		Retrieved:     4,
 		Admitted:      2,
 		Withheld:      1,
 		BudgetDropped: 3,
+		Reasons:       []string{"policy_withheld", "budget"},
 	}
 	m, err := s.AddMember(ctx, tenantA, r.ID, "agt_1", tenantA, []string{sentinelOnboardingContext}, commitment)
 	if err != nil {
@@ -712,7 +715,7 @@ func TestPG_AddMember_ContextCommitmentPersistedNotContent(t *testing.T) {
 	if replayed.ContextReplayable {
 		t.Error("replayed member ContextReplayable = true, want false")
 	}
-	if replayed.Context != commitment {
+	if !reflect.DeepEqual(replayed.Context, commitment) {
 		t.Errorf("replayed Context = %+v, want %+v", replayed.Context, commitment)
 	}
 }
