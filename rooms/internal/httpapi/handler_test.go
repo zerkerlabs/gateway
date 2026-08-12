@@ -109,6 +109,14 @@ func newMuxWithMemoryAndGateway(t *testing.T, memoryStore memory.Store, gatewayC
 // *httpapi.Handler itself so a test can call Shutdown.
 func newMuxWithReceipts(t *testing.T, memoryStore memory.Store, gatewayClient httpapi.GatewayCaller, emitter receipt.Emitter) (http.Handler, room.Store, *httpapi.Handler) {
 	t.Helper()
+	if memoryStore == nil {
+		// Posting a message proposes it to the memory backend
+		// (Handler.proposeMessage), so a nil memoryStore here — used by
+		// tests that only care about gateway or receipt behaviour — would
+		// panic the moment a message is posted. Default it rather than
+		// making every such test pass one explicitly.
+		memoryStore = memory.NewFake()
+	}
 	store := room.NewMemoryStore()
 	h := httpapi.NewHandler(store, memoryStore, gatewayClient, emitter, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
