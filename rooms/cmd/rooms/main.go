@@ -10,6 +10,11 @@
 // This entrypoint serves the operational routes plus the v1 room API: create
 // a room, read it back, seat a member, post a message, and read the room's
 // receipts.
+//
+// It supports two deployment modes, selected by ROOMS_DATABASE_URL: durable
+// (a Postgres store, migrated automatically at startup) when it is set, and
+// ephemeral (an in-memory store, evaluation only) when it is not. See
+// openStore and the README's database section.
 package main
 
 import (
@@ -27,6 +32,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	roomsdb "github.com/zerkerlabs/gateway/rooms/db"
 	"github.com/zerkerlabs/gateway/rooms/internal/auth"
 	"github.com/zerkerlabs/gateway/rooms/internal/gateway"
 	"github.com/zerkerlabs/gateway/rooms/internal/httpapi"
@@ -71,20 +79,18 @@ func run(logger *slog.Logger) error {
 	// open by a crash has to be resolved one way or the other before this
 	// process starts taking traffic for the room that holds it.
 	//
-	// This is still the in-memory store, which means the sweep below has
-	// nothing to find: a MemoryStore starts empty, so nothing survives the
-	// restart it is meant to recover from. That is deliberate and not a gap
-	// in the reconciliation work — PostgresStore implements the whole Store
-	// interface, including reservations, and is covered by its own tests.
-	// Choosing the store from configuration is separate, separately reviewed
-	// work, because it also owns the connection string, pool lifecycle, and
-	// running migrations at startup.
-	//
-	// Until that lands, restart-survival is real in the store and inert in
-	// the service. Anyone reading this line to answer "do reservations
-	// survive a crash in production?" should read it as: not yet, and this
-	// is the line that will change.
-	store := room.NewMemoryStore()
+	// openStore selects the implementation from configuration: a configured
+	// ROOMS_DATABASE_URL selects the durable PostgresStore (pool opened,
+	// migrations applied); its absence selects the ephemeral MemoryStore. A
+	// MemoryStore starts empty, so the reconciliation sweep below has nothing
+	// to find there — that is expected, not a gap, since ephemeral mode by
+	// definition has nothing to survive a restart.
+	store, closeStore, err := openStore(ctx, logger)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer closeStore()
+
 	if err := room.ReconcileReservations(ctx, store, gwClient, reconcileTimeoutFromEnv(logger), logger); err != nil {
 		return fmt.Errorf("reconcile turn reservations: %w", err)
 	}
@@ -256,6 +262,131 @@ func durationFromEnv(logger *slog.Logger, key string) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// defaultDatabaseMaxConns, defaultDatabaseMinConns, and
+// defaultDatabaseMaxConnIdleTime are the pool defaults used when their
+// respective ROOMS_DATABASE_* variables are unset.
+const (
+	defaultDatabaseMaxConns        = 10
+	defaultDatabaseMinConns        = 2
+	defaultDatabaseMaxConnIdleTime = 5 * time.Minute
+)
+
+// poolConfig is Rooms' configurable connection-pool tuning for the durable
+// store, with sane defaults so ROOMS_DATABASE_URL alone is enough to run
+// durably.
+type poolConfig struct {
+	MaxConns        int32
+	MinConns        int32
+	MaxConnIdleTime time.Duration
+}
+
+// poolConfigFromEnv reads the pool tuning variables, applying documented
+// defaults for anything unset and rejecting anything malformed rather than
+// silently falling back — an operator who set a pool variable and got a typo
+// past startup would only find out under load.
+func poolConfigFromEnv() (poolConfig, error) {
+	maxConns := int32(defaultDatabaseMaxConns)
+	if v := os.Getenv("ROOMS_DATABASE_MAX_CONNS"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil || n <= 0 {
+			return poolConfig{}, fmt.Errorf("ROOMS_DATABASE_MAX_CONNS must be a positive integer, got %q", v)
+		}
+		maxConns = int32(n) //nolint:gosec // bounded to int32 by ParseInt's bitSize=32
+	}
+
+	minConns := int32(defaultDatabaseMinConns)
+	if v := os.Getenv("ROOMS_DATABASE_MIN_CONNS"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil || n < 0 {
+			return poolConfig{}, fmt.Errorf("ROOMS_DATABASE_MIN_CONNS must be a non-negative integer, got %q", v)
+		}
+		minConns = int32(n) //nolint:gosec // bounded to int32 by ParseInt's bitSize=32
+	}
+	if minConns > maxConns {
+		return poolConfig{}, fmt.Errorf("ROOMS_DATABASE_MIN_CONNS (%d) must not exceed ROOMS_DATABASE_MAX_CONNS (%d)", minConns, maxConns)
+	}
+
+	maxConnIdleTime := defaultDatabaseMaxConnIdleTime
+	if v := os.Getenv("ROOMS_DATABASE_MAX_CONN_IDLE_TIME"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return poolConfig{}, fmt.Errorf("ROOMS_DATABASE_MAX_CONN_IDLE_TIME: %w", err)
+		}
+		maxConnIdleTime = d
+	}
+
+	return poolConfig{MaxConns: maxConns, MinConns: minConns, MaxConnIdleTime: maxConnIdleTime}, nil
+}
+
+// openStore selects Rooms' room.Store implementation from configuration. A
+// configured ROOMS_DATABASE_URL selects the durable PostgresStore: the pool
+// is opened and tuned, connectivity is verified, and pending migrations are
+// applied before the store is handed back. Its absence selects the ephemeral
+// MemoryStore, logged loudly as non-durable.
+//
+// Rooms never falls back to the in-memory store on a database failure — a
+// malformed or unreachable ROOMS_DATABASE_URL fails startup instead. Silently
+// downgrading to ephemeral would let a self-hoster who configured a database
+// lose data while believing it was safe.
+//
+// The returned close function releases the pool (a no-op for the in-memory
+// store) and must be called on shutdown.
+func openStore(ctx context.Context, logger *slog.Logger) (room.Store, func(), error) {
+	dbURL := os.Getenv("ROOMS_DATABASE_URL")
+	if dbURL == "" {
+		logger.Warn("rooms: ROOMS_DATABASE_URL is not set — running in EPHEMERAL mode with the " +
+			"in-memory store. ALL ROOM STATE IS NON-DURABLE AND WILL BE LOST ON RESTART. " +
+			"This mode is for evaluation only; configure ROOMS_DATABASE_URL for production use.")
+		return room.NewMemoryStore(), func() {}, nil
+	}
+
+	pool, err := openDatabasePool(ctx, dbURL)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := roomsdb.Migrate(ctx, pool); err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("run migrations: %w", err)
+	}
+
+	logger.Info("rooms: running in DURABLE mode with the Postgres store",
+		"max_conns", pool.Config().MaxConns, "min_conns", pool.Config().MinConns)
+
+	return room.NewPostgresStore(pool), pool.Close, nil
+}
+
+// openDatabasePool parses dbURL, applies the configured pool tuning, and
+// opens the pool — pinging it to turn an unreachable database into a startup
+// failure rather than a failure on the first request. A malformed dbURL fails
+// at ParseConfig, before any connection is attempted.
+func openDatabasePool(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse ROOMS_DATABASE_URL: %w", err)
+	}
+
+	poolCfg, err := poolConfigFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	cfg.MaxConns = poolCfg.MaxConns
+	cfg.MinConns = poolCfg.MinConns
+	cfg.MaxConnIdleTime = poolCfg.MaxConnIdleTime
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("open database pool: %w", err)
+	}
+
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+
+	return pool, nil
 }
 
 // defaultContextBudgetTokens is used when ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS is
