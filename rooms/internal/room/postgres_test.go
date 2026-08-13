@@ -1315,3 +1315,138 @@ func TestPG_RecordDelivery_CrossTenantBlocked(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
+
+// ------------------------------------------------- reservation durability ---
+//
+// The point of the reservation table is that a reservation outlives the
+// process that took it. These tests are the only place that claim is actually
+// checked against Postgres: they resolve a reservation through a *second*
+// PostgresStore built on the same database, which is what a restart is. The
+// reconciliation tests in reconcile_test.go cover the recovery logic, but they
+// run against MemoryStore, which cannot survive a crash by construction — so
+// without these, "reservations are persisted before the proxy call" would be
+// unproven on the only store where it means anything.
+
+// restartedStore returns a second PostgresStore over the same pool — a stand-in
+// for the process restarting with its in-memory state gone but its database
+// intact.
+func restartedStore(pool *pgxpool.Pool) *room.PostgresStore {
+	return room.NewPostgresStore(pool)
+}
+
+// reservedRoom creates a room, seats a sender and a recipient, and reserves a
+// turn for a message between them: the state a crash mid-delivery leaves behind.
+func reservedRoom(t *testing.T, s *room.PostgresStore) (*room.Room, *room.Reservation) {
+	t.Helper()
+	ctx := context.Background()
+
+	r, err := s.CreateRoom(ctx, tenantA, "goal")
+	if err != nil {
+		t.Fatalf("CreateRoom: %v", err)
+	}
+	sender, err := s.AddMember(ctx, tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
+	if err != nil {
+		t.Fatalf("AddMember(sender): %v", err)
+	}
+	recipient, err := s.AddMember(ctx, tenantA, r.ID, "agt_recipient", tenantA, nil, nil, room.ContextCommitment{})
+	if err != nil {
+		t.Fatalf("AddMember(recipient): %v", err)
+	}
+
+	res, err := s.ReserveTurn(ctx, tenantA, r.ID, room.PendingMessage{
+		MemberID:   sender.ID,
+		ToMemberID: recipient.ID,
+		Body:       "crashed mid-delivery",
+	})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	return r, res
+}
+
+func TestPG_ReserveTurn_ReservationSurvivesRestart(t *testing.T) {
+	s, pool := newPGStore(t)
+	r, _ := reservedRoom(t, s)
+
+	// The restart: nothing of the reserving process survives except the rows.
+	pending, err := restartedStore(pool).PendingReservations(context.Background())
+	if err != nil {
+		t.Fatalf("PendingReservations: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending = %d reservations, want 1 — the reservation did not survive the restart", len(pending))
+	}
+
+	pr := pending[0]
+	if pr.RoomID != r.ID || pr.TenantID != tenantA {
+		t.Errorf("pending reservation = room %q tenant %q, want %q / %q", pr.RoomID, pr.TenantID, r.ID, tenantA)
+	}
+	// The recipient's agent ID is what reconciliation needs to ask the gateway
+	// about the call; it comes from the join, not from the reservation row.
+	if pr.ToAgentID != "agt_recipient" {
+		t.Errorf("ToAgentID = %q, want %q", pr.ToAgentID, "agt_recipient")
+	}
+	if pr.InvocationID != "" {
+		t.Errorf("InvocationID = %q, want empty — none was attached", pr.InvocationID)
+	}
+	if pr.Reservation == nil {
+		t.Fatal("Reservation = nil, want a reservation the recovered store can resolve")
+	}
+}
+
+func TestPG_AttachReservationInvocation_SurvivesRestart(t *testing.T) {
+	s, pool := newPGStore(t)
+	_, res := reservedRoom(t, s)
+
+	if err := s.AttachReservationInvocation(context.Background(), res, "inv_landed"); err != nil {
+		t.Fatalf("AttachReservationInvocation: %v", err)
+	}
+
+	pending, err := restartedStore(pool).PendingReservations(context.Background())
+	if err != nil {
+		t.Fatalf("PendingReservations: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending = %d reservations, want 1", len(pending))
+	}
+	// Without this the reservation is unreconcilable: there is no ID to ask
+	// the gateway about, so recovery can only release and log a known gap.
+	if pending[0].InvocationID != "inv_landed" {
+		t.Errorf("InvocationID = %q, want %q — the attached ID did not persist", pending[0].InvocationID, "inv_landed")
+	}
+}
+
+func TestPG_ResolvedReservationsAreNotPendingAfterRestart(t *testing.T) {
+	// A resolved reservation must leave nothing behind. If it did, the next
+	// startup would reconcile a call that was already accounted for and either
+	// double-record the delivery or spend the turn twice.
+	for _, tc := range []struct {
+		name    string
+		resolve func(*room.PostgresStore, *room.Reservation) error
+	}{
+		{"committed", func(s *room.PostgresStore, res *room.Reservation) error {
+			_, err := s.CommitTurn(context.Background(), res)
+			return err
+		}},
+		{"released", func(s *room.PostgresStore, res *room.Reservation) error {
+			return s.ReleaseTurn(context.Background(), res)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, pool := newPGStore(t)
+			_, res := reservedRoom(t, s)
+
+			if err := tc.resolve(s, res); err != nil {
+				t.Fatalf("resolve (%s): %v", tc.name, err)
+			}
+
+			pending, err := restartedStore(pool).PendingReservations(context.Background())
+			if err != nil {
+				t.Fatalf("PendingReservations: %v", err)
+			}
+			if len(pending) != 0 {
+				t.Errorf("pending = %+v, want none — a %s reservation would be reconciled again on restart", pending, tc.name)
+			}
+		})
+	}
+}
