@@ -109,6 +109,26 @@ type Store interface {
 	// was already committed or released.
 	ReleaseTurn(ctx context.Context, res *Reservation) error
 
+	// AttachReservationInvocation records the gateway invocation ID res's
+	// proxied call was accepted under, once known — before delivery is
+	// confirmed. It exists purely for crash recovery: a reservation left
+	// unresolved by a crash can only be reconciled against the gateway's
+	// invocation record (see ReconcileReservations) if that ID survived the
+	// crash, and the confirmation wait — up to a gateway client's
+	// ConfirmTimeout — is exactly the window a crash leaves the most doubt
+	// in. Attaching it is best-effort by design: it does not change what
+	// Commit or Release do, and a reservation reconciled with no ID attached
+	// is simply released (see ReconcileReservations). Returns
+	// ErrReservationNotHeld if res was already committed or released.
+	AttachReservationInvocation(ctx context.Context, res *Reservation, invocationID string) error
+
+	// PendingReservations returns every reservation currently held across
+	// every tenant this store holds. It is a startup maintenance sweep, not a
+	// caller-scoped read (see ReconcileReservations): a crash's held turns
+	// have to be resolved before any tenant's traffic is served, not looked
+	// up on demand per tenant.
+	PendingReservations(ctx context.Context) ([]*PendingReservation, error)
+
 	// CompleteRoom explicitly marks a room's goal as met. Returns ErrNotFound
 	// if roomID does not exist or belongs to a different tenant, and
 	// ErrRoomTerminated if the room has already reached a terminal state.
@@ -170,13 +190,20 @@ type MemoryStore struct {
 	// Reservations live here rather than on Room so a cloned Room handed to a
 	// caller carries no in-flight bookkeeping.
 	pending map[string]map[string]*Reservation
+	// pendingMeta carries the durability bookkeeping (pendingMeta) for each
+	// entry in pending, keyed the same way (room ID then reservation ID). It
+	// is a separate map, not fields on Reservation, so a caller holding a
+	// *Reservation cannot observe or mutate it directly — see
+	// AttachReservationInvocation and PendingReservations.
+	pendingMeta map[string]map[string]*pendingMeta
 }
 
 // NewMemoryStore returns an empty MemoryStore ready for use.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		rooms:   make(map[string]map[string]*Room),
-		pending: make(map[string]map[string]*Reservation),
+		rooms:       make(map[string]map[string]*Room),
+		pending:     make(map[string]map[string]*Reservation),
+		pendingMeta: make(map[string]map[string]*pendingMeta),
 	}
 }
 
@@ -344,6 +371,22 @@ type Reservation struct {
 	msg       PendingMessage
 }
 
+// PendingReservation is one outstanding turn reservation as seen from outside
+// the store that holds it, carrying what ReconcileReservations needs to
+// resolve it against the gateway: the reservation itself (ready to hand
+// straight to CommitTurn or ReleaseTurn), which tenant and room it belongs
+// to, the recipient agent to ask the gateway about, and the invocation ID the
+// call was accepted under — empty if the crash happened before
+// AttachReservationInvocation ever ran.
+type PendingReservation struct {
+	Reservation  *Reservation
+	TenantID     string
+	RoomID       string
+	ToAgentID    string
+	InvocationID string
+	CreatedAt    time.Time
+}
+
 // ReserveTurn implements Store.
 func (s *MemoryStore) ReserveTurn(ctx context.Context, tenantID, roomID string, msg PendingMessage) (*Reservation, error) {
 	if err := ctx.Err(); err != nil {
@@ -372,7 +415,65 @@ func (s *MemoryStore) ReserveTurn(ctx context.Context, tenantID, roomID string, 
 		s.pending[roomID] = make(map[string]*Reservation)
 	}
 	s.pending[roomID][id] = res
+	if s.pendingMeta[roomID] == nil {
+		s.pendingMeta[roomID] = make(map[string]*pendingMeta)
+	}
+	s.pendingMeta[roomID][id] = &pendingMeta{createdAt: time.Now().UTC()}
 	return res, nil
+}
+
+// pendingMeta carries the durability bookkeeping for one outstanding
+// reservation that isn't part of the reservation/budget protocol itself —
+// when it was made, and the invocation ID it was later accepted under, if
+// any. It lives alongside s.pending rather than on Reservation so a caller
+// holding a *Reservation cannot observe or mutate it directly.
+type pendingMeta struct {
+	invocationID string
+	createdAt    time.Time
+}
+
+// AttachReservationInvocation implements Store.
+func (s *MemoryStore) AttachReservationInvocation(_ context.Context, res *Reservation, invocationID string) error {
+	if res == nil {
+		return ErrReservationNotHeld
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, ok := s.pendingMeta[res.roomID][res.messageID]
+	if !ok {
+		return ErrReservationNotHeld
+	}
+	meta.invocationID = invocationID
+	return nil
+}
+
+// PendingReservations implements Store.
+func (s *MemoryStore) PendingReservations(_ context.Context) ([]*PendingReservation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var out []*PendingReservation
+	for tenantID, rooms := range s.rooms {
+		for roomID, r := range rooms {
+			for msgID, res := range s.pending[roomID] {
+				pr := &PendingReservation{Reservation: res, TenantID: tenantID, RoomID: roomID}
+				for _, m := range r.Members {
+					if m.ID == res.msg.ToMemberID {
+						pr.ToAgentID = m.AgentID
+						break
+					}
+				}
+				if meta, ok := s.pendingMeta[roomID][msgID]; ok {
+					pr.InvocationID = meta.invocationID
+					pr.CreatedAt = meta.createdAt
+				}
+				out = append(out, pr)
+			}
+		}
+	}
+	return out, nil
 }
 
 // CommitTurn implements Store. It does not honour ctx cancellation — see the
@@ -481,6 +582,12 @@ func (s *MemoryStore) dropPending(res *Reservation) bool {
 	delete(held, res.messageID)
 	if len(held) == 0 {
 		delete(s.pending, res.roomID)
+	}
+	if meta, ok := s.pendingMeta[res.roomID]; ok {
+		delete(meta, res.messageID)
+		if len(meta) == 0 {
+			delete(s.pendingMeta, res.roomID)
+		}
 	}
 	return true
 }

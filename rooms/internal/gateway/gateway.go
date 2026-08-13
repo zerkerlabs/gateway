@@ -224,6 +224,13 @@ func New(cfg Config) (*Client, error) {
 }
 
 // Call delivers body to agentID through the gateway's proxy on behalf of
+// tenantID, and returns only once delivery is CONFIRMED. It is Deliver with
+// no onAccepted callback — see Deliver's doc comment for the full behavior.
+func (c *Client) Call(ctx context.Context, tenantID, agentID string, body []byte) (*Result, error) {
+	return c.Deliver(ctx, tenantID, agentID, body, nil)
+}
+
+// Deliver delivers body to agentID through the gateway's proxy on behalf of
 // tenantID, and returns only once delivery is CONFIRMED.
 //
 // tenantID must be the tenant this client's credential acts as (Config.Tenant);
@@ -232,12 +239,22 @@ func New(cfg Config) (*Client, error) {
 // regardless of who it was really for.
 //
 // The proxy is asynchronous: the POST returns 202 with an invocation_id, and
-// the upstream call runs server-side afterwards. Call therefore does two
+// the upstream call runs server-side afterwards. Deliver therefore does two
 // things — it issues the POST, then polls
 // GET /v1/proxy/{agt_id}/invocations/{inv_id} until the invocation is
 // succeeded or failed. Returning at the 202 would report every upstream
 // error, timeout, and unreachable agent as a successful delivery. That polling
-// is synchronous, so a Call can take up to Timeout + ConfirmTimeout.
+// is synchronous, so a call can take up to Timeout + ConfirmTimeout.
+//
+// If onAccepted is non-nil, it is called once, synchronously, with the
+// invocation ID the gateway assigned — as soon as the POST is accepted, before
+// the (possibly long) confirmation poll begins. It exists so a caller that
+// needs the invocation ID to survive a crash can persist it durably before
+// that wait, rather than only learning it once this call already returned:
+// the confirmation poll is exactly the window a crash leaves the most doubt
+// in. onAccepted returns nothing — persisting the ID is best-effort, and a
+// failure to do so must not abort a call that may already be running on the
+// recipient's agent.
 //
 // Failures are classified, never forwarded: a 4xx (on the POST, or as the
 // recipient's own status) is ErrorClassCallerError; a 5xx, network failure, or
@@ -246,7 +263,7 @@ func New(cfg Config) (*Client, error) {
 // ErrorClassUnconfirmed. No raw response body reaches the caller (AGENTS.md
 // invariant #3), and the credential never appears in a returned error
 // (invariant #4).
-func (c *Client) Call(ctx context.Context, tenantID, agentID string, body []byte) (*Result, error) {
+func (c *Client) Deliver(ctx context.Context, tenantID, agentID string, body []byte, onAccepted func(invocationID string)) (*Result, error) {
 	if tenantID != c.tenant {
 		return nil, &CallError{Class: ErrorClassTenantMismatch}
 	}
@@ -260,7 +277,7 @@ func (c *Client) Call(ctx context.Context, tenantID, agentID string, body []byte
 	// the real outcome never recorded.
 	//
 	// Nothing is unbounded as a result: the request timeout bounds each HTTP
-	// call and confirm imposes its own deadline below, so Call still returns
+	// call and confirm imposes its own deadline below, so a call still returns
 	// within Timeout + ConfirmTimeout. Values on ctx (trace IDs and the like)
 	// are preserved.
 	ctx = context.WithoutCancel(ctx)
@@ -268,6 +285,9 @@ func (c *Client) Call(ctx context.Context, tenantID, agentID string, body []byte
 	invocationID, err := c.accept(ctx, agentID, body)
 	if err != nil {
 		return nil, err
+	}
+	if onAccepted != nil {
+		onAccepted(invocationID)
 	}
 	return c.confirm(ctx, agentID, invocationID)
 }
@@ -350,6 +370,17 @@ func (c *Client) confirm(ctx context.Context, agentID, invocationID string) (*Re
 	}
 }
 
+// pollError is what poll returns for a non-2xx response, carrying the status
+// code so a caller like Reconcile can distinguish "not found" from every
+// other unanswerable outcome.
+type pollError struct {
+	statusCode int
+}
+
+func (e *pollError) Error() string {
+	return fmt.Sprintf("gateway: poll returned status %d", e.statusCode)
+}
+
 // poll fetches the invocation's current status and the recipient's HTTP status
 // (zero when the gateway has not recorded one yet).
 func (c *Client) poll(ctx context.Context, agentID, invocationID string) (string, int, error) {
@@ -368,7 +399,7 @@ func (c *Client) poll(ctx context.Context, agentID, invocationID string) (string
 	defer closeBody(resp)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", 0, fmt.Errorf("gateway: poll returned status %d", resp.StatusCode)
+		return "", 0, &pollError{statusCode: resp.StatusCode}
 	}
 
 	var payload struct {
@@ -383,6 +414,48 @@ func (c *Client) poll(ctx context.Context, agentID, invocationID string) (string
 		upstream = *payload.UpstreamStatus
 	}
 	return payload.Status, upstream, nil
+}
+
+// ReconcileOutcome is what Reconcile learned about a previously accepted
+// invocation from a single, unretried check — used to resolve a room's turn
+// reservation left open by a crash (rooms/internal/room.ReconcileReservations).
+type ReconcileOutcome int
+
+const (
+	// ReconcileSucceeded means the invocation reached a terminal succeeded
+	// state: the call landed.
+	ReconcileSucceeded ReconcileOutcome = iota
+	// ReconcileFailed means the invocation reached a terminal failed state:
+	// the call did not land.
+	ReconcileFailed
+	// ReconcileNotFound means the gateway has no record of this invocation ID.
+	ReconcileNotFound
+)
+
+// Reconcile asks the gateway, once, whether the invocation agentID/invocationID
+// identifies has reached a terminal state. Unlike confirm, it does not poll or
+// wait: a pending or running invocation, an unreachable gateway, a non-2xx/404
+// response, or a malformed one all return a non-nil error, since none of them
+// answers the question. That keeps a caller resolving many reservations at
+// startup (room.ReconcileReservations) bounded by its own context deadline
+// rather than by this method retrying internally.
+func (c *Client) Reconcile(ctx context.Context, agentID, invocationID string) (ReconcileOutcome, error) {
+	status, _, err := c.poll(ctx, agentID, invocationID)
+	if err != nil {
+		var pgErr *pollError
+		if errors.As(err, &pgErr) && pgErr.statusCode == http.StatusNotFound {
+			return ReconcileNotFound, nil
+		}
+		return 0, fmt.Errorf("gateway: reconcile invocation %s: %w", invocationID, err)
+	}
+	switch status {
+	case statusSucceeded:
+		return ReconcileSucceeded, nil
+	case statusFailed:
+		return ReconcileFailed, nil
+	default:
+		return 0, fmt.Errorf("gateway: reconcile invocation %s: not yet terminal (status %q)", invocationID, status)
+	}
 }
 
 func closeBody(resp *http.Response) {

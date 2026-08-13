@@ -558,9 +558,21 @@ func TestPG_TurnAccountingMatchesMemoryStore(t *testing.T) {
 // through the Store methods themselves rather than seeding rows with direct
 // SQL — CreateRoom, AddMember, AppendMessage, CompleteRoom,
 // RecordDeliveryFailure, and RecordDelivery are what this file now proves.
-// Turn reservations (ReserveTurn/CommitTurn/ReleaseTurn) are not implemented
-// by PostgresStore yet, so it does not satisfy room.Store and these tests
-// call its concrete methods directly instead of running roomtest.RunContract.
+// These tests call PostgresStore's concrete methods directly rather than
+// running roomtest.RunContract. That is no longer because it cannot satisfy
+// room.Store — ReserveTurn/CommitTurn/ReleaseTurn are implemented above and
+// the compile-time assertion in zz_iface_check_test.go passes. It is because
+// the shared suite calls newStore() per behaviour expecting a clean store,
+// across subtests that run in parallel, while every test here isolates by
+// TRUNCATE-ing shared tables in one database. Pointing the suite at Postgres
+// as-is would have parallel subtests truncating rows out from under each
+// other — not flakiness, guaranteed mutual destruction.
+//
+// Closing that gap needs real per-call isolation (a schema per store, in
+// which case the suite's parallelism can stay untouched), which is a change
+// to how this package's tests get a database and is tracked as its own piece
+// of work. Until then, interface conformance is proven but behavioural
+// equivalence with MemoryStore is not.
 // ============================================================================
 
 // -------------------------------------------------------------- CreateRoom ---

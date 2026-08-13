@@ -157,7 +157,7 @@ func (h *Handler) postAddressedMessage(w http.ResponseWriter, r *http.Request, t
 		}
 	}()
 
-	if !h.deliverToMember(w, r, tenantID, roomID, req) {
+	if !h.deliverToMember(w, r, tenantID, roomID, req, res) {
 		return
 	}
 
@@ -205,8 +205,12 @@ type deliveredMessage struct {
 //
 // Callers must hold a turn reservation for the message (see Store.ReserveTurn)
 // before calling this — it performs a real side effect on another member's
-// agent, and that side effect must be both permitted and recordable.
-func (h *Handler) deliverToMember(w http.ResponseWriter, r *http.Request, tenantID, roomID string, req postMessageRequest) bool {
+// agent, and that side effect must be both permitted and recordable. res is
+// that same reservation: as soon as the gateway accepts the call, its
+// invocation ID is attached to res so a crash during the confirmation wait
+// that follows can still be reconciled against the gateway's own invocation
+// record on the next startup (room.ReconcileReservations).
+func (h *Handler) deliverToMember(w http.ResponseWriter, r *http.Request, tenantID, roomID string, req postMessageRequest, res *room.Reservation) bool {
 	toAgentID, err := h.store.MemberAgentID(r.Context(), tenantID, roomID, req.ToMemberID)
 	if err != nil {
 		switch {
@@ -233,7 +237,17 @@ func (h *Handler) deliverToMember(w http.ResponseWriter, r *http.Request, tenant
 		return false
 	}
 
-	result, callErr := h.gateway.Call(r.Context(), tenantID, toAgentID, payload)
+	result, callErr := h.gateway.Deliver(r.Context(), tenantID, toAgentID, payload, func(invocationID string) {
+		// Best-effort: a failure here does not abort the call, which may
+		// already be running on the recipient's agent. Attaching the ID is
+		// what lets a crash during the confirmation wait below be
+		// reconciled against the gateway on the next startup; losing it
+		// just means that specific reservation falls back to the
+		// gateway-cannot-answer case if a crash does happen here.
+		if err := h.store.AttachReservationInvocation(context.WithoutCancel(r.Context()), res, invocationID); err != nil {
+			h.logger.Error("post message: attach reservation invocation", "err", err)
+		}
+	})
 
 	// What happened to the call is recorded on a context detached from the
 	// request's: the call reached the recipient (or didn't) whether or not the

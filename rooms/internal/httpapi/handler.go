@@ -22,13 +22,17 @@ import (
 // gateway and confirming it actually completed. *gateway.Client satisfies this
 // interface.
 //
-// Call returns only once delivery is confirmed — the gateway's proxy is
+// Deliver returns only once delivery is confirmed — the gateway's proxy is
 // asynchronous, so an accepted call is not yet a delivered one. It takes the
 // tenant the call is made on behalf of: the gateway attributes a proxied call
 // to whichever tenant the credential belongs to, so the tenant has to be
-// carried explicitly rather than assumed.
+// carried explicitly rather than assumed. onAccepted, if non-nil, is called
+// with the gateway's invocation ID as soon as the call is accepted — before
+// the (possibly long) confirmation wait — so a caller can persist it durably
+// against a turn reservation before that wait, in case the process crashes
+// during it (see room.AttachReservationInvocation).
 type GatewayCaller interface {
-	Call(ctx context.Context, tenantID, agentID string, body []byte) (*gateway.Result, error)
+	Deliver(ctx context.Context, tenantID, agentID string, body []byte, onAccepted func(invocationID string)) (*gateway.Result, error)
 }
 
 // Handler holds the shared dependencies for the Rooms HTTP handlers.

@@ -64,7 +64,16 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("init gateway client: %w", err)
 	}
 
-	handler, roomHandler, err := newHandler(logger, gwClient)
+	// A room's store is built up front, rather than inside newMux, so it can
+	// be reconciled before anything is served from it: a reservation left
+	// open by a crash has to be resolved one way or the other before this
+	// process starts taking traffic for the room that holds it.
+	store := room.NewMemoryStore()
+	if err := room.ReconcileReservations(ctx, store, gwClient, reconcileTimeoutFromEnv(logger), logger); err != nil {
+		return fmt.Errorf("reconcile turn reservations: %w", err)
+	}
+
+	handler, roomHandler, err := newHandler(logger, store, gwClient)
 	if err != nil {
 		return err
 	}
@@ -116,7 +125,7 @@ func run(logger *slog.Logger) error {
 // The *httpapi.Handler is also returned so the caller can drain its receipt-
 // emission goroutines on shutdown (Handler.Shutdown) — the auth-wrapped
 // http.Handler above does not expose it.
-func newHandler(logger *slog.Logger, gwClient httpapi.GatewayCaller) (http.Handler, *httpapi.Handler, error) {
+func newHandler(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller) (http.Handler, *httpapi.Handler, error) {
 	// context.Background, not the shutdown context: go-oidc keeps this context
 	// for background JWKS refreshes, and one cancelled at SIGTERM would break
 	// key rotation for the lifetime of the process instead.
@@ -124,7 +133,7 @@ func newHandler(logger *slog.Logger, gwClient httpapi.GatewayCaller) (http.Handl
 	if err != nil {
 		return nil, nil, fmt.Errorf("init auth middleware: %w", err)
 	}
-	mux, roomHandler := newMux(logger, gwClient)
+	mux, roomHandler := newMux(logger, store, gwClient)
 	return mw(mux), roomHandler, nil
 }
 
@@ -135,7 +144,7 @@ func newHandler(logger *slog.Logger, gwClient httpapi.GatewayCaller) (http.Handl
 //
 // It also returns the *httpapi.Handler it registered, so a caller that needs
 // it for shutdown draining does not have to reach back into the mux.
-func newMux(logger *slog.Logger, gwClient httpapi.GatewayCaller) (*http.ServeMux, *httpapi.Handler) {
+func newMux(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller) (*http.ServeMux, *httpapi.Handler) {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthz())
 	mux.Handle("GET /version", versionHandler())
@@ -144,7 +153,7 @@ func newMux(logger *slog.Logger, gwClient httpapi.GatewayCaller) (*http.ServeMux
 	// receipt backends, neither of which exists yet (rooms/internal/memory,
 	// rooms/internal/receipt); real clients wire in here later without
 	// changing the httpapi.Handler seam.
-	roomHandler := httpapi.NewHandler(room.NewMemoryStore(), memory.NewFake(), gwClient, receipt.NewFake(), logger)
+	roomHandler := httpapi.NewHandler(store, memory.NewFake(), gwClient, receipt.NewFake(), logger)
 	roomHandler.RegisterRoutes(mux)
 	return mux, roomHandler
 }
@@ -183,6 +192,14 @@ func gatewayConfigFromEnv(logger *slog.Logger) gateway.Config {
 		Timeout:        durationFromEnv(logger, "ROOMS_GATEWAY_TIMEOUT"),
 		ConfirmTimeout: durationFromEnv(logger, "ROOMS_GATEWAY_CONFIRM_TIMEOUT"),
 	}
+}
+
+// reconcileTimeoutFromEnv reads ROOMS_RECONCILE_TIMEOUT, the bound on the
+// whole startup reservation-reconciliation sweep (room.ReconcileReservations).
+// Unset or invalid falls back to room.DefaultReconcileTimeout — a gateway
+// this process cannot reach must not be able to stop it from starting.
+func reconcileTimeoutFromEnv(logger *slog.Logger) time.Duration {
+	return durationFromEnv(logger, "ROOMS_RECONCILE_TIMEOUT")
 }
 
 // durationFromEnv reads an optional duration, returning zero (which the
