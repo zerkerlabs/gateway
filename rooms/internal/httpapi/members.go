@@ -70,11 +70,15 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	// and seating on that basis is the identical failure arriving with no
 	// error to catch it. Only StateReady, StatePartial, and StateEmpty seat.
 	//
-	// Purpose, Risk, and ContextBudgetTokens are room and tenant policy inputs
-	// this handler does not yet wire up — a separate change.
+	// Purpose is the room's goal: it is the retrieval query a real backend
+	// searches against, not descriptive metadata, and CreateRoom already
+	// requires got.Goal to be non-empty, so it is always safe to send here.
+	// Risk and ContextBudgetTokens are tenant policy inputs this handler does
+	// not yet wire up — a separate change.
 	result, err := h.memoryStore.PrepareContext(r.Context(), memory.PrepareRequest{
 		RoomID:           roomID,
 		AgentID:          req.AgentID,
+		Purpose:          got.Goal,
 		MembershipDigest: membershipDigest(got.Members),
 		RoomStateDigest:  roomStateDigest(got),
 	})

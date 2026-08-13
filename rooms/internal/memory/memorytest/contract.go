@@ -14,16 +14,20 @@
 //
 // A real backend retrieves against PrepareRequest.Purpose — it is the search
 // query, not descriptive metadata. Content whose text shares no term with
-// the purpose is not retrieved at all, and the call returns StateEmpty. The
-// fake ignores Purpose and returns everything in the room, so a suite that
-// left Purpose blank would pass against the fake and fail against every real
-// backend. Every case below therefore states a purpose that shares a term
-// with the content it just wrote, the way a real caller would.
+// the purpose is not retrieved at all, and the call returns StateEmpty. Every
+// implementation, including the fake, must reject an empty Purpose rather
+// than treat it as "match everything" — so every case below states a purpose
+// that shares a term with the content it just wrote, the way a real caller
+// would.
 //
-// # What this suite does NOT cover
+// # Visibility is part of the contract
 //
-// Room-shared versus member-private visibility is not here; see
-// RunVisibilityContract for why it cannot currently be a shared contract.
+// Room-shared versus member-private memory is covered here like any other
+// case: AgentID is always required on a write, and Visibility states which
+// partition the write lands in. A store that leaks member-private memory to
+// another agent in the same room, or that fails to make VisibilityRoom's
+// default behavior room-shared, fails this suite the same way a store that
+// gets StateBudgetExhausted wrong does.
 package memorytest
 
 import (
@@ -289,36 +293,56 @@ func RunContract(t *testing.T, newStore func() memory.Store) {
 			t.Errorf("Memories = %+v, want [mem_newer mem_older] in the order seeded, not chronological order", result.Memories)
 		}
 	})
-}
 
-// RunVisibilityContract pins how a Store decides room-shared versus
-// member-private memory: a write with a blank AgentID is the room speaking and
-// is visible to everyone, a write carrying an AgentID is that member's and is
-// visible only to them.
-//
-// This is deliberately NOT part of RunContract, and only memory.Fake runs it.
-// It is not a shared contract, because the seam cannot currently express
-// visibility to a real backend at all:
-//
-//   - ZMem requires agent_id on every write and rejects a blank one, so "the
-//     room speaking" has no wire representation. It decides visibility from an
-//     explicit visibility field ("room" by default, "member") that
-//     RecordRequest and ProposeRequest have no field for and never send.
-//   - Every write through ZMemClient therefore lands room-visible, and the
-//     member-private case below is not merely unproven against a real backend,
-//     it is false of one.
-//
-// Keeping these cases in RunContract would have asserted, on every run, a
-// privacy property that production does not have — so they live here, run
-// against the fake only, and stay honest about their scope. Rooms v1 ships
-// behind the fake, so the fake's behaviour is still worth pinning.
-//
-// Adding Visibility to the seam and teaching the fake query-driven retrieval
-// folds these cases back into RunContract and removes this function; that
-// work is tracked and is a prerequisite for wiring this client into
-// production, since until then member-private memory is not expressible.
-func RunVisibilityContract(t *testing.T, newStore func() memory.Store) {
-	t.Helper()
+	t.Run("PrepareContext requires a non-empty Purpose", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		if _, err := s.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"}); err == nil {
+			t.Fatal("err = nil, want an error for an empty Purpose")
+		}
+	})
+
+	t.Run("Propose and Record require a non-empty AgentID", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		ctx := context.Background()
+		if _, err := s.Propose(ctx, memory.ProposeRequest{
+			RoomID: "rom_1", Content: "no contributor named",
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err == nil {
+			t.Fatal("Propose: err = nil, want an error for an empty AgentID")
+		}
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: "rom_1", Content: "no contributor named",
+			SourceEventID: "evt_2", IdempotencyKey: "key_2",
+		}); err == nil {
+			t.Fatal("Record: err = nil, want an error for an empty AgentID")
+		}
+	})
+
+	t.Run("Propose and Record reject an unrecognized Visibility value", func(t *testing.T) {
+		t.Parallel()
+
+		s := newStore()
+		ctx := context.Background()
+		const bogus memory.Visibility = "everyone"
+		if _, err := s.Propose(ctx, memory.ProposeRequest{
+			RoomID: "rom_1", AgentID: "agt_1", Content: "bogus visibility",
+			Visibility:    bogus,
+			SourceEventID: "evt_1", IdempotencyKey: "key_1",
+		}); err == nil {
+			t.Fatal("Propose: err = nil, want an error for an unrecognized Visibility")
+		}
+		if _, err := s.Record(ctx, memory.RecordRequest{
+			RoomID: "rom_1", AgentID: "agt_1", Content: "bogus visibility",
+			Visibility:    bogus,
+			SourceEventID: "evt_2", IdempotencyKey: "key_2",
+		}); err == nil {
+			t.Fatal("Record: err = nil, want an error for an unrecognized Visibility")
+		}
+	})
 
 	t.Run("cross-agent isolation: member-private memory is not visible to another agent in the same room", func(t *testing.T) {
 		t.Parallel()
@@ -329,6 +353,7 @@ func RunVisibilityContract(t *testing.T, newStore func() memory.Store) {
 
 		if _, err := s.Record(ctx, memory.RecordRequest{
 			RoomID: roomID, AgentID: "agt_1", Content: "private to agt_1",
+			Visibility:    memory.VisibilityMember,
 			SourceEventID: "evt_1", IdempotencyKey: "key_1",
 		}); err != nil {
 			t.Fatalf("Record: %v", err)
@@ -341,6 +366,15 @@ func RunVisibilityContract(t *testing.T, newStore func() memory.Store) {
 		if result.State != memory.StateEmpty || len(result.Memories) != 0 {
 			t.Errorf("agt_2's PrepareContext = %+v, want empty (agt_1's private memory leaked)", result)
 		}
+
+		// The writer's own PrepareContext call still sees it.
+		own, err := s.PrepareContext(ctx, memory.PrepareRequest{RoomID: roomID, AgentID: "agt_1", Purpose: "private to agt_1"})
+		if err != nil {
+			t.Fatalf("PrepareContext: %v", err)
+		}
+		if own.State != memory.StateReady || len(own.Memories) != 1 {
+			t.Errorf("agt_1's own PrepareContext = %+v, want its private memory admitted", own)
+		}
 	})
 
 	t.Run("room-shared memory is visible to every agent in the room", func(t *testing.T) {
@@ -350,8 +384,9 @@ func RunVisibilityContract(t *testing.T, newStore func() memory.Store) {
 		ctx := context.Background()
 		roomID := "rom_1"
 
+		// Visibility left at its zero value: the default must be room-shared.
 		if _, err := s.Record(ctx, memory.RecordRequest{
-			RoomID: roomID, Content: "shared with the whole room",
+			RoomID: roomID, AgentID: "agt_1", Content: "shared with the whole room",
 			SourceEventID: "evt_1", IdempotencyKey: "key_1",
 		}); err != nil {
 			t.Fatalf("Record: %v", err)

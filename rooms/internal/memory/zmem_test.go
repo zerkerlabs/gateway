@@ -126,6 +126,7 @@ type writeRequestOut struct {
 	RoomID         string `json:"room_id"`
 	AgentID        string `json:"agent_id"`
 	Content        string `json:"content"`
+	Visibility     string `json:"visibility"`
 	SourceEventID  string `json:"source_event_id"`
 	IdempotencyKey string `json:"idempotency_key"`
 }
@@ -268,12 +269,12 @@ func (s *fakeZMemServer) handleWrite(do any) http.HandlerFunc {
 		switch fn := do.(type) {
 		case func(context.Context, memory.ProposeRequest) (memory.WriteResult, error):
 			result, err = fn(r.Context(), memory.ProposeRequest{
-				RoomID: req.RoomID, AgentID: req.AgentID, Content: req.Content,
+				RoomID: req.RoomID, AgentID: req.AgentID, Content: req.Content, Visibility: memory.Visibility(req.Visibility),
 				SourceEventID: req.SourceEventID, IdempotencyKey: req.IdempotencyKey,
 			})
 		case func(context.Context, memory.RecordRequest) (memory.WriteResult, error):
 			result, err = fn(r.Context(), memory.RecordRequest{
-				RoomID: req.RoomID, AgentID: req.AgentID, Content: req.Content,
+				RoomID: req.RoomID, AgentID: req.AgentID, Content: req.Content, Visibility: memory.Visibility(req.Visibility),
 				SourceEventID: req.SourceEventID, IdempotencyKey: req.IdempotencyKey,
 			})
 		}
@@ -352,12 +353,13 @@ func TestNewZMemClient_RequiresConfig(t *testing.T) {
 // its own fake backend instance, modeling how a real deployment is
 // tenant-local — two Rooms services never share a backend process, so two
 // independent clients never share state either.
-// It deliberately does NOT run memorytest.RunVisibilityContract. This
-// server is backed by memory.Fake, so it would pass — and passing would
-// assert that ZMemClient keeps member-private memory private, which is false
-// against a real backend for the reasons RunVisibilityContract documents.
-// Asserting it here is precisely the false confidence a fake-only suite
-// produces.
+// RunContract now includes the member-private visibility cases. What they
+// prove here is a wire fact, not a storage one: this server enforces
+// visibility on its own side, so a client that dropped Visibility from the
+// request body would fail them. That is the part ZMemClient is responsible
+// for. Whether a real backend then honors the field is its claim to keep,
+// and it is checked end to end by TestZMemClient_Contract_Integration
+// against a running zmem.
 func TestZMemClient_Contract(t *testing.T) {
 	t.Parallel()
 
@@ -380,7 +382,7 @@ func TestZMemClient_DrivesEachState(t *testing.T) {
 	t.Run(string(memory.StateEmpty), func(t *testing.T) {
 		t.Parallel()
 		c, _ := newClient(t)
-		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -395,7 +397,7 @@ func TestZMemClient_DrivesEachState(t *testing.T) {
 		if _, err := c.Record(ctx, memory.RecordRequest{RoomID: "rom_1", AgentID: "agt_1", Content: "fact", SourceEventID: "evt_1", IdempotencyKey: "key_1"}); err != nil {
 			t.Fatalf("Record: %v", err)
 		}
-		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "fact"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -416,7 +418,7 @@ func TestZMemClient_DrivesEachState(t *testing.T) {
 		if _, err := c.Propose(ctx, memory.ProposeRequest{RoomID: "rom_1", AgentID: "agt_1", Content: "unreviewed", SourceEventID: "evt_2", IdempotencyKey: "key_2"}); err != nil {
 			t.Fatalf("Propose: %v", err)
 		}
-		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "accepted unreviewed"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -434,7 +436,7 @@ func TestZMemClient_DrivesEachState(t *testing.T) {
 		if _, err := c.Propose(ctx, memory.ProposeRequest{RoomID: "rom_1", AgentID: "agt_1", Content: "unreviewed", SourceEventID: "evt_1", IdempotencyKey: "key_1"}); err != nil {
 			t.Fatalf("Propose: %v", err)
 		}
-		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "unreviewed"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -447,7 +449,7 @@ func TestZMemClient_DrivesEachState(t *testing.T) {
 		t.Parallel()
 		c, srv := newClient(t)
 		srv.backing.SetAbstain("rom_1", "agt_1")
-		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -465,7 +467,7 @@ func TestZMemClient_DrivesEachState(t *testing.T) {
 		if _, err := c.Record(ctx, memory.RecordRequest{RoomID: "rom_1", AgentID: "agt_1", Content: "too long for the budget", SourceEventID: "evt_1", IdempotencyKey: "key_1"}); err != nil {
 			t.Fatalf("Record: %v", err)
 		}
-		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", ContextBudgetTokens: 1})
+		result, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "budget", ContextBudgetTokens: 1})
 		if err != nil {
 			t.Fatalf("PrepareContext: %v", err)
 		}
@@ -493,7 +495,7 @@ func TestZMemClient_PreservesReturnedOrder(t *testing.T) {
 	srv.backing.Seed("rom_1", "", newer)
 	srv.backing.Seed("rom_1", "", older)
 
-	result, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+	result, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "seeded"})
 	if err != nil {
 		t.Fatalf("PrepareContext: %v", err)
 	}
@@ -511,7 +513,7 @@ func TestZMemClient_NeverCallsInject(t *testing.T) {
 	c := fastZMemClient(t, srv.server(t).URL)
 	ctx := context.Background()
 
-	if _, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"}); err != nil {
+	if _, err := c.PrepareContext(ctx, memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"}); err != nil {
 		t.Fatalf("PrepareContext: %v", err)
 	}
 	if _, err := c.Record(ctx, memory.RecordRequest{RoomID: "rom_1", AgentID: "agt_1", Content: "x", SourceEventID: "evt_1", IdempotencyKey: "key_1"}); err != nil {
@@ -532,7 +534,7 @@ func TestZMemClient_SendsBearerToken(t *testing.T) {
 	srv := newFakeZMemServer(testTenantID)
 	c := fastZMemClient(t, srv.server(t).URL)
 
-	if _, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"}); err != nil {
+	if _, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"}); err != nil {
 		t.Fatalf("PrepareContext: %v", err)
 	}
 	srv.mu.Lock()
@@ -560,7 +562,7 @@ func TestZMemClient_ServiceTokenNeverLeaksInErrors(t *testing.T) {
 			t.Cleanup(srv.Close)
 			c := fastZMemClient(t, srv.URL)
 
-			_, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+			_, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 			if err == nil {
 				t.Fatal("err = nil, want an error")
 			}
@@ -579,7 +581,7 @@ func TestZMemClient_UnreachableBackendIsTransportError(t *testing.T) {
 	srv.Close() // nothing listening now
 
 	c := fastZMemClient(t, url)
-	_, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+	_, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 	if got := classOf(t, err); got != memory.ErrorClassTransport {
 		t.Errorf("class = %q, want %q", got, memory.ErrorClassTransport)
 	}
@@ -605,7 +607,7 @@ func TestZMemClient_TimeoutIsTransportError(t *testing.T) {
 		t.Fatalf("NewZMemClient: %v", err)
 	}
 
-	_, callErr := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+	_, callErr := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 	if got := classOf(t, callErr); got != memory.ErrorClassTransport {
 		t.Errorf("class = %q, want %q (a timed-out request is a transport failure)", got, memory.ErrorClassTransport)
 	}
@@ -623,7 +625,7 @@ func TestZMemClient_NonTwoXXIsUpstreamStatus(t *testing.T) {
 			t.Cleanup(srv.Close)
 			c := fastZMemClient(t, srv.URL)
 
-			_, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+			_, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 			if got := classOf(t, err); got != memory.ErrorClassUpstreamStatus {
 				t.Errorf("class = %q, want %q", got, memory.ErrorClassUpstreamStatus)
 			}
@@ -649,7 +651,7 @@ func TestZMemClient_TenantMismatchFailsClosedAndLogs(t *testing.T) {
 		t.Fatalf("NewZMemClient: %v", err)
 	}
 
-	result, callErr := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+	result, callErr := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 	if callErr == nil {
 		t.Fatal("err = nil — a cross-tenant response was accepted")
 	}
@@ -683,6 +685,43 @@ func TestZMemClient_WriteContentTooLargeIsRejectedLocally(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&srv.writes); got != 0 {
 		t.Errorf("write requests reaching the backend = %d, want 0 — oversized content must never be sent", got)
+	}
+}
+
+// An empty Purpose must never reach the backend as the "purpose must be a
+// non-empty string" 400 a real ZMem would return — it is rejected locally,
+// the same as oversized content.
+func TestZMemClient_PrepareContextRequiresPurposeRejectedLocally(t *testing.T) {
+	t.Parallel()
+
+	srv := newFakeZMemServer(testTenantID)
+	c := fastZMemClient(t, srv.server(t).URL)
+
+	_, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+	if got := classOf(t, err); got != memory.ErrorClassInvalidRequest {
+		t.Errorf("class = %q, want %q", got, memory.ErrorClassInvalidRequest)
+	}
+	if got := atomic.LoadInt32(&srv.prepares); got != 0 {
+		t.Errorf("prepare requests reaching the backend = %d, want 0 — an empty purpose must never be sent", got)
+	}
+}
+
+// An empty AgentID must never reach the backend, for the same reason: ZMem
+// uses it for the contributor: label on every write.
+func TestZMemClient_WriteRequiresAgentIDRejectedLocally(t *testing.T) {
+	t.Parallel()
+
+	srv := newFakeZMemServer(testTenantID)
+	c := fastZMemClient(t, srv.server(t).URL)
+
+	_, err := c.Record(context.Background(), memory.RecordRequest{
+		RoomID: "rom_1", Content: "no contributor named", SourceEventID: "evt_1", IdempotencyKey: "key_1",
+	})
+	if got := classOf(t, err); got != memory.ErrorClassInvalidRequest {
+		t.Errorf("class = %q, want %q", got, memory.ErrorClassInvalidRequest)
+	}
+	if got := atomic.LoadInt32(&srv.writes); got != 0 {
+		t.Errorf("write requests reaching the backend = %d, want 0 — a blank agent id must never be sent", got)
 	}
 }
 
@@ -774,7 +813,7 @@ func TestZMemClient_AcceptsCrossLanguageGoldenVector(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	result, err := fastZMemClient(t, srv.URL).PrepareContext(
-		context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"},
+		context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"},
 	)
 	if err != nil {
 		t.Fatalf("PrepareContext rejected the backend's own published commitment vector: %v", err)
@@ -880,7 +919,7 @@ func TestZMemClient_CommitmentGoldenVectors(t *testing.T) {
 			t.Cleanup(srv.Close)
 			c := fastZMemClient(t, srv.URL)
 
-			result, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1"})
+			result, err := c.PrepareContext(context.Background(), memory.PrepareRequest{RoomID: "rom_1", AgentID: "agt_1", Purpose: "anything at all"})
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("err = nil, want an error")

@@ -10,6 +10,9 @@
 // draft of this seam assumed, which scoped memory to (tenant, agent). A
 // member's onboarding context is "what this room knows, plus what is private
 // to me here," not "everything this agent has ever remembered anywhere."
+// Visibility on ProposeRequest and RecordRequest states which partition a
+// write lands in; AgentID is always required on a write regardless, since it
+// is the contributor being credited, not a proxy for visibility.
 //
 // The tenant is never a field on a request here. A real backend deployment
 // is tenant-local — one deployment serves exactly one tenant — so the tenant
@@ -25,8 +28,29 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrPurposeRequired is returned by PrepareContext when PrepareRequest.Purpose
+// is empty. Purpose is the retrieval query a real backend searches against,
+// not descriptive metadata — a blank one is a caller bug, and it must be
+// caught here, before a request ever reaches a backend, rather than surfacing
+// as that backend's "purpose must be a non-empty string" 400.
+var ErrPurposeRequired = errors.New("memory: purpose is required")
+
+// ErrAgentIDRequired is returned by Propose and Record when the request's
+// AgentID is empty. A real backend uses AgentID for the contributor: label on
+// every write, including ones Rooms itself asserts via Record, so there is no
+// write a blank AgentID could ever be valid for.
+var ErrAgentIDRequired = errors.New("memory: agent id is required")
+
+// ErrInvalidVisibility is returned by Propose and Record when the request's
+// Visibility is set to a value other than the zero value, VisibilityRoom, or
+// VisibilityMember. Visibility is a closed set — see its doc — so an
+// implementation must reject anything else rather than silently treating an
+// unrecognized value as room-shared.
+var ErrInvalidVisibility = errors.New(`memory: visibility must be "", "room", or "member"`)
 
 // State is the outcome of a PrepareContext call: what the backend was able
 // to do with a room's governed memory for the agent that asked. It is a
@@ -61,7 +85,12 @@ const (
 type PrepareRequest struct {
 	RoomID  string
 	AgentID string
-	// Purpose is the retrieval purpose, typically the room's goal.
+	// Purpose is the retrieval query a real backend searches against — not a
+	// label — typically the room's goal. It is required: an implementation
+	// must return ErrPurposeRequired rather than send an empty purpose
+	// onward, since content whose text shares no term with an empty query
+	// would either match everything or nothing depending on the backend, and
+	// neither is a caller's actual intent.
 	Purpose string
 	// Risk is the room or tenant's configured risk level: "low", "medium",
 	// or "high".
@@ -134,13 +163,52 @@ type ContextResult struct {
 	Commitment Commitment
 }
 
+// Visibility states who a written memory is visible to when it is later
+// retrieved by PrepareContext. It is a closed set of two values so a caller
+// states intent explicitly rather than encoding it in whether a field happens
+// to be blank.
+type Visibility string
+
+const (
+	// VisibilityRoom means the memory is room-shared: visible to every
+	// member's PrepareContext call in the room it was written to. A request
+	// that leaves Visibility unset (the empty string, Go's zero value for
+	// Visibility) defaults to this behavior, the same as setting it
+	// explicitly to VisibilityRoom.
+	VisibilityRoom Visibility = "room"
+	// VisibilityMember means the memory is private to the writing AgentID:
+	// visible only to that agent's own PrepareContext calls in the room.
+	VisibilityMember Visibility = "member"
+)
+
+// validVisibility reports whether v is one Propose and Record must accept:
+// the unset zero value, VisibilityRoom, or VisibilityMember. Any other value
+// is a caller bug that must be rejected with ErrInvalidVisibility (Fake) or
+// ErrorClassInvalidRequest (ZMemClient) rather than silently treated as
+// room-shared.
+func validVisibility(v Visibility) bool {
+	switch v {
+	case "", VisibilityRoom, VisibilityMember:
+		return true
+	default:
+		return false
+	}
+}
+
 // ProposeRequest submits agent-authored content as a candidate memory. It is
 // quarantined until reviewed — calling Propose vouches for nothing beyond
 // "this was said."
 type ProposeRequest struct {
-	RoomID  string
+	RoomID string
+	// AgentID is the contributor: the agent this content is attributed to. A
+	// real backend uses it on every write, so it is required — an
+	// implementation must return ErrAgentIDRequired rather than send a blank
+	// one onward.
 	AgentID string
 	Content string
+	// Visibility states who may see this memory once retrieved. The zero
+	// value is VisibilityRoom.
+	Visibility Visibility
 	// SourceEventID is the Rooms event this content came from, and
 	// IdempotencyKey makes the write safe to retry: replaying the same key
 	// with identical content is a no-op: reusing it for different content is
@@ -153,9 +221,15 @@ type ProposeRequest struct {
 // transition — a room outcome or a task-state change — so it is active
 // immediately rather than quarantined.
 type RecordRequest struct {
-	RoomID         string
-	AgentID        string
-	Content        string
+	RoomID string
+	// AgentID is the contributor: the agent this content is attributed to,
+	// required for the same reason as ProposeRequest.AgentID — a trusted
+	// write is still attributed to whoever or whatever is asserting it.
+	AgentID string
+	Content string
+	// Visibility states who may see this memory once retrieved. The zero
+	// value is VisibilityRoom.
+	Visibility     Visibility
 	SourceEventID  string
 	IdempotencyKey string
 }

@@ -129,21 +129,24 @@ func TestHandlePostMessage_ProposedContentIsQuarantined(t *testing.T) {
 		}
 	}
 
-	// The author's own context preparation is the one whose scope actually
-	// covers this proposal (memory.Fake scopes a write to the AgentID it was
-	// proposed under) — it must report the withheld entry in its counts
-	// rather than silently dropping it.
-	authorResult, err := fake.PrepareContext(context.Background(), memory.PrepareRequest{
-		RoomID: roomID, AgentID: "agt_1", Purpose: "the deploy",
-	})
-	if err != nil {
-		t.Fatalf("PrepareContext(agt_1): %v", err)
-	}
-	if authorResult.Counts.Retrieved == 0 || authorResult.Counts.Withheld == 0 {
-		t.Errorf("author's Counts = %+v, want a nonzero Retrieved and Withheld — the proposal must be reported withheld, not discarded", authorResult.Counts)
-	}
-	if authorResult.Counts.Admitted != 0 {
-		t.Errorf("author's Counts.Admitted = %d, want 0 — an unreviewed proposal is never admitted", authorResult.Counts.Admitted)
+	// proposeMessage sends no explicit Visibility, so the proposal lands
+	// room-shared (the zero value's default) — a posted message is content
+	// for the room, not a private aside. Every member's context preparation,
+	// including the author's, must therefore report the withheld entry in
+	// its counts rather than silently dropping it.
+	for _, agentID := range []string{"agt_1", other.AgentID} {
+		result, err := fake.PrepareContext(context.Background(), memory.PrepareRequest{
+			RoomID: roomID, AgentID: agentID, Purpose: "the deploy",
+		})
+		if err != nil {
+			t.Fatalf("PrepareContext(%s): %v", agentID, err)
+		}
+		if result.Counts.Retrieved == 0 || result.Counts.Withheld == 0 {
+			t.Errorf("PrepareContext(%s) Counts = %+v, want a nonzero Retrieved and Withheld — the proposal must be reported withheld, not discarded", agentID, result.Counts)
+		}
+		if result.Counts.Admitted != 0 {
+			t.Errorf("PrepareContext(%s) Counts.Admitted = %d, want 0 — an unreviewed proposal is never admitted", agentID, result.Counts.Admitted)
+		}
 	}
 }
 
