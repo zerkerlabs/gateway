@@ -45,6 +45,42 @@ proxy, never direct.
 | `ROOMS_GATEWAY_TIMEOUT` | `30s` | Bounds a single proxy HTTP request. |
 | `ROOMS_GATEWAY_CONFIRM_TIMEOUT` | `60s` | Bounds how long Rooms polls an accepted invocation for a terminal state before reporting the outcome as unknown. |
 
+### Database (persistence)
+
+Rooms supports two deployment modes, selected by whether `ROOMS_DATABASE_URL`
+is set — there is no separate mode flag, and no path from a database failure
+back to the in-memory store:
+
+- **Ephemeral** (`ROOMS_DATABASE_URL` unset) — the in-memory store. Zero
+  dependencies, nothing to configure, and every room, member, and message is
+  lost on restart. This is the right way to evaluate Rooms in ten minutes; it
+  is **not** a production mode. Starting in this mode logs an explicit warning
+  at boot.
+- **Durable** (`ROOMS_DATABASE_URL` set) — the Postgres store. Rooms opens a
+  connection pool, applies any pending migrations from `db/migrations`
+  automatically, and verifies connectivity before serving traffic. Starting in
+  this mode logs which mode it is in — never the connection string, which may
+  carry credentials.
+
+A malformed or unreachable `ROOMS_DATABASE_URL` fails startup rather than
+falling back to the in-memory store: a self-hoster who configured a database
+and got an ephemeral one instead would lose data believing it was safe.
+
+Migrations live in `db/migrations` as numbered `*.sql` files and are applied
+by `db.Migrate`, the same convention `gateway/db` and `facilitator/db` use —
+idempotent, tracked in a `schema_migrations` table, and safe to run on every
+startup. There is no separate migrate command; running the `rooms` binary
+against a configured database applies them.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ROOMS_DATABASE_URL` | — (unset selects the in-memory store) | Postgres connection string. Never logged. |
+| `ROOMS_DATABASE_MAX_CONNS` | `10` | Maximum size of the connection pool. |
+| `ROOMS_DATABASE_MIN_CONNS` | `2` | Minimum size of the connection pool. |
+| `ROOMS_DATABASE_MAX_CONN_IDLE_TIME` | `5m` | How long an idle pooled connection is kept before it is closed. |
+
+The pool is closed on graceful shutdown along with the HTTP server.
+
 ### Memory backend
 
 Rooms onboards a member with the room's actual, policy-approved memory,

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -8,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -348,5 +351,126 @@ func TestVersionExposesOnlyBuildMetadata(t *testing.T) {
 		if k != "version" && k != "commit" {
 			t.Errorf("unexpected key %q in /version response", k)
 		}
+	}
+}
+
+// Without ROOMS_DATABASE_URL, openStore must return the in-memory store and
+// log an unmissable warning that the mode is non-durable — an operator
+// scanning logs should not have to infer this from silence.
+func TestOpenStoreEphemeralWithoutDatabaseURL(t *testing.T) {
+	t.Setenv("ROOMS_DATABASE_URL", "")
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+	store, closeStore, err := openStore(context.Background(), logger)
+	if err != nil {
+		t.Fatalf("openStore: %v", err)
+	}
+	t.Cleanup(closeStore)
+
+	if _, ok := store.(*room.MemoryStore); !ok {
+		t.Fatalf("openStore() returned %T, want *room.MemoryStore", store)
+	}
+
+	log := buf.String()
+	if !strings.Contains(log, "EPHEMERAL") || !strings.Contains(log, "NON-DURABLE") {
+		t.Errorf("expected an explicit non-durable warning, got log output: %s", log)
+	}
+}
+
+// A malformed ROOMS_DATABASE_URL must fail startup rather than silently
+// falling back to the in-memory store — a self-hoster who configured a
+// database and got an ephemeral one would lose data believing it was safe.
+func TestOpenStoreFailsOnMalformedDatabaseURL(t *testing.T) {
+	t.Setenv("ROOMS_DATABASE_URL", "://not a valid url")
+
+	store, closeStore, err := openStore(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Fatal("openStore() with a malformed URL: want an error, got nil")
+	}
+	if store != nil || closeStore != nil {
+		t.Errorf("openStore() with a malformed URL: want (nil, nil, err), got store=%v closeStore=%t", store, closeStore != nil)
+	}
+}
+
+// An unreachable (but syntactically valid) ROOMS_DATABASE_URL must also fail
+// startup loudly, not fall back to the in-memory store.
+func TestOpenStoreFailsOnUnreachableDatabaseURL(t *testing.T) {
+	t.Setenv("ROOMS_DATABASE_URL", "postgres://user:pass@127.0.0.1:1/nonexistent?connect_timeout=1&sslmode=disable")
+
+	store, closeStore, err := openStore(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Fatal("openStore() with an unreachable database: want an error, got nil")
+	}
+	if store != nil || closeStore != nil {
+		t.Errorf("openStore() with an unreachable database: want (nil, nil, err), got store=%v closeStore=%t", store, closeStore != nil)
+	}
+}
+
+// TestPoolConfigFromEnv covers the documented defaults, valid overrides, and
+// the failure modes an operator can hit: non-numeric, negative, or
+// zero MaxConns, a negative MinConns, MinConns exceeding MaxConns, and an
+// unparseable idle-time duration.
+func TestPoolConfigFromEnv(t *testing.T) {
+	t.Run("defaults when unset", func(t *testing.T) {
+		t.Setenv("ROOMS_DATABASE_MAX_CONNS", "")
+		t.Setenv("ROOMS_DATABASE_MIN_CONNS", "")
+		t.Setenv("ROOMS_DATABASE_MAX_CONN_IDLE_TIME", "")
+
+		got, err := poolConfigFromEnv()
+		if err != nil {
+			t.Fatalf("poolConfigFromEnv: %v", err)
+		}
+		want := poolConfig{
+			MaxConns:        defaultDatabaseMaxConns,
+			MinConns:        defaultDatabaseMinConns,
+			MaxConnIdleTime: defaultDatabaseMaxConnIdleTime,
+		}
+		if got != want {
+			t.Errorf("poolConfigFromEnv() = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("valid overrides", func(t *testing.T) {
+		t.Setenv("ROOMS_DATABASE_MAX_CONNS", "20")
+		t.Setenv("ROOMS_DATABASE_MIN_CONNS", "5")
+		t.Setenv("ROOMS_DATABASE_MAX_CONN_IDLE_TIME", "1m")
+
+		got, err := poolConfigFromEnv()
+		if err != nil {
+			t.Fatalf("poolConfigFromEnv: %v", err)
+		}
+		want := poolConfig{MaxConns: 20, MinConns: 5, MaxConnIdleTime: time.Minute}
+		if got != want {
+			t.Errorf("poolConfigFromEnv() = %+v, want %+v", got, want)
+		}
+	})
+
+	failureCases := []struct {
+		name string
+		env  map[string]string
+	}{
+		{"non-numeric max conns", map[string]string{"ROOMS_DATABASE_MAX_CONNS": "lots"}},
+		{"zero max conns", map[string]string{"ROOMS_DATABASE_MAX_CONNS": "0"}},
+		{"negative max conns", map[string]string{"ROOMS_DATABASE_MAX_CONNS": "-1"}},
+		{"non-numeric min conns", map[string]string{"ROOMS_DATABASE_MIN_CONNS": "many"}},
+		{"negative min conns", map[string]string{"ROOMS_DATABASE_MIN_CONNS": "-1"}},
+		{"min conns exceeds max conns", map[string]string{"ROOMS_DATABASE_MAX_CONNS": "2", "ROOMS_DATABASE_MIN_CONNS": "3"}},
+		{"malformed idle time", map[string]string{"ROOMS_DATABASE_MAX_CONN_IDLE_TIME": "not-a-duration"}},
+	}
+	for _, tt := range failureCases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("ROOMS_DATABASE_MAX_CONNS", "")
+			t.Setenv("ROOMS_DATABASE_MIN_CONNS", "")
+			t.Setenv("ROOMS_DATABASE_MAX_CONN_IDLE_TIME", "")
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			if _, err := poolConfigFromEnv(); err == nil {
+				t.Fatal("poolConfigFromEnv(): want an error, got nil")
+			}
+		})
 	}
 }
