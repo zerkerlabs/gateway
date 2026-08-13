@@ -9,7 +9,7 @@ LDFLAGS := -X github.com/zerkerlabs/gateway/rooms/internal/version.Version=$(VER
 
 .DEFAULT_GOAL := check
 
-.PHONY: check tidy-check fmt-check vet lint test integration-test build run fmt tidy
+.PHONY: check tidy-check fmt-check vet lint test integration-test zmem-integration-test build run fmt tidy
 check: tidy-check fmt-check vet lint test build ## Full per-module gate
 
 tidy-check:
@@ -30,6 +30,9 @@ test:
 
 integration-test: ## Run integration tests (needs TEST_DATABASE_URL + a Postgres)
 	$(GO) test -tags=integration -race -count=1 ./...
+
+zmem-integration-test: ## Run just the ZMem httpapi integration test against a local backend (needs ZMEM_TEST_*, no Postgres)
+	bash run_local_skip_check.sh
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)

@@ -63,8 +63,8 @@ below.
 | `ROOMS_ZMEM_SERVICE_TOKEN_FILE` | — | Path to a file containing the service token, read instead of `ROOMS_ZMEM_SERVICE_TOKEN`. Prefer this in production — a token passed as `ROOMS_ZMEM_SERVICE_TOKEN` is only an environment variable, but a token passed as a flag would be visible in a process listing, which is exactly what this variable's file form avoids needing. |
 | `ROOMS_ZMEM_TENANT_ID` | — (required) | The tenant this deployment expects the backend to be serving. Every response is checked against it, and a mismatch refuses the call rather than trusting whatever the backend answered with — a cheap guard against a misconfigured deployment pointed at the wrong sidecar. |
 | `ROOMS_ZMEM_TIMEOUT` | `2s` | Bounds a single HTTP request to the backend. |
-| `ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS` | `2000` | Caps how much admitted memory content a context-preparation call may return, 1–64000 (the backend's own cap). |
-| `ROOMS_ZMEM_RISK` | `medium` | The room or tenant's configured risk level: `low`, `medium`, or `high`. |
+| `ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS` | `2000` | Caps how much admitted memory content a context-preparation call may return, 1–64000 (the backend's own cap). Parsed and validated at startup; not yet threaded into the join path's `PrepareContext` call, so it has no runtime effect until that wiring lands. |
+| `ROOMS_ZMEM_RISK` | `medium` | The room or tenant's configured risk level: `low`, `medium`, or `high`. Parsed and validated at startup; not yet threaded into the join path's `PrepareContext` call, so it has no runtime effect until that wiring lands. |
 
 ## Build & test
 
@@ -108,3 +108,9 @@ TEST_DATABASE_URL="postgres://zerker:zerker@localhost:5432/zerker_test" \
 The same `ROOMS_ZMEM_BASE_URL` / `ROOMS_ZMEM_SERVICE_TOKEN` /
 `ROOMS_ZMEM_TENANT_ID` variables (see [Configuration](#configuration) above)
 point a running `rooms` binary at this same backend for manual testing.
+
+Once `ZMEM_TEST_BASE_URL` / `ZMEM_TEST_SERVICE_TOKEN` / `ZMEM_TEST_TENANT_ID`
+are exported, `make -C rooms zmem-integration-test` (or
+`bash rooms/run_local_skip_check.sh` directly) reruns just the ZMem httpapi
+integration test — no `TEST_DATABASE_URL`/Postgres needed — which is faster
+to iterate on than the full `integration-test` target.
