@@ -353,12 +353,13 @@ func TestNewZMemClient_RequiresConfig(t *testing.T) {
 // its own fake backend instance, modeling how a real deployment is
 // tenant-local — two Rooms services never share a backend process, so two
 // independent clients never share state either.
-// It deliberately does NOT run memorytest.RunVisibilityContract. This
-// server is backed by memory.Fake, so it would pass — and passing would
-// assert that ZMemClient keeps member-private memory private, which is false
-// against a real backend for the reasons RunVisibilityContract documents.
-// Asserting it here is precisely the false confidence a fake-only suite
-// produces.
+// RunContract now includes the member-private visibility cases. What they
+// prove here is a wire fact, not a storage one: this server enforces
+// visibility on its own side, so a client that dropped Visibility from the
+// request body would fail them. That is the part ZMemClient is responsible
+// for. Whether a real backend then honors the field is its claim to keep,
+// and it is checked end to end by TestZMemClient_Contract_Integration
+// against a running zmem.
 func TestZMemClient_Contract(t *testing.T) {
 	t.Parallel()
 
