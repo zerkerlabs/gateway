@@ -68,6 +68,20 @@ func run(logger *slog.Logger) error {
 	// be reconciled before anything is served from it: a reservation left
 	// open by a crash has to be resolved one way or the other before this
 	// process starts taking traffic for the room that holds it.
+	//
+	// This is still the in-memory store, which means the sweep below has
+	// nothing to find: a MemoryStore starts empty, so nothing survives the
+	// restart it is meant to recover from. That is deliberate and not a gap
+	// in the reconciliation work — PostgresStore implements the whole Store
+	// interface, including reservations, and is covered by its own tests.
+	// Choosing the store from configuration is separate, separately reviewed
+	// work, because it also owns the connection string, pool lifecycle, and
+	// running migrations at startup.
+	//
+	// Until that lands, restart-survival is real in the store and inert in
+	// the service. Anyone reading this line to answer "do reservations
+	// survive a crash in production?" should read it as: not yet, and this
+	// is the line that will change.
 	store := room.NewMemoryStore()
 	if err := room.ReconcileReservations(ctx, store, gwClient, reconcileTimeoutFromEnv(logger), logger); err != nil {
 		return fmt.Errorf("reconcile turn reservations: %w", err)

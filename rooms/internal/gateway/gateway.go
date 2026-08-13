@@ -226,6 +226,14 @@ func New(cfg Config) (*Client, error) {
 // Call delivers body to agentID through the gateway's proxy on behalf of
 // tenantID, and returns only once delivery is CONFIRMED. It is Deliver with
 // no onAccepted callback — see Deliver's doc comment for the full behavior.
+//
+// Rooms itself no longer calls this: the addressed-message path moved to
+// Deliver when it needed the accepted invocation ID attached to a reservation
+// mid-flight. It is kept because it is the honest form of the operation for
+// any caller that does not need that hook, and because the tests that go
+// through it exercise the shared confirm/classify logic Deliver depends on —
+// they are not testing a wrapper, they are testing the path underneath it
+// through its simpler entry point.
 func (c *Client) Call(ctx context.Context, tenantID, agentID string, body []byte) (*Result, error) {
 	return c.Deliver(ctx, tenantID, agentID, body, nil)
 }
