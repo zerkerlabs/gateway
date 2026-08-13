@@ -24,8 +24,11 @@ const (
 
 // RunContract runs the full contract suite against implementations returned
 // by newStore, calling it once per behaviour so each case starts from a
-// clean store.
-func RunContract(t *testing.T, newStore func() room.Store) {
+// clean store. newStore receives the *testing.T of the specific subtest
+// requesting the store, so an implementation that needs per-call isolation
+// (a fresh schema, say) can fail that subtest directly and register its own
+// t.Cleanup rather than leaking state into whichever case runs next.
+func RunContract(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Helper()
 
 	testCreateRoomAssignsServerFields(t, newStore)
@@ -66,11 +69,11 @@ func mustCreateRoom(t *testing.T, s room.Store, tenantID, goal string) *room.Roo
 
 // ------------------------------------------------------------- CreateRoom ---
 
-func testCreateRoomAssignsServerFields(t *testing.T, newStore func() room.Store) {
+func testCreateRoomAssignsServerFields(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("CreateRoom_AssignsServerFields", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "ship the thing")
 
 		if !strings.HasPrefix(r.ID, "rom_") {
@@ -96,7 +99,7 @@ func testCreateRoomAssignsServerFields(t *testing.T, newStore func() room.Store)
 
 // ---------------------------------------------------------------- GetRoom ---
 
-func testGetRoom(t *testing.T, newStore func() room.Store) {
+func testGetRoom(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("GetRoom", func(t *testing.T) {
 		t.Parallel()
 
@@ -113,7 +116,7 @@ func testGetRoom(t *testing.T, newStore func() room.Store) {
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
 
-				s := newStore()
+				s := newStore(t)
 				created := mustCreateRoom(t, s, tenantA, "goal")
 
 				got, err := s.GetRoom(context.Background(), tt.lookupAs, created.ID)
@@ -137,11 +140,11 @@ func testGetRoom(t *testing.T, newStore func() room.Store) {
 	})
 }
 
-func testGetRoomUnknownID(t *testing.T, newStore func() room.Store) {
+func testGetRoomUnknownID(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("GetRoom_UnknownID", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		_, err := s.GetRoom(context.Background(), tenantA, "rom_nonexistent")
 		if !errors.Is(err, room.ErrNotFound) {
 			t.Errorf("err = %v, want ErrNotFound", err)
@@ -151,11 +154,11 @@ func testGetRoomUnknownID(t *testing.T, newStore func() room.Store) {
 
 // -------------------------------------------------------------- ListRooms ---
 
-func testListRoomsCrossTenantIsolation(t *testing.T, newStore func() room.Store) {
+func testListRoomsCrossTenantIsolation(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("ListRooms_CrossTenantIsolation", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		a1 := mustCreateRoom(t, s, tenantA, "a1")
 		a2 := mustCreateRoom(t, s, tenantA, "a2")
 		mustCreateRoom(t, s, tenantB, "b1")
@@ -175,11 +178,11 @@ func testListRoomsCrossTenantIsolation(t *testing.T, newStore func() room.Store)
 	})
 }
 
-func testListRoomsEmpty(t *testing.T, newStore func() room.Store) {
+func testListRoomsEmpty(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("ListRooms_Empty", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		got, err := s.ListRooms(context.Background(), tenantA)
 		if err != nil {
 			t.Fatalf("ListRooms: %v", err)
@@ -192,14 +195,14 @@ func testListRoomsEmpty(t *testing.T, newStore func() room.Store) {
 
 // -------------------------------------------------------------- AddMember ---
 
-func testAddMember(t *testing.T, newStore func() room.Store) {
+func testAddMember(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("AddMember", func(t *testing.T) {
 		t.Parallel()
 
 		t.Run("seats a same-tenant agent", func(t *testing.T) {
 			t.Parallel()
 
-			s := newStore()
+			s := newStore(t)
 			r := mustCreateRoom(t, s, tenantA, "goal")
 
 			m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
@@ -228,7 +231,7 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 		t.Run("cross-tenant member add is rejected", func(t *testing.T) {
 			t.Parallel()
 
-			s := newStore()
+			s := newStore(t)
 			r := mustCreateRoom(t, s, tenantA, "goal")
 
 			_, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantB, nil, nil, room.ContextCommitment{})
@@ -248,7 +251,7 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 		t.Run("room in another tenant is not found", func(t *testing.T) {
 			t.Parallel()
 
-			s := newStore()
+			s := newStore(t)
 			r := mustCreateRoom(t, s, tenantA, "goal")
 
 			_, err := s.AddMember(context.Background(), tenantB, r.ID, "agt_1", tenantB, nil, nil, room.ContextCommitment{})
@@ -260,7 +263,7 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 		t.Run("carries the context commitment and marks it live", func(t *testing.T) {
 			t.Parallel()
 
-			s := newStore()
+			s := newStore(t)
 			r := mustCreateRoom(t, s, tenantA, "goal")
 			commitment := room.ContextCommitment{
 				Digest:        "sha256:" + strings.Repeat("ab", 32),
@@ -287,7 +290,7 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 		t.Run("keeps admitted memory and caller documents distinguishable", func(t *testing.T) {
 			t.Parallel()
 
-			s := newStore()
+			s := newStore(t)
 			r := mustCreateRoom(t, s, tenantA, "goal")
 			admittedMemory := []string{"memory entry"}
 			callerDocuments := []string{"onboarding doc"}
@@ -328,11 +331,11 @@ func testAddMember(t *testing.T, newStore func() room.Store) {
 
 // testReturnedValuesAreIsolated verifies that mutating a returned *Room does
 // not corrupt the stored record.
-func testReturnedValuesAreIsolated(t *testing.T, newStore func() room.Store) {
+func testReturnedValuesAreIsolated(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("ReturnedValuesAreIsolated", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "goal")
 		if _, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{}); err != nil {
 			t.Fatalf("AddMember: %v", err)
@@ -356,11 +359,11 @@ func testReturnedValuesAreIsolated(t *testing.T, newStore func() room.Store) {
 
 // ----------------------------------------------------------- AppendMessage ---
 
-func testAppendMessageRoundTrip(t *testing.T, newStore func() room.Store) {
+func testAppendMessageRoundTrip(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("AppendMessage_RoundTrip", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "goal")
 		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
@@ -391,11 +394,11 @@ func testAppendMessageRoundTrip(t *testing.T, newStore func() room.Store) {
 	})
 }
 
-func testAppendMessageCrossTenantBlocked(t *testing.T, newStore func() room.Store) {
+func testAppendMessageCrossTenantBlocked(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("AppendMessage_CrossTenantBlocked", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "goal")
 
 		_, err := s.AppendMessage(context.Background(), tenantB, r.ID, "mem_1", "hello")
@@ -409,11 +412,11 @@ func testAppendMessageCrossTenantBlocked(t *testing.T, newStore func() room.Stor
 // attributable to a member actually seated in the room — otherwise a caller
 // could persist one pointing at a member that never existed, or one belonging
 // to a different room.
-func testAppendMessageUnknownMemberRejected(t *testing.T, newStore func() room.Store) {
+func testAppendMessageUnknownMemberRejected(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("AppendMessage_UnknownMemberRejected", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "goal")
 
 		if _, err := s.AppendMessage(context.Background(), tenantA, r.ID, "mem_nope", "hello"); !errors.Is(err, room.ErrMemberNotFound) {
@@ -425,11 +428,11 @@ func testAppendMessageUnknownMemberRejected(t *testing.T, newStore func() room.S
 // testAppendMessageMemberFromAnotherRoomRejected verifies that a member seated
 // in one room may not author messages in another, even when both rooms belong
 // to the same tenant.
-func testAppendMessageMemberFromAnotherRoomRejected(t *testing.T, newStore func() room.Store) {
+func testAppendMessageMemberFromAnotherRoomRejected(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("AppendMessage_MemberFromAnotherRoomRejected", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r1 := mustCreateRoom(t, s, tenantA, "first")
 		r2 := mustCreateRoom(t, s, tenantA, "second")
 
@@ -449,12 +452,12 @@ func testAppendMessageMemberFromAnotherRoomRejected(t *testing.T, newStore func(
 // is also the proof that concurrent appends still produce a valid contiguous
 // sequence — the store's write serialization must hold even though the
 // callers race.
-func testAppendMessageConcurrentDoNotRace(t *testing.T, newStore func() room.Store) {
+func testAppendMessageConcurrentDoNotRace(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("AppendMessage_ConcurrentDoNotRace", func(t *testing.T) {
 		t.Parallel()
 
 		const n = 50
-		s := newStore()
+		s := newStore(t)
 		r, err := s.CreateRoomWithBudget(context.Background(), tenantA, "goal", n)
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
@@ -524,11 +527,11 @@ func testAppendMessageConcurrentDoNotRace(t *testing.T, newStore func() room.Sto
 // testEventsSequenceNumbering verifies that every kind of append — membership,
 // messages, and terminal transitions — shares one contiguous, per-room
 // sequence starting at 1.
-func testEventsSequenceNumbering(t *testing.T, newStore func() room.Store) {
+func testEventsSequenceNumbering(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("Events_SequenceNumbering", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "goal")
 		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
@@ -578,11 +581,11 @@ func testEventsSequenceNumbering(t *testing.T, newStore func() room.Store) {
 // testMessagesReplaysTranscriptFromEvents verifies that a room's transcript is
 // derived by replaying its event log, in order, skipping non-message events
 // such as the member join and the terminal transition.
-func testMessagesReplaysTranscriptFromEvents(t *testing.T, newStore func() room.Store) {
+func testMessagesReplaysTranscriptFromEvents(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("Messages_ReplaysTranscriptFromEvents", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "goal")
 		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
@@ -624,12 +627,12 @@ func testMessagesReplaysTranscriptFromEvents(t *testing.T, newStore func() room.
 // testAppendMessageTurnBudgetExhaustionAbandonsRoom verifies that exceeding a
 // room's turn budget rejects the over-budget message and abandons the room,
 // recording the transition as an event.
-func testAppendMessageTurnBudgetExhaustionAbandonsRoom(t *testing.T, newStore func() room.Store) {
+func testAppendMessageTurnBudgetExhaustionAbandonsRoom(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("AppendMessage_TurnBudgetExhaustionAbandonsRoom", func(t *testing.T) {
 		t.Parallel()
 
 		const budget = 2
-		s := newStore()
+		s := newStore(t)
 		r, err := s.CreateRoomWithBudget(context.Background(), tenantA, "goal", budget)
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
@@ -692,7 +695,7 @@ func testAppendMessageTurnBudgetExhaustionAbandonsRoom(t *testing.T, newStore fu
 	})
 }
 
-func testCreateRoomWithBudgetRejectsNonPositive(t *testing.T, newStore func() room.Store) {
+func testCreateRoomWithBudgetRejectsNonPositive(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("CreateRoomWithBudget_RejectsNonPositive", func(t *testing.T) {
 		t.Parallel()
 
@@ -707,7 +710,7 @@ func testCreateRoomWithBudgetRejectsNonPositive(t *testing.T, newStore func() ro
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
 
-				s := newStore()
+				s := newStore(t)
 				_, err := s.CreateRoomWithBudget(context.Background(), tenantA, "goal", tt.budget)
 				if err == nil {
 					t.Fatal("err = nil, want error for non-positive turn budget")
@@ -719,11 +722,11 @@ func testCreateRoomWithBudgetRejectsNonPositive(t *testing.T, newStore func() ro
 
 // ---------------------------------------------------------- MemberAgentID ---
 
-func testMemberAgentID(t *testing.T, newStore func() room.Store) {
+func testMemberAgentID(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("MemberAgentID", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "goal")
 		member, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_1", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
@@ -762,11 +765,11 @@ func testMemberAgentID(t *testing.T, newStore func() room.Store) {
 
 // ----------------------------------------------------- RecordDeliveryFailure
 
-func testRecordDeliveryFailure(t *testing.T, newStore func() room.Store) {
+func testRecordDeliveryFailure(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("RecordDeliveryFailure", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "goal")
 		sender, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 		if err != nil {
@@ -815,11 +818,11 @@ func testRecordDeliveryFailure(t *testing.T, newStore func() room.Store) {
 
 // -------------------------------------------------------------- terminal ---
 
-func testCompleteRoom(t *testing.T, newStore func() room.Store) {
+func testCompleteRoom(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("CompleteRoom", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r := mustCreateRoom(t, s, tenantA, "goal")
 
 		got, err := s.CompleteRoom(context.Background(), tenantA, r.ID)
@@ -843,7 +846,7 @@ func testCompleteRoom(t *testing.T, newStore func() room.Store) {
 // testTerminatedRoomRejectsAppends is table-driven over both terminal states
 // and every append path: appending anything to a terminated room is an error,
 // regardless of how it became terminal.
-func testTerminatedRoomRejectsAppends(t *testing.T, newStore func() room.Store) {
+func testTerminatedRoomRejectsAppends(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("TerminatedRoomRejectsAppends", func(t *testing.T) {
 		t.Parallel()
 
@@ -884,7 +887,7 @@ func testTerminatedRoomRejectsAppends(t *testing.T, newStore func() room.Store) 
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
 
-				s := newStore()
+				s := newStore(t)
 				r, err := s.CreateRoomWithBudget(context.Background(), tenantA, "goal", 1)
 				if err != nil {
 					t.Fatalf("CreateRoomWithBudget: %v", err)
@@ -918,7 +921,7 @@ func testTerminatedRoomRejectsAppends(t *testing.T, newStore func() room.Store) 
 // runs exactly the checks AppendMessage runs, so a caller can find out whether
 // a message would be accepted BEFORE performing a side effect it cannot take
 // back.
-func testReserveTurnRunsTheSameChecksAsAppendMessage(t *testing.T, newStore func() room.Store) {
+func testReserveTurnRunsTheSameChecksAsAppendMessage(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("ReserveTurn_RunsTheSameChecksAsAppendMessage", func(t *testing.T) {
 		t.Parallel()
 
@@ -970,7 +973,7 @@ func testReserveTurnRunsTheSameChecksAsAppendMessage(t *testing.T, newStore func
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
 
-				s := newStore()
+				s := newStore(t)
 				r, err := s.CreateRoomWithBudget(context.Background(), tenantA, "goal", 1)
 				if err != nil {
 					t.Fatalf("CreateRoomWithBudget: %v", err)
@@ -999,11 +1002,11 @@ func testReserveTurnRunsTheSameChecksAsAppendMessage(t *testing.T, newStore func
 // is abandoned. Otherwise which of the two paths a post arrived on would
 // decide whether the room lives, and an addressed message could keep asking
 // for turns a broadcast one had already exhausted.
-func testReserveTurnOutOfTurnsAbandonsTheRoomLikeAppendMessage(t *testing.T, newStore func() room.Store) {
+func testReserveTurnOutOfTurnsAbandonsTheRoomLikeAppendMessage(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("ReserveTurn_OutOfTurnsAbandonsTheRoomLikeAppendMessage", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r, err := s.CreateRoomWithBudget(context.Background(), tenantA, "goal", 1)
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
@@ -1037,11 +1040,11 @@ func testReserveTurnOutOfTurnsAbandonsTheRoomLikeAppendMessage(t *testing.T, new
 // testReserveTurnHoldsTheTurnUntilResolved verifies the point of a
 // reservation: the turn is held for the life of the side effect, so nothing
 // arriving in the meantime can spend it. Releasing gives it back.
-func testReserveTurnHoldsTheTurnUntilResolved(t *testing.T, newStore func() room.Store) {
+func testReserveTurnHoldsTheTurnUntilResolved(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("ReserveTurn_HoldsTheTurnUntilResolved", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r, err := s.CreateRoomWithBudget(context.Background(), tenantA, "goal", 1)
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
@@ -1095,11 +1098,11 @@ func testReserveTurnHoldsTheTurnUntilResolved(t *testing.T, newStore func() room
 // the recipient's agent — so the transcript records it even if the room was
 // terminated or its budget exhausted while the delivery was in flight. A
 // delivered call the room denies would be the worse outcome.
-func testCommitTurnRecordsTheMessageEvenIfTheRoomTerminatedMeanwhile(t *testing.T, newStore func() room.Store) {
+func testCommitTurnRecordsTheMessageEvenIfTheRoomTerminatedMeanwhile(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("CommitTurn_RecordsTheMessageEvenIfTheRoomTerminatedMeanwhile", func(t *testing.T) {
 		t.Parallel()
 
-		s := newStore()
+		s := newStore(t)
 		r, err := s.CreateRoomWithBudget(context.Background(), tenantA, "goal", 1)
 		if err != nil {
 			t.Fatalf("CreateRoomWithBudget: %v", err)
@@ -1148,7 +1151,7 @@ func testCommitTurnRecordsTheMessageEvenIfTheRoomTerminatedMeanwhile(t *testing.
 // testReservationResolvesOnlyOnce verifies that a reservation is resolved
 // exactly once. Resolving it twice would either double-record a message or
 // hand back a turn that is not held.
-func testReservationResolvesOnlyOnce(t *testing.T, newStore func() room.Store) {
+func testReservationResolvesOnlyOnce(t *testing.T, newStore func(t *testing.T) room.Store) {
 	t.Run("ReservationResolvesOnlyOnce", func(t *testing.T) {
 		t.Parallel()
 
@@ -1166,7 +1169,7 @@ func testReservationResolvesOnlyOnce(t *testing.T, newStore func() room.Store) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				s := newStore()
+				s := newStore(t)
 				r := mustCreateRoom(t, s, tenantA, "goal")
 				m, err := s.AddMember(context.Background(), tenantA, r.ID, "agt_sender", tenantA, nil, nil, room.ContextCommitment{})
 				if err != nil {

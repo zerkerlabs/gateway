@@ -559,20 +559,19 @@ func TestPG_TurnAccountingMatchesMemoryStore(t *testing.T) {
 // SQL — CreateRoom, AddMember, AppendMessage, CompleteRoom,
 // RecordDeliveryFailure, and RecordDelivery are what this file now proves.
 // These tests call PostgresStore's concrete methods directly rather than
-// running roomtest.RunContract. That is no longer because it cannot satisfy
-// room.Store — ReserveTurn/CommitTurn/ReleaseTurn are implemented above and
-// the compile-time assertion in zz_iface_check_test.go passes. It is because
-// the shared suite calls newStore() per behaviour expecting a clean store,
-// across subtests that run in parallel, while every test here isolates by
-// TRUNCATE-ing shared tables in one database. Pointing the suite at Postgres
-// as-is would have parallel subtests truncating rows out from under each
-// other — not flakiness, guaranteed mutual destruction.
-//
-// Closing that gap needs real per-call isolation (a schema per store, in
-// which case the suite's parallelism can stay untouched), which is a change
-// to how this package's tests get a database and is tracked as its own piece
-// of work. Until then, interface conformance is proven but behavioural
-// equivalence with MemoryStore is not.
+// running roomtest.RunContract, on purpose: they are here for what TRUNCATE
+// against one shared database lets them do that the contract suite doesn't —
+// direct SQL assertions against room_events.payload and room_members.tenant_id
+// (TestPG_AddMember_ContextCommitmentPersistedNotContent,
+// TestPG_AddMember_RoundTrip), rolled-back transactions
+// (TestPG_AppendMessage_RolledBackTransactionLeavesNoGap), and a second store
+// standing in for a restart (TestPG_ReserveTurn_ReservationSurvivesRestart and
+// its neighbors below). roomtest.RunContract itself now runs against
+// PostgresStore too — see TestPostgresStore_Contract in
+// postgres_contract_test.go, schema-per-store rather than TRUNCATE, so its
+// parallel and -race subtests run unchanged. Behavioural equivalence with
+// MemoryStore is proven there; this file is additive to it, not a
+// placeholder for it.
 // ============================================================================
 
 // -------------------------------------------------------------- CreateRoom ---

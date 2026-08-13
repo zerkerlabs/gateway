@@ -4,13 +4,12 @@ package room
 // a method added to Store and left unimplemented on one side fails the build
 // immediately rather than at run time.
 //
-// This is currently the ONLY thing holding the two implementations to the
-// same interface. Only MemoryStore is exercised end-to-end by
-// roomtest.RunContract (store_test.go); PostgresStore is covered by its own
-// direct tests (postgres_test.go), which is weaker — satisfying the interface
-// is not the same as behaving identically through it. Running the shared
-// suite against both is tracked separately; see the note in postgres_test.go
-// for what it needs.
+// Satisfying the interface is not the same as behaving identically through
+// it — that stronger claim is proven by running roomtest.RunContract against
+// both implementations: MemoryStore in store_test.go, PostgresStore (build
+// tag integration, schema-per-store isolation) in postgres_contract_test.go.
+// PostgresStore also has its own direct tests in postgres_test.go, additive
+// to the shared suite rather than a substitute for it.
 var (
 	_ Store = (*MemoryStore)(nil)
 	_ Store = (*PostgresStore)(nil)
