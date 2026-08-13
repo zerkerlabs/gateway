@@ -107,7 +107,10 @@ func run(logger *slog.Logger) error {
 		"timeout", zmemDeployment.Timeout, "context_budget_tokens", zmemDeployment.ContextBudgetTokens,
 		"risk", zmemDeployment.Risk)
 
-	handler, roomHandler, err := newHandler(logger, store, gwClient, memoryStore)
+	handler, roomHandler, err := newHandler(logger, store, gwClient, memoryStore, memory.ContextPolicy{
+		Risk:                zmemDeployment.Risk,
+		ContextBudgetTokens: zmemDeployment.ContextBudgetTokens,
+	})
 	if err != nil {
 		return err
 	}
@@ -159,7 +162,7 @@ func run(logger *slog.Logger) error {
 // The *httpapi.Handler is also returned so the caller can drain its receipt-
 // emission goroutines on shutdown (Handler.Shutdown) — the auth-wrapped
 // http.Handler above does not expose it.
-func newHandler(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller, memoryStore memory.Store) (http.Handler, *httpapi.Handler, error) {
+func newHandler(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller, memoryStore memory.Store, contextPolicy memory.ContextPolicy) (http.Handler, *httpapi.Handler, error) {
 	// context.Background, not the shutdown context: go-oidc keeps this context
 	// for background JWKS refreshes, and one cancelled at SIGTERM would break
 	// key rotation for the lifetime of the process instead.
@@ -167,7 +170,7 @@ func newHandler(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayC
 	if err != nil {
 		return nil, nil, fmt.Errorf("init auth middleware: %w", err)
 	}
-	mux, roomHandler := newMux(logger, store, gwClient, memoryStore)
+	mux, roomHandler := newMux(logger, store, gwClient, memoryStore, contextPolicy)
 	return mw(mux), roomHandler, nil
 }
 
@@ -178,7 +181,7 @@ func newHandler(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayC
 //
 // It also returns the *httpapi.Handler it registered, so a caller that needs
 // it for shutdown draining does not have to reach back into the mux.
-func newMux(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller, memoryStore memory.Store) (*http.ServeMux, *httpapi.Handler) {
+func newMux(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller, memoryStore memory.Store, contextPolicy memory.ContextPolicy) (*http.ServeMux, *httpapi.Handler) {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthz())
 	mux.Handle("GET /version", versionHandler())
@@ -191,7 +194,7 @@ func newMux(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCalle
 	//
 	// store is also built in run(), so its turn reservations are reconciled
 	// before any route can reach it.
-	roomHandler := httpapi.NewHandler(store, memoryStore, gwClient, receipt.NewFake(), logger)
+	roomHandler := httpapi.NewHandler(store, memoryStore, contextPolicy, gwClient, receipt.NewFake(), logger)
 	roomHandler.RegisterRoutes(mux)
 	return mux, roomHandler
 }

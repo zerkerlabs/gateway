@@ -73,14 +73,18 @@ func (h *Handler) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	// Purpose is the room's goal: it is the retrieval query a real backend
 	// searches against, not descriptive metadata, and CreateRoom already
 	// requires got.Goal to be non-empty, so it is always safe to send here.
-	// Risk and ContextBudgetTokens are tenant policy inputs this handler does
-	// not yet wire up — a separate change.
+	// Risk and ContextBudgetTokens come from deployment configuration and are
+	// sent on every call, never left unset — the backend records them in the
+	// commitment, so omitting them attests its defaults instead of what this
+	// deployment was configured with. See memory.ContextPolicy.
 	result, err := h.memoryStore.PrepareContext(r.Context(), memory.PrepareRequest{
-		RoomID:           roomID,
-		AgentID:          req.AgentID,
-		Purpose:          got.Goal,
-		MembershipDigest: membershipDigest(got.Members),
-		RoomStateDigest:  roomStateDigest(got),
+		RoomID:              roomID,
+		AgentID:             req.AgentID,
+		Purpose:             got.Goal,
+		Risk:                h.contextPolicy.Risk,
+		ContextBudgetTokens: h.contextPolicy.ContextBudgetTokens,
+		MembershipDigest:    membershipDigest(got.Members),
+		RoomStateDigest:     roomStateDigest(got),
 	})
 	if err != nil {
 		h.logger.Error("add member: onboarding memory preparation failed", "err", err)

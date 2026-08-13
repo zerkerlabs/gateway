@@ -36,7 +36,7 @@ func TestOperationalRoutes(t *testing.T) {
 	// onboarding, so a nil gateway client (never called) and a fresh fake
 	// memory store are fine here — the real client is exercised by the
 	// memory package's own tests and the integration suite.
-	mux, _ := newMux(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake())
+	mux, _ := newMux(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake(), memory.ContextPolicy{Risk: "medium", ContextBudgetTokens: 2_000})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -84,7 +84,7 @@ func TestHandlerRequiresBearerTokenForRoomRoutes(t *testing.T) {
 
 	// Nil gateway client: no test here posts an addressed message, the only
 	// path that calls it.
-	handler, _, err := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake())
+	handler, _, err := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake(), memory.ContextPolicy{Risk: "medium", ContextBudgetTokens: 2_000})
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestNewHandlerFailsWithoutOIDCConfig(t *testing.T) {
 	t.Setenv("ROOMS_OIDC_ISSUER", "")
 	t.Setenv("ROOMS_OIDC_AUDIENCE", "")
 
-	if _, _, err := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake()); err == nil {
+	if _, _, err := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake(), memory.ContextPolicy{Risk: "medium", ContextBudgetTokens: 2_000}); err == nil {
 		t.Fatal("newHandler with no OIDC config: want error, got nil")
 	}
 }
@@ -336,7 +336,7 @@ func TestReadSecret(t *testing.T) {
 func TestVersionExposesOnlyBuildMetadata(t *testing.T) {
 	t.Parallel()
 
-	mux, _ := newMux(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake())
+	mux, _ := newMux(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake(), memory.ContextPolicy{Risk: "medium", ContextBudgetTokens: 2_000})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/version", nil))
 
