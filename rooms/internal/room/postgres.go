@@ -17,13 +17,15 @@ import (
 // pgUniqueViolation is the PostgreSQL SQLSTATE code for unique_violation.
 const pgUniqueViolation = "23505"
 
-// PostgresStore is a PostgreSQL-backed, tenant-scoped implementation of most
-// of Store: the full read half (GetRoom, ListRooms, Messages, Events,
-// MemberAgentID) plus CreateRoom, CreateRoomWithBudget, AddMember,
-// AppendMessage, CompleteRoom, RecordDeliveryFailure, and RecordDelivery.
-// Turn reservations (ReserveTurn, CommitTurn, ReleaseTurn) are a separate
-// implementation effort; a PostgresStore does not satisfy the full Store
-// interface on its own.
+// PostgresStore is a PostgreSQL-backed, tenant-scoped implementation of
+// Store.
+//
+// Turn reservations are durable: ReserveTurn writes a room_reservations row
+// before any caller-visible side effect happens, so a reservation still
+// there after a crash can be resolved on the next startup by asking the
+// gateway what became of the invocation it was accepted under (see
+// ReconcileReservations) rather than either burning the turn forever or
+// silently losing a call that landed.
 //
 // A room's transcript and turn accounting are never stored separately — they
 // are derived by replaying room_events in sequence order through the same
@@ -352,6 +354,215 @@ func (s *PostgresStore) RecordDelivery(ctx context.Context, tenantID, roomID, fr
 	})
 }
 
+// ------------------------------------------------------- turn reservations ---
+
+// ReserveTurn implements the write half of Store. It runs the identical
+// checks AppendMessage runs (canPostTx) inside the same room-row-locked
+// transaction, and, if they pass, inserts a room_reservations row before
+// returning — so the reservation is durable, and holding a turn against the
+// budget, before the caller ever makes the proxied call it exists to guard.
+// That ordering is what makes a reservation left over by a crash
+// reconcilable at all (see ReconcileReservations): there would be nothing to
+// reconcile against otherwise.
+func (s *PostgresStore) ReserveTurn(ctx context.Context, tenantID, roomID string, msg PendingMessage) (*Reservation, error) {
+	id, err := resource.New("msg")
+	if err != nil {
+		return nil, err
+	}
+
+	// reserveErr carries ErrTurnBudgetExceeded out of the transaction below,
+	// mirroring AppendMessage's budgetErr: that one rejection still has to
+	// commit the room's transition to StateAbandoned, while every other
+	// rejection has written nothing and simply rolls back.
+	var reserveErr error
+	err = s.withTx(ctx, func(tx pgx.Tx) error {
+		rl, err := s.lockRoom(ctx, tx, tenantID, roomID)
+		if err != nil {
+			return err
+		}
+		if postErr := s.canPostTx(ctx, tx, tenantID, roomID, rl, msg.MemberID); postErr != nil {
+			if !errors.Is(postErr, ErrTurnBudgetExceeded) {
+				return postErr
+			}
+			if err := s.abandonTx(ctx, tx, tenantID, roomID, rl); err != nil {
+				return err
+			}
+			reserveErr = postErr
+			return nil
+		}
+
+		if _, err := tx.Exec(
+			ctx,
+			`INSERT INTO room_reservations (id, room_id, tenant_id, member_id, to_member_id, body, created_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			id, roomID, tenantID, msg.MemberID, msg.ToMemberID, msg.Body, time.Now().UTC(),
+		); err != nil {
+			return fmt.Errorf("room: insert reservation: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if reserveErr != nil {
+		return nil, reserveErr
+	}
+	return &Reservation{messageID: id, tenantID: tenantID, roomID: roomID, msg: msg}, nil
+}
+
+// CommitTurn implements the write half of Store. Deleting the reservation row
+// and appending the message it was held for happen in the same transaction
+// that locks the room, so a second CommitTurn or ReleaseTurn for the same
+// reservation always finds the row already gone (ErrReservationNotHeld)
+// rather than racing to act on it twice.
+//
+// ctx is accepted only for symmetry with the rest of Store — see the
+// Store.CommitTurn doc comment for why an implementation must not honour
+// cancellation here. Stripping it with context.WithoutCancel, rather than
+// ignoring the parameter outright, keeps this method able to issue the
+// queries a committed delivery still requires.
+func (s *PostgresStore) CommitTurn(ctx context.Context, res *Reservation) (*Message, error) {
+	if res == nil {
+		return nil, ErrReservationNotHeld
+	}
+	ctx = context.WithoutCancel(ctx)
+
+	m := &Message{
+		ID:         res.messageID,
+		MemberID:   res.msg.MemberID,
+		ToMemberID: res.msg.ToMemberID,
+		Body:       res.msg.Body,
+		CreatedAt:  time.Now().UTC(),
+	}
+
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		rl, err := s.lockRoom(ctx, tx, res.tenantID, res.roomID)
+		if err != nil {
+			return err
+		}
+
+		tag, err := tx.Exec(ctx, `DELETE FROM room_reservations WHERE id=$1 AND room_id=$2 AND tenant_id=$3`,
+			res.messageID, res.roomID, res.tenantID)
+		if err != nil {
+			return fmt.Errorf("room: delete reservation: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrReservationNotHeld
+		}
+
+		return s.appendEventTx(ctx, tx, res.tenantID, res.roomID, rl.nextSequence, EventMessagePosted, MessagePostedPayload{Message: m})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cloneMessage(m), nil
+}
+
+// ReleaseTurn implements the write half of Store. Like CommitTurn it strips
+// ctx's cancellation rather than honouring it — a released turn that stayed
+// reserved would be lost for the life of the room. It needs no room lock: it
+// only ever deletes a room_reservations row, and never touches next_sequence
+// or the turn-budget check that lock exists to serialize.
+func (s *PostgresStore) ReleaseTurn(ctx context.Context, res *Reservation) error {
+	if res == nil {
+		return ErrReservationNotHeld
+	}
+	ctx = context.WithoutCancel(ctx)
+
+	tag, err := s.pool.Exec(ctx, `DELETE FROM room_reservations WHERE id=$1 AND room_id=$2 AND tenant_id=$3`,
+		res.messageID, res.roomID, res.tenantID)
+	if err != nil {
+		return fmt.Errorf("room: delete reservation: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrReservationNotHeld
+	}
+	return nil
+}
+
+// AttachReservationInvocation implements Store.
+func (s *PostgresStore) AttachReservationInvocation(ctx context.Context, res *Reservation, invocationID string) error {
+	if res == nil {
+		return ErrReservationNotHeld
+	}
+
+	tag, err := s.pool.Exec(
+		ctx,
+		`UPDATE room_reservations SET invocation_id=$1 WHERE id=$2 AND room_id=$3 AND tenant_id=$4`,
+		invocationID, res.messageID, res.roomID, res.tenantID,
+	)
+	if err != nil {
+		return fmt.Errorf("room: attach reservation invocation: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrReservationNotHeld
+	}
+	return nil
+}
+
+// PendingReservations implements Store. It sweeps every tenant this store
+// holds, joining each reservation to its recipient's agent_id so
+// ReconcileReservations has what it needs to ask the gateway about the call —
+// room_members is permanent (nothing in Rooms removes a member), so this join
+// can never fail to find a row a live reservation's to_member_id names.
+func (s *PostgresStore) PendingReservations(ctx context.Context) ([]*PendingReservation, error) {
+	rows, err := s.pool.Query(
+		ctx, `
+		SELECT r.id, r.room_id, r.tenant_id, r.member_id, r.to_member_id, r.body,
+		       r.invocation_id, r.created_at, rm.agent_id
+		FROM room_reservations r
+		JOIN room_members rm ON rm.id = r.to_member_id AND rm.room_id = r.room_id AND rm.tenant_id = r.tenant_id
+		ORDER BY r.created_at ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("room: list pending reservations: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*PendingReservation
+	for rows.Next() {
+		var (
+			id, roomID, tenantID, memberID, toMemberID, body, invocationID, toAgentID string
+			createdAt                                                                 time.Time
+		)
+		if err := rows.Scan(&id, &roomID, &tenantID, &memberID, &toMemberID, &body, &invocationID, &createdAt, &toAgentID); err != nil {
+			return nil, fmt.Errorf("room: scan pending reservation: %w", err)
+		}
+		out = append(out, &PendingReservation{
+			Reservation: &Reservation{
+				messageID: id,
+				tenantID:  tenantID,
+				roomID:    roomID,
+				msg:       PendingMessage{MemberID: memberID, ToMemberID: toMemberID, Body: body},
+			},
+			TenantID:     tenantID,
+			RoomID:       roomID,
+			ToAgentID:    toAgentID,
+			InvocationID: invocationID,
+			CreatedAt:    createdAt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("room: list pending reservations: %w", err)
+	}
+	return out, nil
+}
+
+// turnsReservedTx counts how many of roomID's turns are currently held by an
+// outstanding reservation (see ReserveTurn) — mirrors
+// MemoryStore.turnsSpent's len(s.pending[r.ID]) term.
+func (s *PostgresStore) turnsReservedTx(ctx context.Context, tx pgx.Tx, tenantID, roomID string) (int, error) {
+	var n int
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT count(*) FROM room_reservations WHERE room_id=$1 AND tenant_id=$2`,
+		roomID, tenantID,
+	).Scan(&n); err != nil {
+		return 0, fmt.Errorf("room: count reserved turns: %w", err)
+	}
+	return n, nil
+}
+
 // roomLock is what a write transaction reads from a rooms row locked FOR
 // UPDATE: everything it needs to decide whether the write may proceed and
 // where its event's sequence number comes from. Holding this lock for the
@@ -392,9 +603,14 @@ func (s *PostgresStore) lockRoom(ctx context.Context, tx pgx.Tx, tenantID, roomI
 
 // canPostTx mirrors MemoryStore.canPost: memberID may post to roomID right
 // now only if the room (already locked via rl) is open, memberID is seated
-// in it, and the budget has room for one more turn. It reads inside the same
-// transaction that holds the row lock rl came from, so nothing else can
-// change the turn count between this check and the caller acting on it.
+// in it, and the budget has room for one more turn. "Room" accounts for both
+// turns already spent (turnsConsumedTx) and turns currently held by an
+// outstanding reservation (turnsReservedTx) — a reserved turn counts against
+// the budget exactly like a posted message does, so AppendMessage and
+// ReserveTurn share this one check and can never disagree about whether a
+// turn is available. It reads inside the same transaction that holds the row
+// lock rl came from, so nothing else can change the turn count between this
+// check and the caller acting on it.
 func (s *PostgresStore) canPostTx(ctx context.Context, tx pgx.Tx, tenantID, roomID string, rl *roomLock, memberID string) error {
 	if rl.state != StateOpen {
 		return ErrRoomTerminated
@@ -408,12 +624,20 @@ func (s *PostgresStore) canPostTx(ctx context.Context, tx pgx.Tx, tenantID, room
 		return ErrMemberNotFound
 	}
 
-	spent, err := s.turnsConsumedTx(ctx, tx, tenantID, roomID)
+	consumed, err := s.turnsConsumedTx(ctx, tx, tenantID, roomID)
 	if err != nil {
 		return err
 	}
-	if spent+1 > rl.turnBudget {
+	if consumed+1 > rl.turnBudget {
 		return ErrTurnBudgetExceeded
+	}
+
+	reserved, err := s.turnsReservedTx(ctx, tx, tenantID, roomID)
+	if err != nil {
+		return err
+	}
+	if consumed+reserved+1 > rl.turnBudget {
+		return ErrTurnReserved
 	}
 	return nil
 }

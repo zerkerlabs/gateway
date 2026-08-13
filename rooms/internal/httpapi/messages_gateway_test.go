@@ -91,8 +91,8 @@ func newCountingGatewayWithConfirmTimeout(t *testing.T, confirmTimeout time.Dura
 	return g
 }
 
-func (g *countingGateway) Call(ctx context.Context, tenantID, agentID string, body []byte) (*gateway.Result, error) {
-	return g.client.Call(ctx, tenantID, agentID, body)
+func (g *countingGateway) Deliver(ctx context.Context, tenantID, agentID string, body []byte, onAccepted func(invocationID string)) (*gateway.Result, error) {
+	return g.client.Deliver(ctx, tenantID, agentID, body, onAccepted)
 }
 
 func TestHandlePostMessage_Addressed(t *testing.T) {
@@ -410,6 +410,85 @@ func TestHandlePostMessage_ConcurrentPostCannotStealAnInFlightTurn(t *testing.T)
 	// the room is open with nothing left — not terminated by the near-miss.
 	if got["state"] != string(room.StateOpen) {
 		t.Errorf("state = %v, want %q — a post refused by a reserved turn abandoned the room", got["state"], room.StateOpen)
+	}
+}
+
+// Reservation durability depends on the invocation ID reaching the store
+// before the (possibly long) confirmation wait, not only once it returns —
+// that wait is the crash window reconciliation exists to cover. This proves
+// the ID is attached to the store's outstanding reservation while
+// confirmation is still polling, not just after it completes: the POST is
+// answered immediately, but the first poll blocks until the test releases
+// it.
+func TestHandlePostMessage_AttachesInvocationIDBeforeConfirmation(t *testing.T) {
+	t.Parallel()
+
+	polling := make(chan struct{})
+	release := make(chan struct{})
+	var pollOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"invocation_id":"inv_mid_flight"}`))
+			return
+		}
+		pollOnce.Do(func() { close(polling) })
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"succeeded","upstream_status":200}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := gateway.New(gateway.Config{
+		BaseURL:    srv.URL,
+		Credential: testGatewayCredential, //nolint:gosec // test fixture, not a real credential
+		Tenant:     tenantA,
+	})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+
+	mux, store := newMuxWithMemoryAndGateway(t, nil, client)
+	roomID, memberID := roomAndMember(t, store, 1)
+	recipient := mustAddMember(t, store, roomID, "agt_recipient")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, requestAs(t, http.MethodPost, "/v1/rooms/"+roomID+"/messages",
+			map[string]any{"member_id": memberID, "to_member_id": recipient.ID, "body": "hi"}, tenantA))
+		if rec.Code != http.StatusCreated {
+			t.Errorf("status = %d, want %d; body = %s", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+	}()
+
+	select {
+	case <-polling: // accept() has returned and confirm() is now blocked on its first poll
+	case <-time.After(2 * time.Second):
+		t.Fatal("confirmation never started polling within 2s")
+	}
+
+	pending, err := store.PendingReservations(context.Background())
+	if err != nil {
+		t.Fatalf("PendingReservations: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending reservations = %+v, want exactly 1 while confirmation is in flight", pending)
+	}
+	if pending[0].InvocationID != "inv_mid_flight" {
+		t.Errorf("pending reservation InvocationID = %q, want %q — a crash right now would have nothing to reconcile against", pending[0].InvocationID, "inv_mid_flight")
+	}
+	if pending[0].ToAgentID != "agt_recipient" {
+		t.Errorf("pending reservation ToAgentID = %q, want %q", pending[0].ToAgentID, "agt_recipient")
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not complete within 2s of releasing the poll")
 	}
 }
 

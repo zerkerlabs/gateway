@@ -66,7 +66,7 @@ func TestMain(m *testing.M) {
 // pretending to deliver, so an unexpected gateway call doesn't go unnoticed.
 type unreachableGateway struct{ t *testing.T }
 
-func (g unreachableGateway) Call(_ context.Context, _, agentID string, _ []byte) (*gateway.Result, error) {
+func (g unreachableGateway) Deliver(_ context.Context, _, agentID string, _ []byte, _ func(invocationID string)) (*gateway.Result, error) {
 	g.t.Helper()
 	g.t.Fatalf("unexpected gateway call to %q", agentID)
 	return nil, nil

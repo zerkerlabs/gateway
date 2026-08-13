@@ -444,3 +444,143 @@ func TestClient_Call_CredentialNeverLeaks(t *testing.T) {
 		})
 	}
 }
+
+// Deliver's onAccepted callback is what lets a caller persist the invocation
+// ID before the (possibly long) confirmation poll begins — the crash window
+// reservation durability exists to cover. It must fire exactly once, with the
+// ID the POST was accepted under, before the invocation reaches a terminal
+// state.
+func TestClient_Deliver_OnAcceptedFiresBeforeConfirmation(t *testing.T) {
+	t.Parallel()
+
+	f := &fakeGateway{statuses: []string{"pending", "running", "succeeded"}, upstreamStatus: 200}
+	srv := f.server(t)
+
+	var (
+		calls         int
+		gotID         string
+		pollsAtAccept int32
+	)
+	result, err := fastClient(t, srv.URL).Deliver(context.Background(), testTenant, "agt_recipient", []byte(`{}`), func(invocationID string) {
+		calls++
+		gotID = invocationID
+		pollsAtAccept = atomic.LoadInt32(&f.polls)
+	})
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("onAccepted called %d times, want exactly 1", calls)
+	}
+	if gotID != "inv_abc123" {
+		t.Errorf("invocationID = %q, want %q", gotID, "inv_abc123")
+	}
+	if pollsAtAccept != 0 {
+		t.Errorf("polls at onAccepted time = %d, want 0 — it must fire before confirmation begins", pollsAtAccept)
+	}
+	if result.InvocationID != gotID {
+		t.Errorf("result.InvocationID = %q, want the same ID onAccepted saw (%q)", result.InvocationID, gotID)
+	}
+}
+
+// A caller-side rejection never reaches accept, so onAccepted must not fire —
+// there is no invocation ID to report.
+func TestClient_Deliver_OnAcceptedNotCalledOnRejection(t *testing.T) {
+	t.Parallel()
+
+	f := &fakeGateway{acceptStatus: http.StatusForbidden}
+	srv := f.server(t)
+
+	called := false
+	_, err := fastClient(t, srv.URL).Deliver(context.Background(), testTenant, "agt_recipient", []byte(`{}`), func(string) {
+		called = true
+	})
+	if err == nil {
+		t.Fatal("err = nil, want an error for a rejected call")
+	}
+	if called {
+		t.Error("onAccepted was called though the gateway never accepted the call")
+	}
+}
+
+// Reconcile answers a startup reservation-recovery sweep about a previously
+// accepted invocation without polling: it asks once and reports what it got.
+func TestClient_Reconcile(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		f           *fakeGateway
+		wantOutcome gateway.ReconcileOutcome
+		wantErr     bool
+	}{
+		{"succeeded", &fakeGateway{statuses: []string{"succeeded"}, upstreamStatus: 200}, gateway.ReconcileSucceeded, false},
+		{"failed", &fakeGateway{statuses: []string{"failed"}, upstreamStatus: 500}, gateway.ReconcileFailed, false},
+		{"still running is unanswerable", &fakeGateway{statuses: []string{"running"}}, 0, true},
+		{"still pending is unanswerable", &fakeGateway{statuses: []string{"pending"}}, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := tt.f.server(t)
+			outcome, err := fastClient(t, srv.URL).Reconcile(context.Background(), "agt_recipient", "inv_abc123")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("err = nil, want an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			if outcome != tt.wantOutcome {
+				t.Errorf("outcome = %v, want %v", outcome, tt.wantOutcome)
+			}
+		})
+	}
+}
+
+// A gateway with no record of the invocation ID at all — e.g. it was never
+// accepted, or the gateway's own state was lost — must be reported distinctly
+// from every other unanswerable outcome, since a caller resolving many
+// reservations at startup treats "definitely not found" as safe to release
+// without further doubt.
+func TestClient_Reconcile_NotFound(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	outcome, err := fastClient(t, srv.URL).Reconcile(context.Background(), "agt_recipient", "inv_missing")
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if outcome != gateway.ReconcileNotFound {
+		t.Errorf("outcome = %v, want ReconcileNotFound", outcome)
+	}
+}
+
+// An unreachable gateway cannot answer either, and must not be mistaken for a
+// "not found" — the caller's fallback (release and log at error level) is the
+// same either way, but the two are different facts about the world.
+func TestClient_Reconcile_Unreachable(t *testing.T) {
+	t.Parallel()
+
+	c, err := gateway.New(gateway.Config{
+		BaseURL:    "http://127.0.0.1:1", // nothing listens here
+		Credential: testCredential,
+		Tenant:     testTenant,
+		Timeout:    200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = c.Reconcile(context.Background(), "agt_recipient", "inv_abc123")
+	if err == nil {
+		t.Fatal("err = nil, want an error — the gateway cannot be reached")
+	}
+}
