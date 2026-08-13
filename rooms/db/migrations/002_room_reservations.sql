@@ -24,3 +24,15 @@ CREATE TABLE IF NOT EXISTS room_reservations (
 );
 
 CREATE INDEX IF NOT EXISTS room_reservations_tenant_id_idx ON room_reservations (tenant_id);
+
+-- The turn-budget check counts a room's outstanding reservations on EVERY
+-- ReserveTurn and AppendMessage (turnsReservedTx: WHERE room_id=$1 AND
+-- tenant_id=$2), so it is on the hot path for posting a message.
+--
+-- The tenant_id index above does not serve it. A Rooms deployment is
+-- tenant-local — one deployment, one tenant — so tenant_id is very nearly the
+-- same value on every row here, and an index on it alone has almost no
+-- selectivity to offer. Leading with room_id is what makes this count a lookup
+-- rather than a scan of every live reservation in the deployment.
+CREATE INDEX IF NOT EXISTS room_reservations_room_id_tenant_id_idx
+    ON room_reservations (room_id, tenant_id);
