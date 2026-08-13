@@ -306,23 +306,23 @@ func testAddMember(t *testing.T, newStore func(t *testing.T) room.Store) {
 				t.Errorf("CallerDocuments = %v, want %v", m.CallerDocuments, callerDocuments)
 			}
 
-			// Mutating the caller's slices after the call must not leak into
-			// the store (same isolation guarantee as
-			// testReturnedValuesAreIsolated), and the two fields must stay
-			// distinguishable through a fresh read, not just on the value
-			// AddMember handed back.
-			admittedMemory[0] = "mutated"
-			callerDocuments[0] = "mutated"
-			got, err := s.GetRoom(context.Background(), tenantA, r.ID)
-			if err != nil {
-				t.Fatalf("GetRoom: %v", err)
-			}
-			if got.Members[0].AdmittedMemory[0] != "memory entry" {
-				t.Errorf("stored AdmittedMemory[0] = %q, want %q (caller mutation leaked into store)", got.Members[0].AdmittedMemory[0], "memory entry")
-			}
-			if got.Members[0].CallerDocuments[0] != "onboarding doc" {
-				t.Errorf("stored CallerDocuments[0] = %q, want %q (caller mutation leaked into store)", got.Members[0].CallerDocuments[0], "onboarding doc")
-			}
+			// Deliberately NOT asserted here: that a fresh GetRoom still
+			// returns this content. That is true of MemoryStore only because
+			// it never leaves the process, and it is deliberately FALSE of a
+			// durable store — the PO decision governing the persisted
+			// member_joined payload is "the commitment digest plus counts,
+			// never the content", so nothing the memory policy withheld (or
+			// later revokes) can outlive that policy in a room's own tables.
+			//
+			// Asserting a fresh read here would encode an in-memory
+			// implementation detail as if it were the interface contract, and
+			// would force any durable implementation to violate that
+			// decision to pass. What each store does on reload is its own
+			// claim: MemoryStore keeps the content live, and PostgresStore
+			// reproduces the commitment while marking the reloaded member's
+			// context not replayable, so it stays distinguishable from a
+			// member that genuinely had none. Both are covered by their own
+			// tests.
 		})
 	})
 }
