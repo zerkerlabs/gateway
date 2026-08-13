@@ -695,3 +695,40 @@ func TestHandleAddMember(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleAddMember_SendsConfiguredContextPolicy proves the deployment's
+// configured risk and context budget actually reach the memory seam.
+//
+// They are easy to get wrong in a way nothing else catches. The backend
+// substitutes its own defaults for an absent risk or budget and then records
+// what it used in the commitment — so a handler that never sends them still
+// returns a valid, verifiable commitment, just one attesting the backend's
+// defaults rather than the deployment's configuration. Startup would log the
+// configured values, the README would document them, and the operator would
+// have no way to tell the setting did nothing.
+func TestHandleAddMember_SendsConfiguredContextPolicy(t *testing.T) {
+	t.Parallel()
+
+	store := room.NewMemoryStore()
+	capturing := &capturingMemoryStore{Fake: memory.NewFake()}
+	mux := newMuxWithStore(t, store, capturing)
+	roomID := mustCreateRoom(t, store, "ship the thing").ID
+
+	req := requestAs(t, http.MethodPost, "/v1/rooms/"+roomID+"/members", map[string]any{"agent_id": "agt_1"}, tenantA)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	got := capturing.lastPrepareRequest
+	if got.Risk != testContextPolicy.Risk {
+		t.Errorf("PrepareRequest.Risk = %q, want %q — the configured risk never reached the backend, "+
+			"so its commitment attests the backend's default instead", got.Risk, testContextPolicy.Risk)
+	}
+	if got.ContextBudgetTokens != testContextPolicy.ContextBudgetTokens {
+		t.Errorf("PrepareRequest.ContextBudgetTokens = %d, want %d — the configured budget never reached "+
+			"the backend", got.ContextBudgetTokens, testContextPolicy.ContextBudgetTokens)
+	}
+}

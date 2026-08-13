@@ -39,9 +39,13 @@ type GatewayCaller interface {
 type Handler struct {
 	store       room.Store
 	memoryStore memory.Store
-	gateway     GatewayCaller
-	emitter     receipt.Emitter
-	logger      *slog.Logger
+	// contextPolicy is the deployment-wide risk and context budget sent on
+	// every PrepareContext call — see memory.ContextPolicy for why they are
+	// always sent rather than left to the backend's defaults.
+	contextPolicy memory.ContextPolicy
+	gateway       GatewayCaller
+	emitter       receipt.Emitter
+	logger        *slog.Logger
 
 	// emitWG tracks in-flight receipt-emission goroutines so Shutdown can
 	// drain them before the process exits — an emitter goroutine must not
@@ -62,11 +66,12 @@ type Handler struct {
 // call to that member's agent (rooms/internal/gateway) — every agent-to-agent
 // call goes through it, never direct. emitter records a trust receipt for
 // each such call, asynchronously and fail-open (rooms/internal/receipt).
-func NewHandler(store room.Store, memoryStore memory.Store, gatewayClient GatewayCaller, emitter receipt.Emitter, logger *slog.Logger) *Handler {
+func NewHandler(store room.Store, memoryStore memory.Store, contextPolicy memory.ContextPolicy, gatewayClient GatewayCaller, emitter receipt.Emitter, logger *slog.Logger) *Handler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Handler{
 		store:          store,
 		memoryStore:    memoryStore,
+		contextPolicy:  contextPolicy,
 		gateway:        gatewayClient,
 		emitter:        emitter,
 		logger:         logger,

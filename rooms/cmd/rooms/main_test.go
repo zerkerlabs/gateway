@@ -6,9 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zerkerlabs/gateway/rooms/internal/auth/authtest"
+	"github.com/zerkerlabs/gateway/rooms/internal/memory"
 	"github.com/zerkerlabs/gateway/rooms/internal/room"
 )
 
@@ -28,9 +32,11 @@ func TestOperationalRoutes(t *testing.T) {
 		{"healthz rejects POST", http.MethodPost, "/healthz", http.StatusMethodNotAllowed, nil},
 	}
 
-	// The operational route tests never exercise message delivery, so a nil
-	// gateway client (never called) is fine here.
-	mux, _ := newMux(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil)
+	// The operational route tests never exercise message delivery or memory
+	// onboarding, so a nil gateway client (never called) and a fresh fake
+	// memory store are fine here — the real client is exercised by the
+	// memory package's own tests and the integration suite.
+	mux, _ := newMux(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake(), memory.ContextPolicy{Risk: "medium", ContextBudgetTokens: 2_000})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -78,7 +84,7 @@ func TestHandlerRequiresBearerTokenForRoomRoutes(t *testing.T) {
 
 	// Nil gateway client: no test here posts an addressed message, the only
 	// path that calls it.
-	handler, _, err := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil)
+	handler, _, err := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake(), memory.ContextPolicy{Risk: "medium", ContextBudgetTokens: 2_000})
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}
@@ -127,9 +133,201 @@ func TestNewHandlerFailsWithoutOIDCConfig(t *testing.T) {
 	t.Setenv("ROOMS_OIDC_ISSUER", "")
 	t.Setenv("ROOMS_OIDC_AUDIENCE", "")
 
-	if _, _, err := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil); err == nil {
+	if _, _, err := newHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake(), memory.ContextPolicy{Risk: "medium", ContextBudgetTokens: 2_000}); err == nil {
 		t.Fatal("newHandler with no OIDC config: want error, got nil")
 	}
+}
+
+// TestZmemDeploymentFromEnv covers the required fields, the documented
+// defaults, and the failure modes an operator can hit: a missing base URL,
+// a missing token (by either form), a missing tenant, and an out-of-range or
+// unrecognized value for the two policy inputs.
+func TestZmemDeploymentFromEnv(t *testing.T) {
+	base := map[string]string{
+		"ROOMS_ZMEM_BASE_URL":      "http://127.0.0.1:8766",
+		"ROOMS_ZMEM_SERVICE_TOKEN": "s3cr3t",
+		"ROOMS_ZMEM_TENANT_ID":     "tnt_123",
+	}
+
+	t.Run("required fields with documented defaults", func(t *testing.T) {
+		for k, v := range base {
+			t.Setenv(k, v)
+		}
+		t.Setenv("ROOMS_ZMEM_SERVICE_TOKEN_FILE", "")
+		got, err := zmemDeploymentFromEnv()
+		if err != nil {
+			t.Fatalf("zmemDeploymentFromEnv: %v", err)
+		}
+		want := zmemDeployment{
+			BaseURL:             "http://127.0.0.1:8766",
+			ServiceToken:        "s3cr3t",
+			TenantID:            "tnt_123",
+			Timeout:             memory.DefaultTimeout,
+			ContextBudgetTokens: defaultContextBudgetTokens,
+			Risk:                defaultRisk,
+		}
+		if got != want {
+			t.Errorf("zmemDeploymentFromEnv() = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("service token from a file, not the environment", func(t *testing.T) {
+		for k, v := range base {
+			t.Setenv(k, v)
+		}
+		t.Setenv("ROOMS_ZMEM_SERVICE_TOKEN", "")
+		path := filepath.Join(t.TempDir(), "token")
+		if err := os.WriteFile(path, []byte("file-token\n"), 0o600); err != nil {
+			t.Fatalf("write token file: %v", err)
+		}
+		t.Setenv("ROOMS_ZMEM_SERVICE_TOKEN_FILE", path)
+
+		got, err := zmemDeploymentFromEnv()
+		if err != nil {
+			t.Fatalf("zmemDeploymentFromEnv: %v", err)
+		}
+		if got.ServiceToken != "file-token" {
+			t.Errorf("ServiceToken = %q, want %q (trimmed file contents)", got.ServiceToken, "file-token")
+		}
+	})
+
+	t.Run("overriding timeout, budget, and risk", func(t *testing.T) {
+		for k, v := range base {
+			t.Setenv(k, v)
+		}
+		t.Setenv("ROOMS_ZMEM_SERVICE_TOKEN_FILE", "")
+		t.Setenv("ROOMS_ZMEM_TIMEOUT", "500ms")
+		t.Setenv("ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS", "8000")
+		t.Setenv("ROOMS_ZMEM_RISK", "high")
+
+		got, err := zmemDeploymentFromEnv()
+		if err != nil {
+			t.Fatalf("zmemDeploymentFromEnv: %v", err)
+		}
+		if got.Timeout != 500*time.Millisecond {
+			t.Errorf("Timeout = %v, want 500ms", got.Timeout)
+		}
+		if got.ContextBudgetTokens != 8000 {
+			t.Errorf("ContextBudgetTokens = %d, want 8000", got.ContextBudgetTokens)
+		}
+		if got.Risk != "high" {
+			t.Errorf("Risk = %q, want %q", got.Risk, "high")
+		}
+	})
+
+	failureCases := []struct {
+		name    string
+		mutate  func(env map[string]string)
+		wantErr string
+	}{
+		{
+			name:    "missing base URL",
+			mutate:  func(env map[string]string) { delete(env, "ROOMS_ZMEM_BASE_URL") },
+			wantErr: "ROOMS_ZMEM_BASE_URL is required",
+		},
+		{
+			name:    "missing token",
+			mutate:  func(env map[string]string) { delete(env, "ROOMS_ZMEM_SERVICE_TOKEN") },
+			wantErr: "ROOMS_ZMEM_SERVICE_TOKEN or ROOMS_ZMEM_SERVICE_TOKEN_FILE is required",
+		},
+		{
+			name:    "missing tenant",
+			mutate:  func(env map[string]string) { delete(env, "ROOMS_ZMEM_TENANT_ID") },
+			wantErr: "ROOMS_ZMEM_TENANT_ID is required",
+		},
+	}
+	for _, tt := range failureCases {
+		t.Run(tt.name, func(t *testing.T) {
+			env := make(map[string]string, len(base))
+			for k, v := range base {
+				env[k] = v
+			}
+			tt.mutate(env)
+			for k, v := range env {
+				t.Setenv(k, v)
+			}
+			t.Setenv("ROOMS_ZMEM_SERVICE_TOKEN_FILE", "")
+
+			_, err := zmemDeploymentFromEnv()
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("zmemDeploymentFromEnv() err = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	invalidValueCases := []struct {
+		name string
+		key  string
+		val  string
+	}{
+		{"malformed timeout", "ROOMS_ZMEM_TIMEOUT", "not-a-duration"},
+		{"non-numeric budget", "ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS", "lots"},
+		{"zero budget", "ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS", "0"},
+		{"budget above the backend's cap", "ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS", "64001"},
+		{"unrecognized risk", "ROOMS_ZMEM_RISK", "extreme"},
+	}
+	for _, tt := range invalidValueCases {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range base {
+				t.Setenv(k, v)
+			}
+			t.Setenv("ROOMS_ZMEM_SERVICE_TOKEN_FILE", "")
+			t.Setenv(tt.key, tt.val)
+
+			if _, err := zmemDeploymentFromEnv(); err == nil {
+				t.Fatalf("zmemDeploymentFromEnv() with %s=%q: want an error, got nil", tt.key, tt.val)
+			}
+		})
+	}
+}
+
+// TestReadSecret covers the plain-value form, the file form, the file form
+// taking precedence being irrelevant when only one is set, a missing file
+// erroring rather than silently returning empty, and both unset returning
+// "" with no error.
+func TestReadSecret(t *testing.T) {
+	t.Run("plain environment variable", func(t *testing.T) {
+		t.Setenv("ROOMS_TEST_SECRET", "direct-value")
+		got, err := readSecret("ROOMS_TEST_SECRET")
+		if err != nil {
+			t.Fatalf("readSecret: %v", err)
+		}
+		if got != "direct-value" {
+			t.Errorf("readSecret() = %q, want %q", got, "direct-value")
+		}
+	})
+
+	t.Run("file, trimmed", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "secret")
+		if err := os.WriteFile(path, []byte("  file-value\n"), 0o600); err != nil {
+			t.Fatalf("write secret file: %v", err)
+		}
+		t.Setenv("ROOMS_TEST_SECRET_FILE", path)
+		got, err := readSecret("ROOMS_TEST_SECRET")
+		if err != nil {
+			t.Fatalf("readSecret: %v", err)
+		}
+		if got != "file-value" {
+			t.Errorf("readSecret() = %q, want %q", got, "file-value")
+		}
+	})
+
+	t.Run("neither set returns empty, no error", func(t *testing.T) {
+		got, err := readSecret("ROOMS_TEST_SECRET")
+		if err != nil {
+			t.Fatalf("readSecret: %v", err)
+		}
+		if got != "" {
+			t.Errorf("readSecret() = %q, want empty", got)
+		}
+	})
+
+	t.Run("file set but unreadable errors rather than returning empty", func(t *testing.T) {
+		t.Setenv("ROOMS_TEST_SECRET_FILE", filepath.Join(t.TempDir(), "does-not-exist"))
+		if _, err := readSecret("ROOMS_TEST_SECRET"); err == nil {
+			t.Fatal("readSecret() with an unreadable file: want an error, got nil")
+		}
+	})
 }
 
 // The operational routes must not leak configuration. /version reports build
@@ -138,7 +336,7 @@ func TestNewHandlerFailsWithoutOIDCConfig(t *testing.T) {
 func TestVersionExposesOnlyBuildMetadata(t *testing.T) {
 	t.Parallel()
 
-	mux, _ := newMux(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil)
+	mux, _ := newMux(slog.New(slog.NewTextHandler(io.Discard, nil)), room.NewMemoryStore(), nil, memory.NewFake(), memory.ContextPolicy{Risk: "medium", ContextBudgetTokens: 2_000})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/version", nil))
 

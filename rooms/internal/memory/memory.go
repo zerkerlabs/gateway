@@ -108,6 +108,26 @@ type PrepareRequest struct {
 	RoomStateDigest  string
 }
 
+// ContextPolicy is the deployment-wide half of a PrepareRequest: the values a
+// Rooms deployment is configured with once and then sends on every call,
+// rather than deriving per request.
+//
+// They are sent explicitly rather than left unset, even when they match the
+// backend's own defaults, because the backend records them in the commitment
+// it returns. An unset field there does not mean "whatever the deployment
+// chose" — it means the backend substituted its default and attested THAT.
+// A deployment configured for high risk that sends nothing produces
+// commitments claiming the default, so the artifact intended to make the
+// deployment's posture verifiable would instead misreport it.
+type ContextPolicy struct {
+	// Risk is the room or tenant's configured risk level: "low", "medium",
+	// or "high".
+	Risk string
+	// ContextBudgetTokens bounds how much admitted content a PrepareContext
+	// call may return.
+	ContextBudgetTokens int
+}
+
 // Memory is one item of governed context a PrepareContext call admitted.
 // Rooms reads it verbatim; it does not interpret, rank, or embed the
 // content — that judgment already happened before it reached this seam.

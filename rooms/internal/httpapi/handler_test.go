@@ -118,18 +118,25 @@ func newMuxWithReceipts(t *testing.T, memoryStore memory.Store, gatewayClient ht
 		memoryStore = memory.NewFake()
 	}
 	store := room.NewMemoryStore()
-	h := httpapi.NewHandler(store, memoryStore, gatewayClient, emitter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := httpapi.NewHandler(store, memoryStore, testContextPolicy, gatewayClient, emitter, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	return authMiddleware(mux), store, h
 }
+
+// testContextPolicy is the deployment-wide policy the test handlers send on
+// every PrepareContext call. Both values are deliberately NOT the production
+// defaults ("medium", 2000): a handler that dropped them, or substituted the
+// backend's defaults, would still look correct against matching values, so a
+// test asserting them would pass while proving nothing.
+var testContextPolicy = memory.ContextPolicy{Risk: "high", ContextBudgetTokens: 4_096}
 
 // newMuxWithStore is newMuxWithMemory with a caller-supplied room.Store in
 // place of a fresh MemoryStore, for a test that needs a store double to reach
 // a branch the real MemoryStore cannot take itself.
 func newMuxWithStore(t *testing.T, store room.Store, memoryStore memory.Store) http.Handler {
 	t.Helper()
-	h := httpapi.NewHandler(store, memoryStore, unreachableGateway{t}, receipt.NewFake(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := httpapi.NewHandler(store, memoryStore, testContextPolicy, unreachableGateway{t}, receipt.NewFake(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	return authMiddleware(mux)
@@ -142,7 +149,7 @@ func newMuxWithStore(t *testing.T, store room.Store, memoryStore memory.Store) h
 func newMuxWithoutAuth(t *testing.T) http.Handler {
 	t.Helper()
 	store := room.NewMemoryStore()
-	h := httpapi.NewHandler(store, memory.NewFake(), unreachableGateway{t}, receipt.NewFake(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := httpapi.NewHandler(store, memory.NewFake(), testContextPolicy, unreachableGateway{t}, receipt.NewFake(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	return mux

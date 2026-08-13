@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -87,7 +89,28 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("reconcile turn reservations: %w", err)
 	}
 
-	handler, roomHandler, err := newHandler(logger, store, gwClient)
+	zmemDeployment, err := zmemDeploymentFromEnv()
+	if err != nil {
+		return fmt.Errorf("init memory backend config: %w", err)
+	}
+	memoryStore, err := memory.NewZMemClient(memory.ZMemConfig{
+		BaseURL:      zmemDeployment.BaseURL,
+		ServiceToken: zmemDeployment.ServiceToken,
+		TenantID:     zmemDeployment.TenantID,
+		Timeout:      zmemDeployment.Timeout,
+	}, logger)
+	if err != nil {
+		return fmt.Errorf("init memory backend client: %w", err)
+	}
+	logger.Info("rooms: memory backend configured",
+		"base_url", zmemDeployment.BaseURL, "tenant_id", zmemDeployment.TenantID,
+		"timeout", zmemDeployment.Timeout, "context_budget_tokens", zmemDeployment.ContextBudgetTokens,
+		"risk", zmemDeployment.Risk)
+
+	handler, roomHandler, err := newHandler(logger, store, gwClient, memoryStore, memory.ContextPolicy{
+		Risk:                zmemDeployment.Risk,
+		ContextBudgetTokens: zmemDeployment.ContextBudgetTokens,
+	})
 	if err != nil {
 		return err
 	}
@@ -139,7 +162,7 @@ func run(logger *slog.Logger) error {
 // The *httpapi.Handler is also returned so the caller can drain its receipt-
 // emission goroutines on shutdown (Handler.Shutdown) — the auth-wrapped
 // http.Handler above does not expose it.
-func newHandler(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller) (http.Handler, *httpapi.Handler, error) {
+func newHandler(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller, memoryStore memory.Store, contextPolicy memory.ContextPolicy) (http.Handler, *httpapi.Handler, error) {
 	// context.Background, not the shutdown context: go-oidc keeps this context
 	// for background JWKS refreshes, and one cancelled at SIGTERM would break
 	// key rotation for the lifetime of the process instead.
@@ -147,7 +170,7 @@ func newHandler(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayC
 	if err != nil {
 		return nil, nil, fmt.Errorf("init auth middleware: %w", err)
 	}
-	mux, roomHandler := newMux(logger, store, gwClient)
+	mux, roomHandler := newMux(logger, store, gwClient, memoryStore, contextPolicy)
 	return mw(mux), roomHandler, nil
 }
 
@@ -158,16 +181,20 @@ func newHandler(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayC
 //
 // It also returns the *httpapi.Handler it registered, so a caller that needs
 // it for shutdown draining does not have to reach back into the mux.
-func newMux(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller) (*http.ServeMux, *httpapi.Handler) {
+func newMux(logger *slog.Logger, store room.Store, gwClient httpapi.GatewayCaller, memoryStore memory.Store, contextPolicy memory.ContextPolicy) (*http.ServeMux, *httpapi.Handler) {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthz())
 	mux.Handle("GET /version", versionHandler())
 
-	// memory.NewFake and receipt.NewFake are stand-ins for the real memory and
-	// receipt backends, neither of which exists yet (rooms/internal/memory,
-	// rooms/internal/receipt); real clients wire in here later without
-	// changing the httpapi.Handler seam.
-	roomHandler := httpapi.NewHandler(store, memory.NewFake(), gwClient, receipt.NewFake(), logger)
+	// receipt.NewFake is a stand-in for the real receipt backend, which does
+	// not exist yet (rooms/internal/receipt); a real client wires in here
+	// later without changing the httpapi.Handler seam. memoryStore, by
+	// contrast, is the real backend client built in run() — memory.NewFake
+	// remains available, but only for tests now.
+	//
+	// store is also built in run(), so its turn reservations are reconciled
+	// before any route can reach it.
+	roomHandler := httpapi.NewHandler(store, memoryStore, contextPolicy, gwClient, receipt.NewFake(), logger)
 	roomHandler.RegisterRoutes(mux)
 	return mux, roomHandler
 }
@@ -229,6 +256,132 @@ func durationFromEnv(logger *slog.Logger, key string) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// defaultContextBudgetTokens is used when ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS is
+// unset. It matches the memory backend's own default. Rooms sets one
+// configured value per deployment and sends it explicitly rather than
+// relying on the backend's own default, so the value a commitment attests to
+// is always visible here.
+const defaultContextBudgetTokens = 2_000
+
+// maxContextBudgetTokens is the memory backend's own cap on
+// context_budget_tokens. A configured value above it can never be satisfied,
+// so it is rejected at startup rather than silently truncated by the backend
+// on every join.
+const maxContextBudgetTokens = 64_000
+
+// defaultRisk is used when ROOMS_ZMEM_RISK is unset.
+const defaultRisk = "medium"
+
+// validRisks are the risk levels the memory backend accepts.
+var validRisks = map[string]bool{"low": true, "medium": true, "high": true}
+
+// zmemDeployment is the fully-resolved configuration for this deployment's
+// memory backend: what memory.NewZMemClient needs (BaseURL, ServiceToken,
+// TenantID, Timeout) plus the two policy inputs — ContextBudgetTokens and
+// Risk — an operator sets once per deployment. Wiring the latter two into the
+// join path's PrepareContext call is a separate change; see
+// rooms/internal/httpapi/members.go.
+type zmemDeployment struct {
+	BaseURL             string
+	ServiceToken        string
+	TenantID            string
+	Timeout             time.Duration
+	ContextBudgetTokens int
+	Risk                string
+}
+
+// zmemDeploymentFromEnv reads and validates the memory backend's
+// configuration from the environment, failing loudly on anything malformed
+// rather than letting Rooms start with a backend it cannot reach or a policy
+// input it cannot honor. ROOMS_ZMEM_BASE_URL and ROOMS_ZMEM_TENANT_ID have no
+// default — memory.NewZMemClient itself refuses an empty BaseURL or TenantID,
+// which is the actual enforcement; the checks here exist so a missing value
+// is reported by name instead of as an opaque client-construction error.
+//
+// ROOMS_ZMEM_SERVICE_TOKEN is read via readSecret, never a flag: a flag value
+// is visible to anyone who can list processes on the host, and this token
+// authenticates to the tenant's own memory. It is never logged.
+func zmemDeploymentFromEnv() (zmemDeployment, error) {
+	baseURL := os.Getenv("ROOMS_ZMEM_BASE_URL")
+	if baseURL == "" {
+		return zmemDeployment{}, errors.New("ROOMS_ZMEM_BASE_URL is required")
+	}
+
+	token, err := readSecret("ROOMS_ZMEM_SERVICE_TOKEN")
+	if err != nil {
+		return zmemDeployment{}, err
+	}
+	if token == "" {
+		return zmemDeployment{}, errors.New("ROOMS_ZMEM_SERVICE_TOKEN or ROOMS_ZMEM_SERVICE_TOKEN_FILE is required")
+	}
+
+	tenantID := os.Getenv("ROOMS_ZMEM_TENANT_ID")
+	if tenantID == "" {
+		return zmemDeployment{}, errors.New("ROOMS_ZMEM_TENANT_ID is required")
+	}
+
+	timeout := memory.DefaultTimeout
+	if v := os.Getenv("ROOMS_ZMEM_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return zmemDeployment{}, fmt.Errorf("ROOMS_ZMEM_TIMEOUT: %w", err)
+		}
+		timeout = d
+	}
+
+	budget := defaultContextBudgetTokens
+	if v := os.Getenv("ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return zmemDeployment{}, fmt.Errorf("ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS: %w", err)
+		}
+		if n <= 0 || n > maxContextBudgetTokens {
+			return zmemDeployment{}, fmt.Errorf("ROOMS_ZMEM_CONTEXT_BUDGET_TOKENS must be between 1 and %d, got %d", maxContextBudgetTokens, n)
+		}
+		budget = n
+	}
+
+	risk := defaultRisk
+	if v := os.Getenv("ROOMS_ZMEM_RISK"); v != "" {
+		if !validRisks[v] {
+			return zmemDeployment{}, fmt.Errorf(`ROOMS_ZMEM_RISK must be "low", "medium", or "high", got %q`, v)
+		}
+		risk = v
+	}
+
+	return zmemDeployment{
+		BaseURL:             baseURL,
+		ServiceToken:        token,
+		TenantID:            tenantID,
+		Timeout:             timeout,
+		ContextBudgetTokens: budget,
+		Risk:                risk,
+	}, nil
+}
+
+// readSecret returns the value of the environment variable envVar, or — when
+// that is unset — the trimmed contents of the file named by envVar+"_FILE".
+// The file form lets an operator hand Rooms a secret via a mounted file (a
+// Docker or Kubernetes secret, say) instead of a plain environment variable;
+// either way, the secret never appears on the command line, where it would be
+// visible to anyone who can list processes on the host. Returns "" with no
+// error when neither is set, so callers can distinguish "not configured"
+// from a file that failed to read.
+func readSecret(envVar string) (string, error) {
+	if v := os.Getenv(envVar); v != "" {
+		return v, nil
+	}
+	path := os.Getenv(envVar + "_FILE")
+	if path == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // operator-configured path via <envVar>_FILE, not user input
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", envVar+"_FILE", err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 // healthz reports liveness only: the process answered. Readiness gains meaning
