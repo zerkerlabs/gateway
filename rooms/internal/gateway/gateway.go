@@ -442,8 +442,8 @@ const (
 func (c *Client) Reconcile(ctx context.Context, agentID, invocationID string) (ReconcileOutcome, error) {
 	status, _, err := c.poll(ctx, agentID, invocationID)
 	if err != nil {
-		var pgErr *pollError
-		if errors.As(err, &pgErr) && pgErr.statusCode == http.StatusNotFound {
+		var pollErr *pollError
+		if errors.As(err, &pollErr) && pollErr.statusCode == http.StatusNotFound {
 			return ReconcileNotFound, nil
 		}
 		return 0, fmt.Errorf("gateway: reconcile invocation %s: %w", invocationID, err)
