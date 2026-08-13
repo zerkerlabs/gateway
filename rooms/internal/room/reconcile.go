@@ -111,6 +111,11 @@ func reconcileOne(ctx context.Context, store Store, gw GatewayReconciler, pr *Pe
 // CommitTurn order, so a call recovered by reconciliation leaves the same
 // shape of trail a call confirmed in-process would have.
 func commitReconciled(ctx context.Context, store Store, pr *PendingReservation, logger *slog.Logger, fields []any) {
+	// The sweep's deadline bounds waiting on the GATEWAY, not on our own
+	// store. Resolving a reservation writes locally and must finish even once
+	// that deadline has passed — see resolveCtx.
+	ctx = resolveCtx(ctx)
+
 	msg := pr.Reservation.msg
 	if err := store.RecordDelivery(ctx, pr.Reservation.tenantID, pr.Reservation.roomID, msg.MemberID, msg.ToMemberID, pr.ToAgentID, pr.InvocationID); err != nil {
 		logger.Error("room: reconcile: record delivery for a recovered reservation", append(fields, "err", err)...)
@@ -120,12 +125,37 @@ func commitReconciled(ctx context.Context, store Store, pr *PendingReservation, 
 	}
 }
 
+// resolveCtx detaches a context from the sweep's deadline for the store calls
+// that resolve a reservation.
+//
+// Those calls are not symmetric on cancellation, and that asymmetry is the
+// bug this exists to prevent. CommitTurn and ReleaseTurn deliberately strip
+// cancellation already (MemoryStore ignores ctx; PostgresStore detaches it
+// internally), so the turn is freed regardless. RecordDelivery and
+// RecordDeliveryFailure do not — they check ctx.Err() and refuse. Passing the
+// sweep's expiring context to both therefore frees the turn while silently
+// dropping the transcript event explaining why, leaving only a secondary
+// "could not record" log line: a real gap in the room's audit trail, in
+// exactly the gateway-cannot-answer case reconciliation exists for. Because
+// the sweep is one sequential loop, one gateway hanging past the deadline
+// costs the event for every reservation behind it too.
+//
+// Detaching here rather than relying on each Store implementation to strip
+// cancellation keeps the guarantee at the call site, where it is visible, and
+// stops a future implementation that honours ctx from silently reintroducing
+// the gap.
+func resolveCtx(ctx context.Context) context.Context {
+	return context.WithoutCancel(ctx)
+}
+
 // releaseReconciled records why the reservation did not land (or could not
 // be answered for), then releases its turn back to the room. class is the
 // DeliveryFailedPayload.Class value the recorded event carries — see the
 // "reconciled_*" values above, distinguishing a definitive gateway answer
 // from one it could never give.
 func releaseReconciled(ctx context.Context, store Store, pr *PendingReservation, class string, logger *slog.Logger, fields []any) {
+	ctx = resolveCtx(ctx) // see resolveCtx: the deadline bounds the gateway, not our store
+
 	msg := pr.Reservation.msg
 	if err := store.RecordDeliveryFailure(ctx, pr.Reservation.tenantID, pr.Reservation.roomID, msg.MemberID, msg.ToMemberID, pr.ToAgentID, class); err != nil {
 		logger.Error("room: reconcile: record delivery failure for a recovered reservation", append(fields, "err", err)...)

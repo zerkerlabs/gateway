@@ -377,3 +377,61 @@ func TestReconcileReservations_TurnAccountingAfterRecovery(t *testing.T) {
 		t.Fatalf("AppendMessage after recovery: err = %v, want ErrTurnBudgetExceeded — the recovered room spent more than its budget", err)
 	}
 }
+
+// TestReconcileReservations_TimedOutStillRecordsTheFailureEvent is the
+// asymmetry that makes a timed-out sweep dangerous rather than merely slow.
+//
+// Releasing the turn and recording why it was released are not equally
+// robust. ReleaseTurn/CommitTurn deliberately strip cancellation (MemoryStore
+// ignores ctx; PostgresStore detaches it), so the turn comes back even on an
+// expired context. The record-keeping calls do not: they check ctx.Err() and
+// refuse. So once the sweep's deadline passes, the naive implementation frees
+// the turn but drops the transcript event — and the only trace is a secondary
+// "could not record" log line.
+//
+// That is precisely the silent hole in the audit trail the reconcile design
+// exists to prevent, and it appears in the one case reconciliation was built
+// for: a gateway that hangs instead of refusing. Worse, the sweep processes
+// reservations in one sequential loop, so a single hang past the deadline
+// costs the event for every reservation behind it, not just its own.
+func TestReconcileReservations_TimedOutStillRecordsTheFailureEvent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	s, res, r := reconcileFixture(t)
+	if err := s.AttachReservationInvocation(ctx, res, "inv_hangs"); err != nil {
+		t.Fatalf("AttachReservationInvocation: %v", err)
+	}
+
+	if err := room.ReconcileReservations(ctx, s, &fakeReconciler{block: true}, 50*time.Millisecond, testLogger()); err != nil {
+		t.Fatalf("ReconcileReservations: %v", err)
+	}
+
+	// The turn came back — this half already worked.
+	pending, err := s.PendingReservations(ctx)
+	if err != nil {
+		t.Fatalf("PendingReservations: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending = %+v, want the timed-out reservation released", pending)
+	}
+
+	// The other half: the room's own transcript must say why.
+	events, err := s.Events(ctx, reconcileTenant, r.ID)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	var failed *room.DeliveryFailedPayload
+	for _, ev := range events {
+		if p, ok := ev.Payload.(room.DeliveryFailedPayload); ok {
+			failed = &p
+		}
+	}
+	if failed == nil {
+		t.Fatalf("events = %+v, want a delivery-failed event: the turn was released but the "+
+			"room's transcript has no record of why — a silent gap in the audit trail", events)
+	}
+	if failed.Class != "reconciled_unknown" {
+		t.Errorf("delivery-failed class = %q, want %q", failed.Class, "reconciled_unknown")
+	}
+}
