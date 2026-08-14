@@ -29,9 +29,17 @@ const recordAgentID = "rooms"
 // EventRoomTerminated carries a payload today; EventTaskStateChanged is
 // declared but no code path emits it yet (see its doc comment in room.go),
 // so there is nothing to derive a payload from and it falls through to the
-// default. The moment a task-state payload exists, adding its own case here
-// is the only change the write path needs — the key derivation, async
-// dispatch, and fail-open handling below stay the same for every kind.
+// default. The key derivation, async dispatch, and fail-open handling below
+// are kind-agnostic and would carry a second kind unchanged.
+//
+// **recordTerminalEvent is not.** It locates the event to record by scanning
+// for the first recognized one, which is exact only because this function
+// recognizes a single kind and a room terminates exactly once. Adding a case
+// here breaks that: a room could then hold a task-state change AND a
+// termination, and the scan would silently record whichever came first and
+// drop the other. So adding a kind means deciding there what "the event to
+// record" means when there are several — record each one, or select by kind
+// per call site — not just adding a case here.
 //
 // Every other kind — member_joined, message_posted (routed to Propose
 // instead, never Record), message_delivered, delivery_failed — is
@@ -105,10 +113,13 @@ func (h *Handler) doRecord(ctx context.Context, roomID, sourceEventID, idempoten
 // positional read finds nothing recordable and the room's own outcome goes
 // unwritten.
 //
-// Scanning is unambiguous: recordableContent recognizes only
+// Scanning is exact, not merely safer: recordableContent recognizes only
 // RoomTerminatedPayload, and a room terminates exactly once, so there is at
 // most one match and its Sequence is stable. That also keeps the
 // source_event_id and idempotency key derived from it stable across retries.
+//
+// That exactness is borrowed from recordableContent's single kind, and it is
+// the coupling to check before adding a second one — see its doc comment.
 func (h *Handler) recordTerminalEvent(ctx context.Context, roomID string, r *room.Room) {
 	for _, ev := range r.Events {
 		if content, ok := recordableContent(ev); ok {
@@ -126,8 +137,9 @@ func (h *Handler) recordTerminalEvent(ctx context.Context, roomID string, r *roo
 }
 
 // recordRoomTerminated asynchronously submits r's terminal event to Record —
-// see recordTerminalEvent. r must already carry the terminal event as its
-// last event; CompleteRoom's own return value satisfies that.
+// see recordTerminalEvent. r must already carry the terminal event; where in
+// r.Events it sits does not matter, and CompleteRoom's own return value
+// satisfies that.
 //
 // Submission does not block the request path: the room transition it records
 // already happened and is durable whether or not this call succeeds, so a
