@@ -55,6 +55,22 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8080/v1/agents
 The mock issuer (`gateway/scripts/mock-oidc/`) is dev-only — never use it in
 production.
 
+### Find your local agents
+
+Start with a read-only scan. It checks for supported executables, known configuration locations, and the number of configured MCP servers:
+
+```bash
+make -C gateway onboard
+```
+
+The scanner does not read conversations, prompts, credentials, environment values, or command arguments. It does not change agent configuration. Use the stable JSON contract when connecting another tool:
+
+```bash
+go run ./gateway/cmd/zerker-onboard --json
+```
+
+The first preview recognizes Claude Code, Codex, Cursor, Gemini CLI, Hermes, Pi, Aider, and OpenCode. See [`gateway/ONBOARDING.md`](gateway/ONBOARDING.md) for the discovery boundary and next dogfood steps.
+
 ### Production
 
 Point `ZERKER_OIDC_ISSUER` at your IdP (Auth0, Okta, Google, …) and set

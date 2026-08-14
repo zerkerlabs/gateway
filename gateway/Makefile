@@ -29,6 +29,14 @@ docs-check: ## Fail if the committed config/env reference is stale (run 'make do
 build: ## Build the gateway binary into ./bin
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
 
+.PHONY: build-onboard
+build-onboard: ## Build the read-only local agent onboarding scanner into ./bin
+	$(GO) build -o bin/zerker-onboard ./cmd/zerker-onboard
+
+.PHONY: onboard
+onboard: ## Find supported local agents without changing their configuration
+	$(GO) run ./cmd/zerker-onboard
+
 .PHONY: run
 run: ## Run the gateway locally
 	$(GO) run -ldflags "$(LDFLAGS)" $(CMD)
