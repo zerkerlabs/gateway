@@ -40,6 +40,12 @@ func (h *Handler) handleCompleteRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The room's accepted outcome is Rooms asserting a fact about itself, not
+	// an agent's claim, so it is recorded — never proposed — as authoritative
+	// room memory (see record.go). Submission is asynchronous and fail-open:
+	// the room is completed whether or not the memory write succeeds.
+	h.recordRoomTerminated(roomID, completed)
+
 	// The store's own ErrNotFound scoping means transcript lookup cannot fail
 	// here for a reason a caller could hit: the room was just found under the
 	// same tenant and ID.

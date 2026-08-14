@@ -79,7 +79,7 @@ func (h *Handler) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 
 	msg, err := h.store.AppendMessage(r.Context(), tenantID, roomID, req.MemberID, req.Body)
 	if err != nil {
-		h.writePostFailure(w, err)
+		h.writePostFailure(w, tenantID, roomID, err)
 		return
 	}
 
@@ -92,13 +92,18 @@ func (h *Handler) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 // ways of acquiring a turn — AppendMessage and ReserveTurn — reject with the
 // same errors, and share this so an addressed message and a broadcast one
 // report an identical room state identically.
-func (h *Handler) writePostFailure(w http.ResponseWriter, err error) {
+func (h *Handler) writePostFailure(w http.ResponseWriter, tenantID, roomID string, err error) {
 	switch {
 	case errors.Is(err, room.ErrNotFound):
 		writeError(w, http.StatusNotFound, CodeRoomNotFound, "room not found")
 	case errors.Is(err, room.ErrRoomTerminated):
 		writeError(w, http.StatusConflict, CodeRoomTerminated, "room is terminated")
 	case errors.Is(err, room.ErrTurnBudgetExceeded):
+		// The store already abandoned the room and appended its
+		// room_terminated event as part of the same call that returned this
+		// error — Rooms asserting its own accepted outcome, recorded the same
+		// way an explicit completion is (see record.go).
+		h.recordRoomTerminatedAfterAbandon(tenantID, roomID)
 		writeError(w, http.StatusConflict, CodeTurnBudgetExceeded, "room turn budget exceeded")
 	case errors.Is(err, room.ErrTurnReserved):
 		// Not out of turns — the remaining ones are held by a delivery still
@@ -141,7 +146,7 @@ func (h *Handler) postAddressedMessage(w http.ResponseWriter, r *http.Request, t
 		// particular is transient: a retry as a broadcast could well succeed,
 		// turning a message meant for another agent into an ordinary one that
 		// never left the room.
-		h.writePostFailure(w, err)
+		h.writePostFailure(w, tenantID, roomID, err)
 		return
 	}
 

@@ -54,6 +54,9 @@ type Handler struct {
 	// proposeWG tracks in-flight message-proposal goroutines (proposeMessage)
 	// so Shutdown can drain them the same way it drains emitWG.
 	proposeWG sync.WaitGroup
+	// recordWG tracks in-flight accepted-transition goroutines (record.go) so
+	// Shutdown can drain them the same way it drains emitWG and proposeWG.
+	recordWG sync.WaitGroup
 	// shutdownCtx is cancelled by Shutdown so an in-flight emission aborts
 	// promptly instead of running out its own timeout.
 	shutdownCtx    context.Context
@@ -91,6 +94,7 @@ func (h *Handler) Shutdown(ctx context.Context) error {
 	go func() {
 		h.emitWG.Wait()
 		h.proposeWG.Wait()
+		h.recordWG.Wait()
 		close(done)
 	}()
 
