@@ -69,7 +69,13 @@ The scanner does not read conversations, prompts, credentials, environment value
 go run ./gateway/cmd/zerker-onboard --json
 ```
 
-The first preview recognizes Claude Code, Codex, Cursor, Gemini CLI, Hermes, Pi, Aider, and OpenCode. See [`gateway/ONBOARDING.md`](gateway/ONBOARDING.md) for the discovery boundary and next dogfood steps.
+The first preview recognizes Claude Code, Codex, Cursor, Gemini CLI, Hermes, Pi, Aider, and OpenCode. With an authenticated Gateway running, register every discovered agent using internal observe-only defaults:
+
+```bash
+make -C gateway observe-agents
+```
+
+See [`gateway/ONBOARDING.md`](gateway/ONBOARDING.md) for the discovery boundary, enrollment defaults, and next dogfood steps.
 
 ### Production
 

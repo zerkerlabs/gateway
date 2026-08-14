@@ -1,0 +1,210 @@
+// Package onboarding registers locally discovered agents with Zerker Gateway
+// using privacy-safe, observe-only defaults.
+package onboarding
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/zerkerlabs/gateway/gateway/internal/discovery"
+)
+
+const maxResponseBytes = 1 << 20
+
+// Result summarizes an idempotent observe-only enrollment.
+type Result struct {
+	Added           []string `json:"added"`
+	AlreadyEnrolled []string `json:"already_enrolled"`
+}
+
+// Client enrolls discovered agents through the authenticated Gateway API.
+type Client struct {
+	baseURL    *url.URL
+	token      string
+	httpClient *http.Client
+}
+
+// NewClient validates the Gateway URL before accepting a bearer token. Plain
+// HTTP is allowed only for loopback dogfood environments.
+func NewClient(rawURL, token string, httpClient *http.Client) (*Client, error) {
+	baseURL, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse gateway URL: %w", err)
+	}
+	if baseURL.User != nil || baseURL.RawQuery != "" || baseURL.Fragment != "" {
+		return nil, errors.New("gateway URL must not contain credentials, a query, or a fragment")
+	}
+	if baseURL.Scheme != "https" && (baseURL.Scheme != "http" || !isLoopbackHost(baseURL.Hostname())) {
+		return nil, errors.New("gateway URL must use HTTPS; HTTP is allowed only on loopback")
+	}
+	if baseURL.Host == "" {
+		return nil, errors.New("gateway URL must include a host")
+	}
+	if strings.TrimSpace(token) == "" {
+		return nil, errors.New("gateway token is empty")
+	}
+	baseURL.Path = strings.TrimRight(baseURL.Path, "/")
+
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	}
+	safeClient := *httpClient
+	if safeClient.Timeout == 0 {
+		safeClient.Timeout = 10 * time.Second
+	}
+	safeClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &Client{baseURL: baseURL, token: strings.TrimSpace(token), httpClient: &safeClient}, nil
+}
+
+// ObserveAll registers every discovered agent with internal, observe-only
+// metadata. It lists first so reruns are safe and name conflicts fail before
+// any create request is sent.
+func (c *Client) ObserveAll(ctx context.Context, report discovery.Report) (Result, error) {
+	existing, err := c.list(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+
+	byKey := make(map[string]listedAgent, len(existing))
+	byName := make(map[string]listedAgent, len(existing))
+	for _, agent := range existing {
+		byName[agent.Name] = agent
+		if key, ok := agent.Metadata["zerker_discovery_key"].(string); ok {
+			byKey[key] = agent
+		}
+	}
+
+	result := Result{Added: []string{}, AlreadyEnrolled: []string{}}
+	for _, found := range report.Agents {
+		if _, ok := byKey[found.Key]; ok {
+			result.AlreadyEnrolled = append(result.AlreadyEnrolled, found.Name)
+			continue
+		}
+		if collision, ok := byName[found.Name]; ok {
+			return Result{}, fmt.Errorf("agent %q already exists without discovery key (id %s); review it before importing", found.Name, collision.ID)
+		}
+	}
+
+	for _, found := range report.Agents {
+		if _, ok := byKey[found.Key]; ok {
+			continue
+		}
+		if err := c.create(ctx, found); err != nil {
+			return result, fmt.Errorf("observe %s: %w", found.Name, err)
+		}
+		result.Added = append(result.Added, found.Name)
+	}
+	return result, nil
+}
+
+type listResponse struct {
+	Agents []listedAgent `json:"agents"`
+}
+
+type listedAgent struct {
+	ID       string         `json:"id"`
+	Name     string         `json:"name"`
+	Metadata map[string]any `json:"metadata"`
+}
+
+func (c *Client) list(ctx context.Context) ([]listedAgent, error) {
+	endpoint := c.resolve("/v1/agents?per_page=100")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build list request: %w", err)
+	}
+	c.authorize(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connect to gateway: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, responseError(resp)
+	}
+
+	var listed listResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&listed); err != nil {
+		return nil, fmt.Errorf("decode gateway agent list: %w", err)
+	}
+	return listed.Agents, nil
+}
+
+func (c *Client) create(ctx context.Context, found discovery.Agent) error {
+	payload := map[string]any{
+		"name":          found.Name,
+		"description":   fmt.Sprintf("Local %s agent enrolled through Zerker discovery.", found.Name),
+		"tags":          []string{"internal", "local", "observe-only"},
+		"capture_body":  false,
+		"emit_receipts": false,
+		"protocol":      "http",
+		"metadata": map[string]any{
+			"zerker_discovery_key":    found.Key,
+			"zerker_discovery_schema": discovery.Schema,
+			"zerker_onboarding_mode":  "observe",
+			"zerker_exposure":         "internal",
+			"zerker_identity_status":  "discovered",
+			"provider":                found.Provider,
+			"installed":               found.Installed,
+			"configured":              found.Configured,
+			"mcp_server_count":        found.MCPServerCount,
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.resolve("/v1/agents"), bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.authorize(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("connect to gateway: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		return responseError(resp)
+	}
+	return nil
+}
+
+func (c *Client) authorize(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+c.token)
+}
+
+func (c *Client) resolve(path string) string {
+	return strings.TrimRight(c.baseURL.String(), "/") + path
+}
+
+func responseError(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	var envelope struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) == nil && envelope.Error != "" {
+		return fmt.Errorf("gateway returned %s: %s", resp.Status, envelope.Error)
+	}
+	return fmt.Errorf("gateway returned %s", resp.Status)
+}
+
+func isLoopbackHost(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}

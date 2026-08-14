@@ -53,6 +53,40 @@ Output uses `zerker.agent-discovery.v1`:
 
 This version reports only discovery evidence. It does not claim a cryptographic identity binding or authority relationship.
 
+## Observe discovered agents
+
+Start an authenticated Gateway, then enroll all discovered agents:
+
+```bash
+# Terminal 1
+make dev-auth
+
+# Terminal 2
+make observe-agents
+```
+
+The command reads the development bearer token from `/tmp/zerker-dev-token`. For another environment, use `ZERKER_TOKEN` and an HTTPS Gateway URL:
+
+```bash
+ZERKER_TOKEN="$TOKEN" ./bin/zerker-onboard \
+  --observe-all \
+  --gateway https://gateway.example.com
+```
+
+Enrollment is idempotent. Rerunning it does not create duplicates. Enrollment creates the internal inventory entry; it does not claim that agent activity is flowing yet. Each agent must be connected before Zerker can measure its work.
+
+It registers each agent with these defaults:
+
+- internal exposure;
+- discovered identity status, not verified identity;
+- no upstream invocation route;
+- no blocking;
+- no body capture;
+- no payment;
+- no external publication.
+
+Plain HTTP is accepted only for numeric loopback addresses. The client refuses redirects so a bearer token cannot be forwarded elsewhere.
+
 ## Next dogfood slice
 
-The next onboarding step will let the operator review one found agent at a time and explicitly choose **Observe** or **Skip**. Observe will register the agent in Gateway monitor mode without enabling blocking, body capture, external exposure, or payment.
+The next onboarding surface will present one found agent at a time with **Observe** and **Skip**, then show the internal inventory and the first measurement Zerker can collect.

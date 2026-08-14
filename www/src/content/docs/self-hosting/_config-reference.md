@@ -27,3 +27,9 @@
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `ZERKER_KMS_KEY` | No | — | Hex-encoded 32-byte (64 hex chars) master key for the local KMS provider, which envelope-encrypts stored credentials. When unset, a random ephemeral key is generated that does not survive a restart — never run production without setting it. |
+
+### Local onboarding
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `ZERKER_TOKEN` | No | — | Bearer token used by `zerker-onboard --observe-all`. When unset, the command reads the file selected by `--token-file`, which defaults to `/tmp/zerker-dev-token`. The token is never printed. |

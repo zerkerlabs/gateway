@@ -37,6 +37,10 @@ build-onboard: ## Build the read-only local agent onboarding scanner into ./bin
 onboard: ## Find supported local agents without changing their configuration
 	$(GO) run ./cmd/zerker-onboard
 
+.PHONY: observe-agents
+observe-agents: ## Register all discovered agents with internal observe-only defaults
+	$(GO) run ./cmd/zerker-onboard --observe-all
+
 .PHONY: run
 run: ## Run the gateway locally
 	$(GO) run -ldflags "$(LDFLAGS)" $(CMD)

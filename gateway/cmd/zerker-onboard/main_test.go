@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,6 +54,22 @@ func TestRunPrintsStableJSON(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"agents": []`) {
 		t.Fatalf("JSON output must preserve empty agents array:\n%s", stdout.String())
+	}
+}
+
+func TestLoadTokenTrimsTokenFile(t *testing.T) {
+	t.Setenv("ZERKER_TOKEN", "")
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("  private-token\n"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	token, err := loadToken(tokenFile)
+	if err != nil {
+		t.Fatalf("loadToken() error = %v", err)
+	}
+	if token != "private-token" {
+		t.Fatalf("token = %q, want trimmed value", token)
 	}
 }
 
