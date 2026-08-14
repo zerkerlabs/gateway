@@ -35,6 +35,8 @@ tags:
     description: Transactional and streaming invocation forwarding, plus polling — spec 0002, spec 0004 (MCP), spec 0005 (x402 gate), spec 0006 (settlement).
   - name: Invocations
     description: Durable invocation records — spec 0003.
+  - name: Agent activity
+    description: Metadata-only lifecycle, tool outcome, and model usage events from enrolled agent adapters.
   - name: Analytics
     description: Aggregate observability metrics — spec 0003.
   - name: Settlement
@@ -228,6 +230,74 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+
+  /v1/agent-events:
+    post:
+      tags: [Agent activity]
+      operationId: createAgentEvent
+      summary: Record a metadata-only agent event
+      description: >-
+        Records lifecycle, tool outcome, or model usage metadata. Unknown fields
+        are rejected. The contract has no prompt, tool argument, tool output,
+        command-line, or file-path fields. Reusing `event_id` is idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentEvent"
+      responses:
+        "201":
+          description: Event recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEventRecorded" }
+        "200":
+          description: The event was already recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEventRecorded" }
+        "400":
+          description: Invalid event or a field outside the privacy-bounded contract.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/agent-events/summary:
+    get:
+      tags: [Agent activity]
+      operationId: summarizeAgentEvents
+      summary: Summarize one agent's activity
+      parameters:
+        - name: agent_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: since
+          in: query
+          description: Inclusive RFC3339 start. Defaults to 24 hours before `until`.
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          description: Exclusive RFC3339 end. Defaults to the current time.
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Compact activity summary for a window of at most 31 days.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEventSummaryResponse" }
+        "400":
+          description: Invalid agent or time window.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/credentials:
     post:
@@ -921,6 +991,58 @@ components:
         error:
           type: string
           description: A coarse, caller-safe message. Never contains internal state (invariant #3).
+
+    AgentEvent:
+      type: object
+      additionalProperties: false
+      required: [schema, event_id, agent_id, type, session_ref, occurred_at, source, source_version]
+      properties:
+        schema: { type: string, enum: [zerker.agent-event.v1] }
+        event_id: { type: string, maxLength: 128 }
+        agent_id: { type: string, maxLength: 128 }
+        type: { type: string, enum: [session.started, session.ended, tool.completed, model.usage] }
+        session_ref: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+        occurred_at: { type: string, format: date-time }
+        tool_name: { type: string, maxLength: 128 }
+        outcome: { type: string, enum: [succeeded, failed, cancelled] }
+        duration_ms: { type: integer, format: int64, minimum: 0 }
+        provider: { type: string, maxLength: 128 }
+        model: { type: string, maxLength: 256 }
+        input_tokens: { type: integer, format: int64, minimum: 0 }
+        output_tokens: { type: integer, format: int64, minimum: 0 }
+        cache_read_tokens: { type: integer, format: int64, minimum: 0 }
+        cache_write_tokens: { type: integer, format: int64, minimum: 0 }
+        cost_usd: { type: number, format: double, minimum: 0 }
+        source: { type: string, maxLength: 64 }
+        source_version: { type: string, maxLength: 64 }
+
+    AgentEventRecorded:
+      type: object
+      required: [recorded, duplicate]
+      properties:
+        recorded: { type: boolean }
+        duplicate: { type: boolean }
+
+    AgentEventSummaryResponse:
+      type: object
+      required: [schema, agent_id, since, until, summary]
+      properties:
+        schema: { type: string, enum: [zerker.agent-event-summary.v1] }
+        agent_id: { type: string }
+        since: { type: string, format: date-time }
+        until: { type: string, format: date-time }
+        summary:
+          type: object
+          required: [sessions, tool_calls, tools_succeeded, tools_failed, tool_duration_ms, input_tokens, output_tokens, cost_usd]
+          properties:
+            sessions: { type: integer, format: int64 }
+            tool_calls: { type: integer, format: int64 }
+            tools_succeeded: { type: integer, format: int64 }
+            tools_failed: { type: integer, format: int64 }
+            tool_duration_ms: { type: integer, format: int64 }
+            input_tokens: { type: integer, format: int64 }
+            output_tokens: { type: integer, format: int64 }
+            cost_usd: { type: number, format: double }
 
     HealthzResponse:
       type: object

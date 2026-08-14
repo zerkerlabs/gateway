@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zerkerlabs/gateway/gateway/internal/agent"
+	"github.com/zerkerlabs/gateway/gateway/internal/agentevent"
 	"github.com/zerkerlabs/gateway/gateway/internal/invocation"
 	"github.com/zerkerlabs/gateway/gateway/internal/policy"
 	"github.com/zerkerlabs/gateway/gateway/internal/receipt"
@@ -50,6 +51,7 @@ type CallerRateLimiter interface {
 // Handler holds the shared dependencies for all Zerker HTTP handlers.
 type Handler struct {
 	store           agent.AgentStore
+	agentEvents     agentevent.Store
 	credSvc         CredentialService
 	forwarder       ProxyForwarder
 	invocations     invocation.Store
@@ -148,6 +150,13 @@ func (h *Handler) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// WithAgentEvents attaches the metadata-only activity store. Event ingest and
+// summary routes are registered only when this store is present.
+func (h *Handler) WithAgentEvents(store agentevent.Store) *Handler {
+	h.agentEvents = store
+	return h
 }
 
 // WithCredentials attaches the credential service used by the /v1/credentials
@@ -297,6 +306,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/agents/{id}", h.handleGet)
 	mux.HandleFunc("PATCH /v1/agents/{id}", h.handleUpdate)
 	mux.HandleFunc("DELETE /v1/agents/{id}", h.handleDelete)
+
+	if h.agentEvents != nil {
+		mux.HandleFunc("POST /v1/agent-events", h.handleCreateAgentEvent)
+		mux.HandleFunc("GET /v1/agent-events/summary", h.handleAgentEventSummary)
+	}
 
 	if h.credSvc != nil {
 		mux.HandleFunc("POST /v1/credentials", h.handleCreateCredential)
