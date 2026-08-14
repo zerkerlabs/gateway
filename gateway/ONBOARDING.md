@@ -87,6 +87,20 @@ It registers each agent with these defaults:
 
 Plain HTTP is accepted only for numeric loopback addresses. The client refuses redirects so a bearer token cannot be forwarded elsewhere.
 
+## Connect Pi measurement
+
+The repository includes a metadata-only Pi extension:
+
+```bash
+mkdir -p ~/.pi/agent/extensions
+ln -s "$PWD/../.pi/extensions/zerker-observer.ts" \
+  ~/.pi/agent/extensions/zerker-observer.ts
+```
+
+Run `/reload` in an existing Pi session or start a new session. `/zerker-status` reports whether events are reaching Gateway.
+
+The extension sends session lifecycle, tool name/outcome/duration, model identity, token counts, and reported cost. It hashes the Pi session ID before sending it. It never sends prompts, tool arguments, tool output, command lines, file paths, or conversation content. Measurement fails open when Gateway is unavailable.
+
 ## Next dogfood slice
 
-The next onboarding surface will present one found agent at a time with **Observe** and **Skip**, then show the internal inventory and the first measurement Zerker can collect.
+Show the internal inventory and today's Pi summary in one calm local screen, then reuse the event contract for the next agent adapter.

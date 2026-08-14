@@ -93,6 +93,7 @@ export default defineConfig({
             { label: 'Routing & proxy', slug: 'gateway/proxy' },
             { label: 'MCP-native transport', slug: 'gateway/mcp' },
             { label: 'Observability & analytics', slug: 'gateway/observability' },
+            { label: 'Agent activity', slug: 'gateway/agent-activity' },
           ],
         },
         {
