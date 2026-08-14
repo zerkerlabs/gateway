@@ -251,3 +251,55 @@ func TestRecordTerminalEvent_EmptyRoomIsANoOp(t *testing.T) {
 		t.Errorf("Record called %d times for a room with no events, want 0", store.calls)
 	}
 }
+
+// TestRecordTerminalEvent_TerminationDisplacedFromLast is the interleaving
+// that makes locating the terminal event by position wrong.
+//
+// A room keeps accepting delivery-outcome events after it terminates, and that
+// is deliberate: a turn reserved before the termination still records what
+// became of its proxied call, so the transcript stays honest about a call that
+// really was made. Under concurrent traffic — one addressed message awaiting
+// gateway confirmation while a second trips the turn budget and abandons the
+// room — the delivery event lands AFTER room_terminated.
+//
+// The abandonment path re-reads the room off the request path rather than
+// holding a snapshot, so it sees that order. Taking the last event then finds
+// message_delivered, which is not recordable, and the room's own outcome is
+// never written — silently, since nothing about it is an error.
+func TestRecordTerminalEvent_TerminationDisplacedFromLast(t *testing.T) {
+	t.Parallel()
+
+	store := newIdempotentRecordStore()
+	h := NewHandler(room.NewMemoryStore(), store, memory.ContextPolicy{}, nil, nil, testLogger())
+
+	terminated := &room.Event{
+		Sequence: 4,
+		Kind:     room.EventRoomTerminated,
+		Payload:  room.RoomTerminatedPayload{State: room.StateAbandoned},
+	}
+	// The in-flight delivery resolving after the abandonment.
+	delivered := &room.Event{
+		Sequence: 5,
+		Kind:     room.EventMessageDelivered,
+		Payload:  room.MessageDeliveredPayload{InvocationID: "inv_1"},
+	}
+
+	h.recordTerminalEvent(context.Background(), "rom_1", &room.Room{
+		Events: []*room.Event{terminated, delivered},
+	})
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.calls != 1 {
+		t.Fatalf("Record called %d times, want 1 — the abandonment was not recorded because a "+
+			"delivery event landed after it and displaced it from last position", store.calls)
+	}
+	// Identity must come from the termination event, not from whatever ended up
+	// last: the idempotency key is derived from it, so a retry after this
+	// interleaving computes the same key and stays a safe no-op.
+	key := recordIdempotencyKey("rom_1", terminated)
+	if _, ok := store.byKey[key]; !ok {
+		t.Errorf("no record under the termination's idempotency key %q; keys = %v "+
+			"(identity was derived from the wrong event)", key, store.byKey)
+	}
+}

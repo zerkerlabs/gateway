@@ -93,21 +93,36 @@ func (h *Handler) doRecord(ctx context.Context, roomID, sourceEventID, idempoten
 	}
 }
 
-// recordTerminalEvent submits r's last event to Record when recordableContent
-// recognizes it, and does nothing otherwise — r.Events may be empty, or its
-// last event may not be a transition this write path records. Callers pass a
-// Room read after the transition they want recorded, so its last event is
-// that transition.
+// recordTerminalEvent submits r's terminal event to Record.
+//
+// It finds that event by identity, not by position. Trusting r.Events' LAST
+// entry looks equivalent and is not: a room keeps accepting delivery-outcome
+// events after it terminates, deliberately — a turn reserved before the
+// termination still records what became of its proxied call, which is what
+// keeps the transcript honest about a call that really was made. So an
+// EventMessageDelivered or EventDeliveryFailed can land after
+// room_terminated and displace it from last position, at which point a
+// positional read finds nothing recordable and the room's own outcome goes
+// unwritten.
+//
+// Scanning is unambiguous: recordableContent recognizes only
+// RoomTerminatedPayload, and a room terminates exactly once, so there is at
+// most one match and its Sequence is stable. That also keeps the
+// source_event_id and idempotency key derived from it stable across retries.
 func (h *Handler) recordTerminalEvent(ctx context.Context, roomID string, r *room.Room) {
-	if len(r.Events) == 0 {
-		return
+	for _, ev := range r.Events {
+		if content, ok := recordableContent(ev); ok {
+			h.doRecord(ctx, roomID, recordEventSourceID(roomID, ev), recordIdempotencyKey(roomID, ev), content)
+			return
+		}
 	}
-	ev := r.Events[len(r.Events)-1]
-	content, ok := recordableContent(ev)
-	if !ok {
-		return
-	}
-	h.doRecord(ctx, roomID, recordEventSourceID(roomID, ev), recordIdempotencyKey(roomID, ev), content)
+	// Nothing recordable. Callers reach here only for a room that holds no
+	// terminal event at all, which for the terminated paths means the write
+	// this function exists to make is being skipped — say so rather than
+	// returning silently, since a silent skip is indistinguishable from a
+	// successful record.
+	h.logger.Warn("record accepted transition skipped: no terminal event found in room",
+		"room_id", roomID, "events", len(r.Events))
 }
 
 // recordRoomTerminated asynchronously submits r's terminal event to Record —
@@ -139,6 +154,11 @@ func (h *Handler) recordRoomTerminated(roomID string, r *room.Room) {
 // runs — reading it back happens off the request path, in the same
 // goroutine as the Record call itself, so a slow store read cannot stall the
 // response either.
+//
+// Because it re-reads rather than holding a snapshot, this is the path where
+// events appended between the abandonment and the read are visible — see
+// recordTerminalEvent for why the terminal event is located by identity
+// rather than by position.
 func (h *Handler) recordRoomTerminatedAfterAbandon(tenantID, roomID string) {
 	h.recordWG.Add(1)
 	go func() {
