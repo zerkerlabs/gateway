@@ -14,19 +14,21 @@ import (
 	"github.com/zerkerlabs/gateway/rooms/internal/receipt"
 )
 
-// recordingMemoryStore wraps a memory.Store, recording every Propose call it
-// sees and letting a test simulate a failing or hanging backend. PrepareContext
-// is delegated to the wrapped Store unchanged; Record calls are counted so a
-// test can assert message posting never reaches it.
+// recordingMemoryStore wraps a memory.Store, recording every Propose and
+// Record call it sees and letting a test simulate a failing or hanging
+// backend. PrepareContext is delegated to the wrapped Store unchanged.
 type recordingMemoryStore struct {
 	memory.Store
 
 	mu          sync.Mutex
 	proposed    []memory.ProposeRequest
+	recorded    []memory.RecordRequest
 	recordCalls int
 	err         error // returned from Propose instead of delegating, when set
 	proposedCh  chan struct{}
+	recordedCh  chan struct{}
 	block       chan struct{} // read from before Propose does anything; only ctx cancellation unblocks it
+	recordBlock chan struct{} // read from before Record does anything; only ctx cancellation unblocks it
 }
 
 func (s *recordingMemoryStore) Propose(ctx context.Context, req memory.ProposeRequest) (memory.WriteResult, error) {
@@ -56,9 +58,25 @@ func (s *recordingMemoryStore) Propose(ctx context.Context, req memory.ProposeRe
 }
 
 func (s *recordingMemoryStore) Record(ctx context.Context, req memory.RecordRequest) (memory.WriteResult, error) {
+	if s.recordBlock != nil {
+		select {
+		case <-s.recordBlock:
+		case <-ctx.Done():
+			return memory.WriteResult{}, ctx.Err()
+		}
+	}
+
 	s.mu.Lock()
 	s.recordCalls++
+	s.recorded = append(s.recorded, req)
 	s.mu.Unlock()
+
+	if s.recordedCh != nil {
+		select {
+		case s.recordedCh <- struct{}{}:
+		default:
+		}
+	}
 	return s.Store.Record(ctx, req)
 }
 
@@ -66,6 +84,12 @@ func (s *recordingMemoryStore) Proposed() []memory.ProposeRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]memory.ProposeRequest(nil), s.proposed...)
+}
+
+func (s *recordingMemoryStore) Recorded() []memory.RecordRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]memory.RecordRequest(nil), s.recorded...)
 }
 
 func (s *recordingMemoryStore) RecordCalls() int {
@@ -83,6 +107,17 @@ func waitForPropose(t *testing.T, s *recordingMemoryStore) {
 	case <-s.proposedCh:
 	case <-time.After(2 * time.Second):
 		t.Fatal("no message proposed within 2s")
+	}
+}
+
+// waitForRecord fails the test if s does not see a Record call within 2s —
+// the same generous margin waitForPropose uses, for the same reason.
+func waitForRecord(t *testing.T, s *recordingMemoryStore) {
+	t.Helper()
+	select {
+	case <-s.recordedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no accepted transition recorded within 2s")
 	}
 }
 
