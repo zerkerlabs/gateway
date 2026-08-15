@@ -1043,6 +1043,10 @@ components:
             input_tokens: { type: integer, format: int64 }
             output_tokens: { type: integer, format: int64 }
             cost_usd: { type: number, format: double }
+            last_event_at:
+              type: string
+              format: date-time
+              description: Latest received event for this agent across all time; absent until an adapter connects.
 
     HealthzResponse:
       type: object

@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -29,6 +30,7 @@ func run(args []string, stdout, stderr io.Writer, scan func() (discovery.Report,
 	flags.SetOutput(stderr)
 	jsonOutput := flags.Bool("json", false, "print stable machine-readable output")
 	observeAll := flags.Bool("observe-all", false, "enroll every discovered agent with internal observe-only defaults")
+	today := flags.Bool("today", false, "show the calm internal activity summary for the last 24 hours")
 	gatewayURL := flags.String("gateway", "http://127.0.0.1:8080", "Zerker Gateway URL")
 	tokenFile := flags.String("token-file", "/tmp/zerker-dev-token", "file containing the Gateway bearer token")
 	if err := flags.Parse(args); err != nil {
@@ -37,17 +39,31 @@ func run(args []string, stdout, stderr io.Writer, scan func() (discovery.Report,
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments: %v", flags.Args())
 	}
+	if *observeAll && *today {
+		return errors.New("choose either --observe-all or --today")
+	}
+
+	if *today {
+		client, err := gatewayClient(*gatewayURL, *tokenFile)
+		if err != nil {
+			return err
+		}
+		result, err := client.Today(context.Background())
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return printJSON(stdout, result)
+		}
+		return printToday(stdout, result)
+	}
 
 	report, err := scan()
 	if err != nil {
 		return fmt.Errorf("scan local agents: %w", err)
 	}
 	if *observeAll {
-		token, err := loadToken(*tokenFile)
-		if err != nil {
-			return err
-		}
-		client, err := onboarding.NewClient(*gatewayURL, token, nil)
+		client, err := gatewayClient(*gatewayURL, *tokenFile)
 		if err != nil {
 			return err
 		}
@@ -65,6 +81,14 @@ func run(args []string, stdout, stderr io.Writer, scan func() (discovery.Report,
 	}
 
 	return printHuman(stdout, report)
+}
+
+func gatewayClient(gatewayURL, tokenFile string) (*onboarding.Client, error) {
+	token, err := loadToken(tokenFile)
+	if err != nil {
+		return nil, err
+	}
+	return onboarding.NewClient(gatewayURL, token, nil)
 }
 
 func loadToken(tokenFile string) (string, error) {
@@ -85,6 +109,30 @@ func printJSON(output io.Writer, value any) error {
 	encoder := json.NewEncoder(output)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
+}
+
+func printToday(output io.Writer, today onboarding.Today) error {
+	lines := []string{"Your agents today"}
+	if len(today.Agents) == 0 {
+		lines = append(lines, "", "No measured activity yet.")
+	}
+	for _, activity := range today.Agents {
+		lines = append(
+			lines,
+			"",
+			activity.Name,
+			fmt.Sprintf("  %d sessions · %d tool calls · %d failed", activity.Sessions, activity.ToolCalls, activity.ToolsFailed),
+			fmt.Sprintf("  %d tokens · $%.6f", activity.InputTokens+activity.OutputTokens, activity.CostUSD),
+		)
+	}
+	if len(today.Quiet) > 0 {
+		lines = append(lines, "", fmt.Sprintf("%d connected agents had no activity today", len(today.Quiet)))
+	}
+	if len(today.Waiting) > 0 {
+		lines = append(lines, "", fmt.Sprintf("%d agents waiting to connect", len(today.Waiting)))
+	}
+	_, err := io.WriteString(output, strings.Join(lines, "\n")+"\n")
+	return err
 }
 
 func printObserved(output io.Writer, result onboarding.Result) error {

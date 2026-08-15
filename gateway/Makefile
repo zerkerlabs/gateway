@@ -41,6 +41,10 @@ onboard: ## Find supported local agents without changing their configuration
 observe-agents: ## Register all discovered agents with internal observe-only defaults
 	$(GO) run ./cmd/zerker-onboard --observe-all
 
+.PHONY: today
+today: ## Show the calm internal agent summary for the last 24 hours
+	$(GO) run ./cmd/zerker-onboard --today
+
 .PHONY: run
 run: ## Run the gateway locally
 	$(GO) run -ldflags "$(LDFLAGS)" $(CMD)

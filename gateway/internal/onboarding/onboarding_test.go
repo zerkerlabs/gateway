@@ -104,6 +104,64 @@ func TestObserveAllUsesPrivateFailSafeDefaultsAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestTodayShowsActivityAndCollapsesUnconnectedAgents(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer token" {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		switch r.URL.Path {
+		case "/v1/agents":
+			_ = json.NewEncoder(w).Encode(listResponse{Agents: []listedAgent{
+				{ID: "agt_pi", Name: "Pi", Metadata: map[string]any{"zerker_discovery_key": "pi"}},
+				{ID: "agt_hermes", Name: "Hermes", Metadata: map[string]any{"zerker_discovery_key": "hermes"}},
+				{ID: "agt_cursor", Name: "Cursor", Metadata: map[string]any{"zerker_discovery_key": "cursor"}},
+			}})
+		case "/v1/agent-events/summary":
+			if r.URL.Query().Get("agent_id") == "agt_pi" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"summary": map[string]any{
+					"sessions": 2, "tool_calls": 5, "tools_succeeded": 4,
+					"tools_failed": 1, "tool_duration_ms": 90, "input_tokens": 100,
+					"output_tokens": 20, "cost_usd": 0.25,
+				}})
+				return
+			}
+			if r.URL.Query().Get("agent_id") == "agt_cursor" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"summary": map[string]any{
+					"last_event_at": "2026-08-13T12:00:00Z",
+				}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"summary": map[string]any{}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	today, err := client.Today(context.Background())
+	if err != nil {
+		t.Fatalf("Today() error = %v", err)
+	}
+	if today.Schema != "zerker.agent-today.v1" {
+		t.Fatalf("schema = %q", today.Schema)
+	}
+	if len(today.Agents) != 1 || today.Agents[0].Name != "Pi" || today.Agents[0].ToolCalls != 5 || today.Agents[0].ToolsFailed != 1 {
+		t.Fatalf("active agents = %#v", today.Agents)
+	}
+	if strings.Join(today.Quiet, ",") != "Cursor" {
+		t.Fatalf("quiet = %#v, want Cursor", today.Quiet)
+	}
+	if strings.Join(today.Waiting, ",") != "Hermes" {
+		t.Fatalf("waiting = %#v, want Hermes", today.Waiting)
+	}
+}
+
 func TestNewClientRejectsTokenExfiltrationURLs(t *testing.T) {
 	t.Parallel()
 

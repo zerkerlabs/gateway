@@ -27,9 +27,9 @@ ln -s "$PWD/.pi/extensions/zerker-observer.ts" \
   ~/.pi/agent/extensions/zerker-observer.ts
 ```
 
-The adapter reads `ZERKER_TOKEN`, or falls back to `/tmp/zerker-dev-token`. It resolves the enrolled Pi agent by its discovery key and fails open when Gateway is unavailable. Agent work continues without delay or blocking.
+The adapter reads `ZERKER_TOKEN`, or falls back to `/tmp/zerker-dev-token`. The development issuer rotates that file before expiry; the adapter reloads it and retries once after an authentication failure. It resolves the enrolled Pi agent by its discovery key and fails open when Gateway is unavailable. Agent work continues without blocking.
 
-Use `/zerker-status` inside Pi to see whether measurement is connected. Reload Pi after installing the extension, or start a new session.
+Use `/zerker-status` inside Pi to see whether measurement is connected. `/zerker-today` shows the current 24-hour summary in one line. Reload Pi after installing the extension, or start a new session.
 
 ## Summary
 
@@ -39,5 +39,13 @@ curl -H "Authorization: Bearer $TOKEN" \
 ```
 
 The summary returns sessions, tool calls, tool outcomes, tool duration, model tokens, and reported cost for the last 24 hours. `since` and `until` can select an explicit RFC3339 window of up to 31 days.
+
+For the inventory-wide calm view:
+
+```bash
+make -C gateway today
+```
+
+Connected agents with no activity today and agents that have never connected are collapsed into separate counts instead of rows of zeroes.
 
 The full wire contract is in the [Gateway API reference](/api-reference/gateway/).

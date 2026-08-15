@@ -69,6 +69,10 @@ func TestAgentEventIngestAndSummary(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode summary: %v", err)
 	}
+	if response.Summary.LastEventAt == nil {
+		t.Fatal("last_event_at is nil after recorded activity")
+	}
+	response.Summary.LastEventAt = nil
 	want := agentevent.Summary{Sessions: 1, ToolCalls: 2, ToolsSucceeded: 1, ToolsFailed: 1, DurationMS: 100, InputTokens: 100, OutputTokens: 20, CostUSD: 0.01}
 	if response.Summary != want {
 		t.Fatalf("summary = %#v, want %#v", response.Summary, want)

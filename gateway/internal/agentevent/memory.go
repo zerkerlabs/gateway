@@ -55,7 +55,14 @@ func (s *MemoryStore) Summary(ctx context.Context, tenantID, agentID string, sin
 	var summary Summary
 	sessions := make(map[string]struct{})
 	for _, event := range s.events[tenantID] {
-		if event.AgentID != agentID || event.OccurredAt.Before(since) || !event.OccurredAt.Before(until) {
+		if event.AgentID != agentID {
+			continue
+		}
+		if summary.LastEventAt == nil || event.ReceivedAt.After(*summary.LastEventAt) {
+			lastEventAt := event.ReceivedAt
+			summary.LastEventAt = &lastEventAt
+		}
+		if event.OccurredAt.Before(since) || !event.OccurredAt.Before(until) {
 			continue
 		}
 		switch event.Type {

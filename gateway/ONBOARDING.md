@@ -65,7 +65,7 @@ make dev-auth
 make observe-agents
 ```
 
-The command reads the development bearer token from `/tmp/zerker-dev-token`. For another environment, use `ZERKER_TOKEN` and an HTTPS Gateway URL:
+The command reads the development bearer token from `/tmp/zerker-dev-token`. The mock issuer rotates this file before expiry, and connected adapters reload it after an authentication failure. For another environment, use `ZERKER_TOKEN` and an HTTPS Gateway URL:
 
 ```bash
 ZERKER_TOKEN="$TOKEN" ./bin/zerker-onboard \
@@ -97,10 +97,20 @@ ln -s "$PWD/../.pi/extensions/zerker-observer.ts" \
   ~/.pi/agent/extensions/zerker-observer.ts
 ```
 
-Run `/reload` in an existing Pi session or start a new session. `/zerker-status` reports whether events are reaching Gateway.
+Run `/reload` in an existing Pi session or start a new session. `/zerker-status` reports whether events are reaching Gateway. `/zerker-today` shows a one-line Pi summary.
 
 The extension sends session lifecycle, tool name/outcome/duration, model identity, token counts, and reported cost. It hashes the Pi session ID before sending it. It never sends prompts, tool arguments, tool output, command lines, file paths, or conversation content. Measurement fails open when Gateway is unavailable.
 
+## See today
+
+From the Gateway module:
+
+```bash
+make today
+```
+
+The default view shows only agents with measured activity. Connected agents with no activity today and agents that have never connected are collapsed into separate calm counts. Use `go run ./cmd/zerker-onboard --today --json` for the stable `zerker.agent-today.v1` machine contract.
+
 ## Next dogfood slice
 
-Show the internal inventory and today's Pi summary in one calm local screen, then reuse the event contract for the next agent adapter.
+Use the live summary during normal work, then connect Hermes through the same event contract.

@@ -28,6 +28,16 @@ type GatewayAgent = {
   metadata?: { zerker_discovery_key?: unknown };
 };
 
+type ActivitySummary = {
+  sessions: number;
+  tool_calls: number;
+  tools_succeeded: number;
+  tools_failed: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+};
+
 function sessionDigest(sessionId: string): string {
   return `sha256:${createHash("sha256").update(sessionId).digest("hex")}`;
 }
@@ -77,16 +87,25 @@ export default function zerkerObserver(pi: ExtensionAPI) {
 
   async function request(path: string, init: RequestInit): Promise<Response> {
     if (!gatewayURL || !token) throw new Error("Zerker is not configured");
-    return fetch(`${gatewayURL}${path}`, {
+    const send = (bearer: string) => fetch(`${gatewayURL}${path}`, {
       ...init,
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${bearer}`,
         "Content-Type": "application/json",
         ...(init.headers ?? {}),
       },
       redirect: "error",
       signal: AbortSignal.timeout(2_000),
     });
+    let response = await send(token);
+    if (response.status === 401) {
+      const refreshed = await loadToken();
+      if (refreshed && refreshed !== token) {
+        token = refreshed;
+        response = await send(token);
+      }
+    }
+    return response;
   }
 
   async function resolveAgent(): Promise<boolean> {
@@ -98,6 +117,16 @@ export default function zerkerObserver(pi: ExtensionAPI) {
     );
     agentId = piAgent?.id;
     return Boolean(agentId);
+  }
+
+  async function fetchToday(): Promise<ActivitySummary> {
+    if (!agentId && !(await resolveAgent())) throw new Error("Pi is not enrolled");
+    const response = await request(`/v1/agent-events/summary?agent_id=${encodeURIComponent(agentId!)}`, {
+      method: "GET",
+    });
+    if (!response.ok) throw new Error(`Gateway returned ${response.status}`);
+    const payload = (await response.json()) as { summary: ActivitySummary };
+    return payload.summary;
   }
 
   async function emit(type: EventType, fields: EventFields = {}, eventId = randomUUID()): Promise<void> {
@@ -182,6 +211,22 @@ export default function zerkerObserver(pi: ExtensionAPI) {
     }
     await Promise.allSettled([...pending]);
     toolStarts.clear();
+  });
+
+  pi.registerCommand("zerker-today", {
+    description: "Show today's calm Pi activity summary",
+    handler: async (_args, ctx) => {
+      try {
+        const summary = await fetchToday();
+        const tokens = summary.input_tokens + summary.output_tokens;
+        ctx.ui.notify(
+          `Pi today · ${summary.sessions} sessions · ${summary.tool_calls} tools · ${summary.tools_failed} failed · ${tokens} tokens · $${summary.cost_usd.toFixed(6)}`,
+          summary.tools_failed > 0 ? "warning" : "info",
+        );
+      } catch {
+        ctx.ui.notify("Zerker summary unavailable. Your agent can keep working.", "warning");
+      }
+    },
   });
 
   pi.registerCommand("zerker-status", {

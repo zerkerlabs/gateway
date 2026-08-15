@@ -75,7 +75,11 @@ The first preview recognizes Claude Code, Codex, Cursor, Gemini CLI, Hermes, Pi,
 make -C gateway observe-agents
 ```
 
-See [`gateway/ONBOARDING.md`](gateway/ONBOARDING.md) for the discovery boundary, enrollment defaults, and next dogfood steps.
+See [`gateway/ONBOARDING.md`](gateway/ONBOARDING.md) for the discovery boundary and enrollment defaults. After connecting an adapter, show the calm 24-hour view with:
+
+```bash
+make -C gateway today
+```
 
 ### Production
 

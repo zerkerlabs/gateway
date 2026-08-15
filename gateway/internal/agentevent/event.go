@@ -67,14 +67,15 @@ type Event struct {
 
 // Summary is the compact measurement shown to an operator for a time window.
 type Summary struct {
-	Sessions       int64   `json:"sessions"`
-	ToolCalls      int64   `json:"tool_calls"`
-	ToolsSucceeded int64   `json:"tools_succeeded"`
-	ToolsFailed    int64   `json:"tools_failed"`
-	DurationMS     int64   `json:"tool_duration_ms"`
-	InputTokens    int64   `json:"input_tokens"`
-	OutputTokens   int64   `json:"output_tokens"`
-	CostUSD        float64 `json:"cost_usd"`
+	Sessions       int64      `json:"sessions"`
+	ToolCalls      int64      `json:"tool_calls"`
+	ToolsSucceeded int64      `json:"tools_succeeded"`
+	ToolsFailed    int64      `json:"tools_failed"`
+	DurationMS     int64      `json:"tool_duration_ms"`
+	InputTokens    int64      `json:"input_tokens"`
+	OutputTokens   int64      `json:"output_tokens"`
+	CostUSD        float64    `json:"cost_usd"`
+	LastEventAt    *time.Time `json:"last_event_at,omitempty"`
 }
 
 // Store persists events and computes tenant-scoped summaries.

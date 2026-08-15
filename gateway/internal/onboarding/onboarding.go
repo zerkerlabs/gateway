@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,6 +25,29 @@ const maxResponseBytes = 1 << 20
 type Result struct {
 	Added           []string `json:"added"`
 	AlreadyEnrolled []string `json:"already_enrolled"`
+}
+
+// Today is the calm, inventory-wide activity view for the last 24 hours.
+type Today struct {
+	Schema  string       `json:"schema"`
+	Agents  []AgentToday `json:"agents"`
+	Quiet   []string     `json:"connected_without_activity"`
+	Waiting []string     `json:"waiting_to_connect"`
+}
+
+// AgentToday contains useful outcome metadata without agent content.
+type AgentToday struct {
+	Name           string     `json:"name"`
+	DiscoveryKey   string     `json:"discovery_key"`
+	Sessions       int64      `json:"sessions"`
+	ToolCalls      int64      `json:"tool_calls"`
+	ToolsSucceeded int64      `json:"tools_succeeded"`
+	ToolsFailed    int64      `json:"tools_failed"`
+	DurationMS     int64      `json:"tool_duration_ms"`
+	InputTokens    int64      `json:"input_tokens"`
+	OutputTokens   int64      `json:"output_tokens"`
+	CostUSD        float64    `json:"cost_usd"`
+	LastEventAt    *time.Time `json:"last_event_at,omitempty"`
 }
 
 // Client enrolls discovered agents through the authenticated Gateway API.
@@ -108,6 +132,51 @@ func (c *Client) ObserveAll(ctx context.Context, report discovery.Report) (Resul
 	return result, nil
 }
 
+// Today returns connected agent activity and keeps unconnected inventory in a
+// single waiting count rather than presenting rows of zeroes.
+func (c *Client) Today(ctx context.Context) (Today, error) {
+	existing, err := c.list(ctx)
+	if err != nil {
+		return Today{}, err
+	}
+	sort.Slice(existing, func(i, j int) bool { return existing[i].Name < existing[j].Name })
+
+	result := Today{Schema: "zerker.agent-today.v1", Agents: []AgentToday{}, Quiet: []string{}, Waiting: []string{}}
+	for _, registered := range existing {
+		key, ok := registered.Metadata["zerker_discovery_key"].(string)
+		if !ok || key == "" {
+			continue
+		}
+		summary, err := c.summary(ctx, registered.ID)
+		if err != nil {
+			return Today{}, fmt.Errorf("summarize %s: %w", registered.Name, err)
+		}
+		activity := AgentToday{
+			Name:           registered.Name,
+			DiscoveryKey:   key,
+			Sessions:       summary.Sessions,
+			ToolCalls:      summary.ToolCalls,
+			ToolsSucceeded: summary.ToolsSucceeded,
+			ToolsFailed:    summary.ToolsFailed,
+			DurationMS:     summary.DurationMS,
+			InputTokens:    summary.InputTokens,
+			OutputTokens:   summary.OutputTokens,
+			CostUSD:        summary.CostUSD,
+			LastEventAt:    summary.LastEventAt,
+		}
+		if activity.Sessions == 0 && activity.ToolCalls == 0 && activity.InputTokens == 0 && activity.OutputTokens == 0 && activity.CostUSD == 0 {
+			if activity.LastEventAt == nil {
+				result.Waiting = append(result.Waiting, registered.Name)
+			} else {
+				result.Quiet = append(result.Quiet, registered.Name)
+			}
+			continue
+		}
+		result.Agents = append(result.Agents, activity)
+	}
+	return result, nil
+}
+
 type listResponse struct {
 	Agents []listedAgent `json:"agents"`
 }
@@ -140,6 +209,52 @@ func (c *Client) list(ctx context.Context) ([]listedAgent, error) {
 		return nil, fmt.Errorf("decode gateway agent list: %w", err)
 	}
 	return listed.Agents, nil
+}
+
+type summaryResponse struct {
+	Summary struct {
+		Sessions       int64      `json:"sessions"`
+		ToolCalls      int64      `json:"tool_calls"`
+		ToolsSucceeded int64      `json:"tools_succeeded"`
+		ToolsFailed    int64      `json:"tools_failed"`
+		DurationMS     int64      `json:"tool_duration_ms"`
+		InputTokens    int64      `json:"input_tokens"`
+		OutputTokens   int64      `json:"output_tokens"`
+		CostUSD        float64    `json:"cost_usd"`
+		LastEventAt    *time.Time `json:"last_event_at"`
+	} `json:"summary"`
+}
+
+func (c *Client) summary(ctx context.Context, agentID string) (AgentToday, error) {
+	endpoint := c.resolve("/v1/agent-events/summary?agent_id=" + url.QueryEscape(agentID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return AgentToday{}, fmt.Errorf("build summary request: %w", err)
+	}
+	c.authorize(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return AgentToday{}, fmt.Errorf("connect to gateway: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return AgentToday{}, responseError(resp)
+	}
+	var payload summaryResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&payload); err != nil {
+		return AgentToday{}, fmt.Errorf("decode gateway activity summary: %w", err)
+	}
+	return AgentToday{
+		Sessions:       payload.Summary.Sessions,
+		ToolCalls:      payload.Summary.ToolCalls,
+		ToolsSucceeded: payload.Summary.ToolsSucceeded,
+		ToolsFailed:    payload.Summary.ToolsFailed,
+		DurationMS:     payload.Summary.DurationMS,
+		InputTokens:    payload.Summary.InputTokens,
+		OutputTokens:   payload.Summary.OutputTokens,
+		CostUSD:        payload.Summary.CostUSD,
+		LastEventAt:    payload.Summary.LastEventAt,
+	}, nil
 }
 
 func (c *Client) create(ctx context.Context, found discovery.Agent) error {
