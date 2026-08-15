@@ -36,6 +36,7 @@ type ActivitySummary = {
   input_tokens: number;
   output_tokens: number;
   cost_usd: number;
+  cost_known: boolean;
 };
 
 function sessionDigest(sessionId: string): string {
@@ -219,8 +220,9 @@ export default function zerkerObserver(pi: ExtensionAPI) {
       try {
         const summary = await fetchToday();
         const tokens = summary.input_tokens + summary.output_tokens;
+        const cost = summary.cost_known ? `$${summary.cost_usd.toFixed(6)}` : "cost unavailable";
         ctx.ui.notify(
-          `Pi today · ${summary.sessions} sessions · ${summary.tool_calls} tools · ${summary.tools_failed} failed · ${tokens} tokens · $${summary.cost_usd.toFixed(6)}`,
+          `Pi today · ${summary.sessions} sessions · ${summary.tool_calls} tools · ${summary.tools_failed} failed · ${tokens} tokens · ${cost}`,
           summary.tools_failed > 0 ? "warning" : "info",
         );
       } catch {

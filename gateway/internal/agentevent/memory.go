@@ -88,6 +88,7 @@ func (s *MemoryStore) Summary(ctx context.Context, tenantID, agentID string, sin
 			}
 			if event.CostUSD != nil {
 				summary.CostUSD += *event.CostUSD
+				summary.CostKnown = true
 			}
 		case TypeSessionEnded:
 		}

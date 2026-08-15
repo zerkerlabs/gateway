@@ -75,6 +75,7 @@ type Summary struct {
 	InputTokens    int64      `json:"input_tokens"`
 	OutputTokens   int64      `json:"output_tokens"`
 	CostUSD        float64    `json:"cost_usd"`
+	CostKnown      bool       `json:"cost_known"`
 	LastEventAt    *time.Time `json:"last_event_at,omitempty"`
 }
 

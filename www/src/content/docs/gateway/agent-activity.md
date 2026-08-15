@@ -31,6 +31,19 @@ The adapter reads `ZERKER_TOKEN`, or falls back to `/tmp/zerker-dev-token`. The 
 
 Use `/zerker-status` inside Pi to see whether measurement is connected. `/zerker-today` shows the current 24-hour summary in one line. Reload Pi after installing the extension, or start a new session.
 
+## Hermes adapter
+
+`integrations/hermes/zerker-observer` uses Hermes' native, fail-open observer hooks. It subscribes only to session boundaries, completed tools, and provider usage. Hook fields containing prompts, arguments, results, commands, paths, and provider payloads are ignored.
+
+```bash
+mkdir -p ~/.hermes/plugins
+ln -s "$PWD/integrations/hermes/zerker-observer" \
+  ~/.hermes/plugins/zerker-observer
+hermes plugins enable zerker-observer
+```
+
+See the [Hermes adapter README](https://github.com/zerkerlabs/gateway/tree/main/integrations/hermes/zerker-observer) for its exact data boundary.
+
 ## Summary
 
 ```bash
@@ -38,7 +51,7 @@ curl -H "Authorization: Bearer $TOKEN" \
   "http://127.0.0.1:8080/v1/agent-events/summary?agent_id=$PI_AGENT_ID"
 ```
 
-The summary returns sessions, tool calls, tool outcomes, tool duration, model tokens, and reported cost for the last 24 hours. `since` and `until` can select an explicit RFC3339 window of up to 31 days.
+The summary returns sessions, tool calls, tool outcomes, tool duration, model tokens, and reported cost for the last 24 hours. Cost is marked unavailable when an adapter supplies token usage without a cost value; zero is never used to imply “free.” `since` and `until` can select an explicit RFC3339 window of up to 31 days.
 
 For the inventory-wide calm view:
 

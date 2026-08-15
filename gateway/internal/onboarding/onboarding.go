@@ -47,6 +47,7 @@ type AgentToday struct {
 	InputTokens    int64      `json:"input_tokens"`
 	OutputTokens   int64      `json:"output_tokens"`
 	CostUSD        float64    `json:"cost_usd"`
+	CostKnown      bool       `json:"cost_known"`
 	LastEventAt    *time.Time `json:"last_event_at,omitempty"`
 }
 
@@ -162,6 +163,7 @@ func (c *Client) Today(ctx context.Context) (Today, error) {
 			InputTokens:    summary.InputTokens,
 			OutputTokens:   summary.OutputTokens,
 			CostUSD:        summary.CostUSD,
+			CostKnown:      summary.CostKnown,
 			LastEventAt:    summary.LastEventAt,
 		}
 		if activity.Sessions == 0 && activity.ToolCalls == 0 && activity.InputTokens == 0 && activity.OutputTokens == 0 && activity.CostUSD == 0 {
@@ -221,6 +223,7 @@ type summaryResponse struct {
 		InputTokens    int64      `json:"input_tokens"`
 		OutputTokens   int64      `json:"output_tokens"`
 		CostUSD        float64    `json:"cost_usd"`
+		CostKnown      bool       `json:"cost_known"`
 		LastEventAt    *time.Time `json:"last_event_at"`
 	} `json:"summary"`
 }
@@ -253,6 +256,7 @@ func (c *Client) summary(ctx context.Context, agentID string) (AgentToday, error
 		InputTokens:    payload.Summary.InputTokens,
 		OutputTokens:   payload.Summary.OutputTokens,
 		CostUSD:        payload.Summary.CostUSD,
+		CostKnown:      payload.Summary.CostKnown,
 		LastEventAt:    payload.Summary.LastEventAt,
 	}, nil
 }

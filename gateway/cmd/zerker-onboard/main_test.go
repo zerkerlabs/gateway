@@ -66,7 +66,7 @@ func TestPrintTodayLeadsWithUsefulActivity(t *testing.T) {
 		Schema: "zerker.agent-today.v1",
 		Agents: []onboarding.AgentToday{{
 			Name: "Pi", Sessions: 2, ToolCalls: 5, ToolsFailed: 1,
-			InputTokens: 100, OutputTokens: 20, CostUSD: 0.25,
+			InputTokens: 100, OutputTokens: 20, CostUSD: 0.25, CostKnown: true,
 		}},
 		Waiting: []string{"Claude Code", "Hermes"},
 	})

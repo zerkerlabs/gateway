@@ -117,12 +117,16 @@ func printToday(output io.Writer, today onboarding.Today) error {
 		lines = append(lines, "", "No measured activity yet.")
 	}
 	for _, activity := range today.Agents {
+		cost := "cost unavailable"
+		if activity.CostKnown {
+			cost = fmt.Sprintf("$%.6f", activity.CostUSD)
+		}
 		lines = append(
 			lines,
 			"",
 			activity.Name,
 			fmt.Sprintf("  %d sessions · %d tool calls · %d failed", activity.Sessions, activity.ToolCalls, activity.ToolsFailed),
-			fmt.Sprintf("  %d tokens · $%.6f", activity.InputTokens+activity.OutputTokens, activity.CostUSD),
+			fmt.Sprintf("  %d tokens · %s", activity.InputTokens+activity.OutputTokens, cost),
 		)
 	}
 	if len(today.Quiet) > 0 {

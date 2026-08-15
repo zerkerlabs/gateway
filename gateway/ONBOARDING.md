@@ -111,6 +111,19 @@ make today
 
 The default view shows only agents with measured activity. Connected agents with no activity today and agents that have never connected are collapsed into separate calm counts. Use `go run ./cmd/zerker-onboard --today --json` for the stable `zerker.agent-today.v1` machine contract.
 
+## Connect Hermes measurement
+
+The Hermes adapter uses native read-only observer hooks rather than scraping session files:
+
+```bash
+mkdir -p ~/.hermes/plugins
+ln -s "$PWD/../integrations/hermes/zerker-observer" \
+  ~/.hermes/plugins/zerker-observer
+hermes plugins enable zerker-observer
+```
+
+It emits hashed session lifecycle, tool name/outcome/duration, model identity, and token counts. It deliberately ignores prompts, history, tool arguments, tool results, commands, paths, and provider payloads. See [`../integrations/hermes/zerker-observer/README.md`](../integrations/hermes/zerker-observer/README.md).
+
 ## Next dogfood slice
 
-Use the live summary during normal work, then connect Hermes through the same event contract.
+Use Pi and Hermes during normal work, then connect Claude Code through the same event contract.

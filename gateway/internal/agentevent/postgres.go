@@ -73,6 +73,7 @@ func (s *PostgresStore) Summary(ctx context.Context, tenantID, agentID string, s
 			COALESCE(SUM(input_tokens) FILTER (WHERE event_type = 'model.usage'), 0),
 			COALESCE(SUM(output_tokens) FILTER (WHERE event_type = 'model.usage'), 0),
 			COALESCE(SUM(cost_usd) FILTER (WHERE event_type = 'model.usage'), 0),
+			COUNT(cost_usd) FILTER (WHERE event_type = 'model.usage') > 0,
 			(SELECT MAX(received_at) FROM agent_events all_events
 			 WHERE all_events.tenant_id=$1 AND all_events.agent_id=$2)
 		FROM agent_events
@@ -80,7 +81,7 @@ func (s *PostgresStore) Summary(ctx context.Context, tenantID, agentID string, s
 	`, tenantID, agentID, since, until).Scan(
 		&summary.Sessions, &summary.ToolCalls, &summary.ToolsSucceeded,
 		&summary.ToolsFailed, &summary.DurationMS, &summary.InputTokens,
-		&summary.OutputTokens, &summary.CostUSD, &summary.LastEventAt,
+		&summary.OutputTokens, &summary.CostUSD, &summary.CostKnown, &summary.LastEventAt,
 	)
 	if err != nil {
 		return Summary{}, fmt.Errorf("summarize agent events: %w", err)

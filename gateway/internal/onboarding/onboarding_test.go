@@ -123,7 +123,7 @@ func TestTodayShowsActivityAndCollapsesUnconnectedAgents(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"summary": map[string]any{
 					"sessions": 2, "tool_calls": 5, "tools_succeeded": 4,
 					"tools_failed": 1, "tool_duration_ms": 90, "input_tokens": 100,
-					"output_tokens": 20, "cost_usd": 0.25,
+					"output_tokens": 20, "cost_usd": 0.25, "cost_known": true,
 				}})
 				return
 			}

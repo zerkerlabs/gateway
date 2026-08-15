@@ -1,0 +1,9 @@
+name: zerker-observer
+version: "0.1.0"
+description: "Privacy-safe Zerker measurement for Hermes sessions, tool outcomes, and model usage. Never exports prompts, arguments, results, commands, paths, or conversation content."
+author: "Zerker Labs"
+hooks:
+  - on_session_start
+  - on_session_finalize
+  - post_tool_call
+  - post_api_request
