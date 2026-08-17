@@ -15,7 +15,7 @@ LDFLAGS    := -X github.com/zerkerlabs/gateway/gateway/internal/version.Version=
 .DEFAULT_GOAL := check
 
 .PHONY: check
-check: tidy-check fmt-check vet lint test docs-check ## Run the full quality gate (build is implied by vet/test)
+check: tidy-check fmt-check vet lint test adapter-test docs-check ## Run the full quality gate (build is implied by vet/test)
 
 .PHONY: docs
 docs: ## Emit the config/env reference the website includes (from internal/config)
@@ -70,6 +70,13 @@ integration-test: ## Run integration tests (needs TEST_DATABASE_URL + a Postgres
 .PHONY: test
 test: ## Run tests with the race detector
 	$(GO) test -race -count=1 ./...
+
+.PHONY: adapter-test
+adapter-test: ## Run privacy-boundary tests for local agent adapters
+	python3 ../integrations/hermes/zerker-observer/test_plugin.py
+	python3 ../integrations/claude-code/test_observer.py
+	python3 ../integrations/codex/test_observer.py
+	python3 ../integrations/gemini-cli/test_observer.py
 
 .PHONY: vet
 vet: ## Run go vet
