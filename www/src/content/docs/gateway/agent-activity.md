@@ -31,6 +31,16 @@ The adapter reads `ZERKER_TOKEN`, or falls back to `/tmp/zerker-dev-token`. The 
 
 Use `/zerker-status` inside Pi to see whether measurement is connected. `/zerker-today` shows the current 24-hour summary in one line. Reload Pi after installing the extension, or start a new session.
 
+## Claude Code adapter
+
+`integrations/claude-code/zerker_observer.py` uses Claude Code's native lifecycle and tool hooks. It records hashed session boundaries plus tool name, coarse outcome, and duration. It ignores prompts, assistant messages, tool inputs, tool outputs, commands, paths, transcripts, environment values, and credentials.
+
+```bash
+python3 integrations/claude-code/install.py
+```
+
+The installer preserves unrelated Claude Code settings and hooks. Restart Claude Code after installation. See the [Claude Code adapter README](https://github.com/zerkerlabs/gateway/tree/main/integrations/claude-code) for setup and removal instructions.
+
 ## Hermes adapter
 
 `integrations/hermes/zerker-observer` uses Hermes' native, fail-open observer hooks. It subscribes only to session boundaries, completed tools, and provider usage. Hook fields containing prompts, arguments, results, commands, paths, and provider payloads are ignored.

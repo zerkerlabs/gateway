@@ -111,6 +111,16 @@ make today
 
 The default view shows only agents with measured activity. Connected agents with no activity today and agents that have never connected are collapsed into separate calm counts. Use `go run ./cmd/zerker-onboard --today --json` for the stable `zerker.agent-today.v1` machine contract.
 
+## Connect Claude Code measurement
+
+The Claude Code adapter uses native lifecycle and tool hooks:
+
+```bash
+python3 integrations/claude-code/install.py
+```
+
+Restart Claude Code after installation. The adapter sends hashed session lifecycle plus tool name, coarse outcome, and duration. It discards prompts, assistant messages, tool inputs, tool outputs, commands, paths, and transcript locations. See [`../integrations/claude-code/README.md`](../integrations/claude-code/README.md).
+
 ## Connect Hermes measurement
 
 The Hermes adapter uses native read-only observer hooks rather than scraping session files:
@@ -126,4 +136,4 @@ It emits hashed session lifecycle, tool name/outcome/duration, model identity, a
 
 ## Next dogfood slice
 
-Use Pi and Hermes during normal work, then connect Claude Code through the same event contract.
+Use Pi, Claude Code, and Hermes during normal work, then connect Codex through the same event contract.
