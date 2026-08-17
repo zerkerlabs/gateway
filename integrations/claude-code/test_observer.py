@@ -33,14 +33,12 @@ class ObserverTest(unittest.TestCase):
             "cwd": "/private/project",
             "prompt": "do not send me",
         }
-        with patch.object(observer, "_resolve_agent_id", return_value="agent-1"), patch.object(
-            observer, "_request", side_effect=lambda path, **kwargs: sent.append(kwargs["payload"]) or {}
-        ):
+        with patch.object(observer, "_spawn_emit", side_effect=sent.append):
             observer.handle_hook(payload)
         self.assertEqual(len(sent), 1)
         event = sent[0]
         self.assertEqual(event["type"], "session.started")
-        self.assertEqual(event["source"], "claude-code")
+        self.assertTrue(event["session_ref"].startswith("sha256:"))
         serialized = json.dumps(event)
         for secret in ("secret-session-id", "transcript", "/private", "do not send me"):
             self.assertNotIn(secret, serialized)
@@ -49,9 +47,7 @@ class ObserverTest(unittest.TestCase):
         sent = []
         with tempfile.TemporaryDirectory() as directory, patch.object(
             observer, "_STATE_ROOT", Path(directory)
-        ), patch.object(observer, "_resolve_agent_id", return_value="agent-1"), patch.object(
-            observer, "_request", side_effect=lambda path, **kwargs: sent.append(kwargs["payload"]) or {}
-        ):
+        ), patch.object(observer, "_spawn_emit", side_effect=sent.append):
             observer.handle_hook(
                 {
                     "hook_event_name": "PreToolUse",
@@ -84,9 +80,7 @@ class ObserverTest(unittest.TestCase):
 
     def test_failure_is_coarse(self) -> None:
         sent = []
-        with patch.object(observer, "_resolve_agent_id", return_value="agent-1"), patch.object(
-            observer, "_request", side_effect=lambda path, **kwargs: sent.append(kwargs["payload"]) or {}
-        ):
+        with patch.object(observer, "_spawn_emit", side_effect=sent.append):
             observer.handle_hook(
                 {
                     "hook_event_name": "PostToolUseFailure",
@@ -116,10 +110,8 @@ class InstallerTest(unittest.TestCase):
             ]
             self.assertEqual(len(zerker), 1)
             command_hook = zerker[0]["hooks"][0]
-            if event == "PreToolUse":
-                self.assertNotIn("async", command_hook)
-            else:
-                self.assertTrue(command_hook["async"])
+            self.assertNotIn("async", command_hook)
+            self.assertEqual(command_hook["timeout"], 3)
 
     def test_uninstall_removes_only_zerker_hooks(self) -> None:
         settings = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "keep"}]}]}}

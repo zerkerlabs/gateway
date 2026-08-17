@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -118,20 +119,37 @@ def _occurred_at() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _emit(event_type: str, session_id: str, *, event_id: str | None = None, **fields: Any) -> None:
-    session_ref = _session_ref(session_id)
+def _emit_sanitized(event: dict[str, Any]) -> None:
     payload = {
         "schema": _SCHEMA,
-        "event_id": event_id or str(uuid.uuid4()),
+        "event_id": event.pop("event_id", str(uuid.uuid4())),
         "agent_id": _resolve_agent_id(),
-        "type": event_type,
-        "session_ref": session_ref,
+        "session_ref": event.pop("session_ref"),
         "occurred_at": _occurred_at(),
         "source": "codex",
         "source_version": _SOURCE_VERSION,
-        **fields,
+        **event,
     }
     _request("/v1/agent-events", method="POST", payload=payload)
+
+
+def _spawn_emit(event: dict[str, Any]) -> None:
+    read_fd, write_fd = os.pipe()
+    try:
+        subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--emit"],
+            stdin=read_fd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+    finally:
+        os.close(read_fd)
+    try:
+        os.write(write_fd, json.dumps(event, separators=(",", ":")).encode("utf-8"))
+    finally:
+        os.close(write_fd)
 
 
 def _start_path(session_id: str, tool_use_id: str) -> Path:
@@ -167,18 +185,18 @@ def handle_hook(payload: dict[str, Any]) -> None:
     session_ref = _session_ref(session_id)
 
     if event_name == "SessionStart":
-        _emit(
-            "session.started",
-            session_id,
-            event_id=_event_id(session_ref, "session.started"),
-        )
+        _spawn_emit({
+            "session_ref": session_ref,
+            "event_id": _event_id(session_ref, "session.started"),
+            "type": "session.started",
+        })
         return
     if event_name == "SessionEnd":
-        _emit(
-            "session.ended",
-            session_id,
-            event_id=_event_id(session_ref, "session.ended"),
-        )
+        _spawn_emit({
+            "session_ref": session_ref,
+            "event_id": _event_id(session_ref, "session.ended"),
+            "type": "session.ended",
+        })
         return
 
     tool_use_id = payload.get("tool_use_id")
@@ -192,27 +210,34 @@ def handle_hook(payload: dict[str, Any]) -> None:
         return
     if not isinstance(tool_name, str) or not tool_name.strip():
         return
-    _emit(
-        "tool.completed",
-        session_id,
-        event_id=_event_id(session_ref, f"tool:{tool_use_id}"),
-        tool_name=tool_name.strip()[:128],
-        outcome="succeeded" if event_name == "PostToolUse" else "failed",
-        duration_ms=_tool_duration_ms(session_id, tool_use_id),
-    )
+    _spawn_emit({
+        "session_ref": session_ref,
+        "event_id": _event_id(session_ref, f"tool:{tool_use_id}"),
+        "type": "tool.completed",
+        "tool_name": tool_name.strip()[:128],
+        "outcome": "succeeded" if event_name == "PostToolUse" else "failed",
+        "duration_ms": _tool_duration_ms(session_id, tool_use_id),
+    })
 
 
 def main() -> int:
     try:
         raw = sys.stdin.buffer.read(_MAX_HOOK_BYTES + 1)
         if len(raw) > _MAX_HOOK_BYTES:
+            if not (len(sys.argv) > 1 and sys.argv[1] == "--emit"):
+                print("{}")
             return 0
         payload = json.loads(raw)
         if isinstance(payload, dict):
+            if len(sys.argv) > 1 and sys.argv[1] == "--emit":
+                _emit_sanitized(payload)
+                return 0
             handle_hook(payload)
     except Exception:
         # Measurement is fail-open. Codex must never wait on telemetry.
         pass
+    if not (len(sys.argv) > 1 and sys.argv[1] == "--emit"):
+        print("{}")
     return 0
 
 

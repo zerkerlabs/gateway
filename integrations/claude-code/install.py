@@ -19,11 +19,8 @@ def _observer_command() -> str:
     return f"python3 {shlex.quote(str(observer))}"
 
 
-def _hook(event: str) -> dict[str, Any]:
-    hook: dict[str, Any] = {"type": "command", "command": _observer_command(), "timeout": 5}
-    if event != "PreToolUse":
-        hook["async"] = True
-    return hook
+def _hook(_event: str) -> dict[str, Any]:
+    return {"type": "command", "command": _observer_command(), "timeout": 3}
 
 
 def _is_zerker_group(group: Any) -> bool:
