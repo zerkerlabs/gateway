@@ -41,6 +41,16 @@ python3 integrations/claude-code/install.py
 
 The installer preserves unrelated Claude Code settings and hooks. Restart Claude Code after installation. See the [Claude Code adapter README](https://github.com/zerkerlabs/gateway/tree/main/integrations/claude-code) for setup and removal instructions.
 
+## Codex adapter
+
+`integrations/codex/zerker_observer.py` uses Codex's native lifecycle and tool hooks with the same privacy boundary. Install it without replacing existing user hooks:
+
+```bash
+python3 integrations/codex/install.py
+```
+
+Restart Codex and approve the new user hook when prompted. See the [Codex adapter README](https://github.com/zerkerlabs/gateway/tree/main/integrations/codex) for setup and removal instructions.
+
 ## Hermes adapter
 
 `integrations/hermes/zerker-observer` uses Hermes' native, fail-open observer hooks. It subscribes only to session boundaries, completed tools, and provider usage. Hook fields containing prompts, arguments, results, commands, paths, and provider payloads are ignored.

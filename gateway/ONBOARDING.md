@@ -121,6 +121,16 @@ python3 integrations/claude-code/install.py
 
 Restart Claude Code after installation. The adapter sends hashed session lifecycle plus tool name, coarse outcome, and duration. It discards prompts, assistant messages, tool inputs, tool outputs, commands, paths, and transcript locations. See [`../integrations/claude-code/README.md`](../integrations/claude-code/README.md).
 
+## Connect Codex measurement
+
+Codex uses the same privacy-bounded native hook model:
+
+```bash
+python3 integrations/codex/install.py
+```
+
+Restart Codex and approve the new user hook when its hook-trust prompt appears. The adapter records hashed session lifecycle plus tool name, coarse outcome, and duration. See [`../integrations/codex/README.md`](../integrations/codex/README.md).
+
 ## Connect Hermes measurement
 
 The Hermes adapter uses native read-only observer hooks rather than scraping session files:
@@ -136,4 +146,4 @@ It emits hashed session lifecycle, tool name/outcome/duration, model identity, a
 
 ## Next dogfood slice
 
-Use Pi, Claude Code, and Hermes during normal work, then connect Codex through the same event contract.
+Use Pi, Claude Code, Codex, and Hermes during normal work, then connect Gemini CLI through the same event contract.
