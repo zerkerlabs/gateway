@@ -1,6 +1,6 @@
 # Zerker observer for Hermes
 
-This user plugin maps Hermes' native read-only observer hooks to `zerker.agent-event.v1`.
+This user plugin maps Hermes' native read-only observer hooks to `zerker.agent-event.v1`. It also provides the `zerker_status` tool so Hermes can explain its own Zerker enrollment and reporting evidence.
 
 ## Install
 
@@ -33,6 +33,8 @@ Network export runs on a bounded background queue and fails open. Gateway unavai
 
 ```bash
 hermes plugins list | grep zerker-observer
-hermes chat -q "Reply with exactly: ok"
+hermes chat -q "Use zerker_status and tell me whether you are reporting to Zerker Gateway."
 make -C gateway today
 ```
+
+`zerker_status` returns the evidence state, last event time, observe mode, and privacy boundary. `hermes gateway status` checks Slack and other messaging platforms; it does not check Zerker Gateway.

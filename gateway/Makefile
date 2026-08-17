@@ -33,6 +33,10 @@ build: ## Build the gateway binary into ./bin
 build-onboard: ## Build the read-only local agent onboarding scanner into ./bin
 	$(GO) build -o bin/zerker-onboard ./cmd/zerker-onboard
 
+.PHONY: build-cli
+build-cli: ## Build the calm local Zerker operator CLI into ./bin
+	$(GO) build -o bin/zerker ./cmd/zerker
+
 .PHONY: onboard
 onboard: ## Find supported local agents without changing their configuration
 	$(GO) run ./cmd/zerker-onboard
@@ -44,6 +48,10 @@ observe-agents: ## Register all discovered agents with internal observe-only def
 .PHONY: today
 today: ## Show the calm internal agent summary for the last 24 hours
 	$(GO) run ./cmd/zerker-onboard --today
+
+.PHONY: status
+status: ## Show evidence-based local agent connection status and privacy boundaries
+	$(GO) run ./cmd/zerker status
 
 .PHONY: run
 run: ## Run the gateway locally

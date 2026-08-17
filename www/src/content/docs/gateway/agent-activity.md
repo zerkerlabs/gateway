@@ -74,6 +74,18 @@ hermes plugins enable zerker-observer
 
 See the [Hermes adapter README](https://github.com/zerkerlabs/gateway/tree/main/integrations/hermes/zerker-observer) for its exact data boundary.
 
+## Connection status
+
+Build the local operator CLI and inspect all discovered agents or one agent:
+
+```bash
+make -C gateway build-cli
+./gateway/bin/zerker status
+./gateway/bin/zerker status --agent hermes
+```
+
+The `zerker.agent-status.v1` contract states enrollment explicitly and uses evidence states rather than claiming a persistent connection: `reporting`, `quiet`, `no_recent_events`, and `not_enrolled`. It also prints what adapters collect and never collect. Hermes users should run this command instead of `hermes gateway status`, which checks messaging platforms rather than Zerker Gateway.
+
 ## Summary
 
 ```bash

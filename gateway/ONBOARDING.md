@@ -101,6 +101,28 @@ Run `/reload` in an existing Pi session or start a new session. `/zerker-status`
 
 The extension sends session lifecycle, tool name/outcome/duration, model identity, token counts, and reported cost. It hashes the Pi session ID before sending it. It never sends prompts, tool arguments, tool output, command lines, file paths, or conversation content. Measurement fails open when Gateway is unavailable.
 
+## Check connection status
+
+Build the local operator CLI and ask for evidence-based status:
+
+```bash
+make build-cli
+./bin/zerker status
+./bin/zerker status --agent hermes
+```
+
+The stable JSON contract is `zerker.agent-status.v1`:
+
+```bash
+./bin/zerker status --json
+```
+
+Every row states enrollment explicitly. `reporting` means Gateway received an event within five minutes. `quiet` means older event evidence exists. `no_recent_events` means the inventory entry exists without event evidence in the last 31 days. `not_enrolled` means the discovered local agent has no matching inventory entry. The command deliberately does not call enrollment a persistent connection.
+
+`hermes gateway status` checks Hermes messaging platforms; it does not check Zerker Gateway. Use `zerker status --agent hermes` for the Zerker relationship.
+
+The one-line remote pairing design is documented in [`REMOTE_ENROLLMENT.md`](REMOTE_ENROLLMENT.md). Device approval and `zerker connect` are not implemented yet.
+
 ## See today
 
 From the Gateway module:

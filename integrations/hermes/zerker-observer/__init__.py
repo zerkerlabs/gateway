@@ -5,23 +5,31 @@ import hashlib
 import json
 import os
 import queue
+import re
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.error import HTTPError
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 _SCHEMA = "zerker.agent-event.v1"
-_SOURCE_VERSION = "0.1.0"
+_SOURCE_VERSION = "0.2.0"
 _DEFAULT_GATEWAY = "http://127.0.0.1:8080"
 _DEFAULT_TOKEN_FILE = "/tmp/zerker-dev-token"
 _EVENTS: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=1000)
 _STARTED = False
 _START_LOCK = threading.Lock()
 _AGENT_ID: Optional[str] = None
+
+_ZERKER_STATUS_SCHEMA = {
+    "name": "zerker_status",
+    "description": "Check whether this Hermes agent is enrolled in and reporting to Zerker Gateway. This is separate from the Hermes messaging gateway.",
+    "parameters": {"type": "object", "properties": {}},
+}
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -241,7 +249,62 @@ def on_post_api_request(
     ))
 
 
+def _parse_rfc3339(value: str) -> datetime:
+    normalized = value.replace("Z", "+00:00")
+    match = re.match(r"^(.*\.)(\d+)([+-]\d{2}:\d{2})$", normalized)
+    if match:
+        normalized = match.group(1) + match.group(2)[:6].ljust(6, "0") + match.group(3)
+    return datetime.fromisoformat(normalized)
+
+
+def _zerker_status(_args: Optional[Dict[str, Any]] = None, **_: Any) -> str:
+    """Return evidence-based status without exposing credentials or agent content."""
+    try:
+        agent_id = _resolve_agent_id()
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(days=31)
+        path = (
+            "/v1/agent-events/summary?agent_id=" + quote(agent_id, safe="")
+            + "&since=" + quote(since.isoformat().replace("+00:00", "Z"), safe="")
+            + "&until=" + quote(now.isoformat().replace("+00:00", "Z"), safe="")
+        )
+        summary = _request(path).get("summary", {})
+        last_raw = summary.get("last_event_at")
+        state = "enrolled"
+        last_line = "No event evidence in the last 31 days."
+        if isinstance(last_raw, str) and last_raw:
+            last = _parse_rfc3339(last_raw)
+            age = max(0, int((now - last).total_seconds()))
+            state = "reporting" if age <= 300 else "quiet"
+            if age < 60:
+                last_line = "Last event: just now."
+            elif age < 3600:
+                last_line = f"Last event: {age // 60}m ago."
+            elif age < 86400:
+                last_line = f"Last event: {age // 3600}h ago."
+            else:
+                last_line = f"Last event: {age // 86400}d ago."
+        return "\n".join([
+            "Zerker Gateway: connected",
+            f"Agent: Hermes · enrolled · {state}",
+            last_line,
+            "Mode: observe · internal only · no blocking",
+            "Collected: session lifecycle, tool name and outcome, duration, model identity, token counts, reported cost.",
+            "Never collected: prompts, messages, arguments, outputs, commands, paths, files, environment values, credentials.",
+            "Note: `hermes gateway status` checks messaging platforms, not Zerker Gateway.",
+        ])
+    except Exception:
+        return "Zerker Gateway status unavailable. Hermes can keep working. This is separate from `hermes gateway status`."
+
+
 def register(ctx) -> None:
+    ctx.register_tool(
+        name="zerker_status",
+        toolset="zerker",
+        schema=_ZERKER_STATUS_SCHEMA,
+        handler=_zerker_status,
+        emoji="🔭",
+    )
     ctx.register_hook("on_session_start", on_session_start)
     ctx.register_hook("on_session_finalize", on_session_finalize)
     ctx.register_hook("post_tool_call", on_post_tool_call)

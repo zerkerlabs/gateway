@@ -1,6 +1,7 @@
 import importlib.util
 import pathlib
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 
 
@@ -61,6 +62,30 @@ class ZerkerHermesObserverTests(unittest.TestCase):
         self.assertEqual(event["output_tokens"], 20)
         self.assertNotIn("response", event)
         self.assertNotIn("content", event)
+
+    def test_status_reports_zerker_without_confusing_messaging_gateway(self):
+        now = datetime.now(timezone.utc)
+        with mock.patch.object(PLUGIN, "_resolve_agent_id", return_value="agt_hermes"), mock.patch.object(
+            PLUGIN,
+            "_request",
+            return_value={"summary": {"last_event_at": now.isoformat()}},
+        ):
+            output = PLUGIN._zerker_status()
+        self.assertIn("Zerker Gateway: connected", output)
+        self.assertIn("Hermes · enrolled · reporting", output)
+        self.assertIn("Never collected: prompts", output)
+        self.assertIn("messaging platforms", output)
+        self.assertNotIn("agt_hermes", output)
+
+    def test_status_accepts_postgres_fractional_rfc3339(self):
+        parsed = PLUGIN._parse_rfc3339("2026-08-18T00:48:13.6923+02:00")
+        self.assertEqual(parsed.microsecond, 692300)
+
+    def test_status_fails_open_without_internal_error_details(self):
+        with mock.patch.object(PLUGIN, "_resolve_agent_id", side_effect=RuntimeError("private token detail")):
+            output = PLUGIN._zerker_status()
+        self.assertIn("status unavailable", output)
+        self.assertNotIn("private token detail", output)
 
     def test_plain_http_is_limited_to_numeric_loopback(self):
         with mock.patch.dict(PLUGIN.os.environ, {"ZERKER_GATEWAY_URL": "http://gateway.example.com"}):

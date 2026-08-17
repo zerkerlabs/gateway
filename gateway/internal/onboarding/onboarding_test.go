@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zerkerlabs/gateway/gateway/internal/discovery"
 )
@@ -159,6 +160,54 @@ func TestTodayShowsActivityAndCollapsesUnconnectedAgents(t *testing.T) {
 	}
 	if strings.Join(today.Waiting, ",") != "Hermes" {
 		t.Fatalf("waiting = %#v, want Hermes", today.Waiting)
+	}
+}
+
+func TestStatusUsesRecentEvidenceAndExplicitThirtyOneDayWindow(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agents":
+			_ = json.NewEncoder(w).Encode(listResponse{Agents: []listedAgent{
+				{ID: "agt_hermes", Name: "Hermes", Metadata: map[string]any{"zerker_discovery_key": "hermes"}},
+				{ID: "agt_pi", Name: "Pi", Metadata: map[string]any{"zerker_discovery_key": "pi"}},
+			}})
+		case "/v1/agent-events/summary":
+			if r.URL.Query().Get("since") != now.Add(-31*24*time.Hour).Format(time.RFC3339) || r.URL.Query().Get("until") != now.Format(time.RFC3339) {
+				t.Errorf("summary window = %q to %q", r.URL.Query().Get("since"), r.URL.Query().Get("until"))
+			}
+			last := now.Add(-2 * time.Minute)
+			if r.URL.Query().Get("agent_id") == "agt_pi" {
+				last = now.Add(-2 * time.Hour)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"summary": map[string]any{"last_event_at": last}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "token", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := client.Status(context.Background(), discovery.Report{Agents: []discovery.Agent{
+		{Key: "hermes", Name: "Hermes"}, {Key: "pi", Name: "Pi"}, {Key: "cursor", Name: "Cursor"},
+	}}, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, agent := range status.Agents {
+		states[agent.DiscoveryKey] = agent.State
+	}
+	if states["hermes"] != "reporting" || states["pi"] != "quiet" || states["cursor"] != "not_enrolled" {
+		t.Fatalf("states = %#v", states)
+	}
+	if !status.Agents[1].Enrolled || len(status.Excluded) == 0 || status.Schema != "zerker.agent-status.v1" {
+		t.Fatalf("status contract = %#v", status)
 	}
 }
 
