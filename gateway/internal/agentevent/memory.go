@@ -53,17 +53,18 @@ func (s *MemoryStore) Summary(ctx context.Context, tenantID, agentID string, sin
 	defer s.mu.RUnlock()
 
 	var summary Summary
+	var usageEvents, usageEventsWithCost int64
 	sessions := make(map[string]struct{})
 	for _, event := range s.events[tenantID] {
 		if event.AgentID != agentID {
 			continue
 		}
+		if event.OccurredAt.Before(since) || !event.OccurredAt.Before(until) {
+			continue
+		}
 		if summary.LastEventAt == nil || event.ReceivedAt.After(*summary.LastEventAt) {
 			lastEventAt := event.ReceivedAt
 			summary.LastEventAt = &lastEventAt
-		}
-		if event.OccurredAt.Before(since) || !event.OccurredAt.Before(until) {
-			continue
 		}
 		switch event.Type {
 		case TypeSessionStarted:
@@ -80,6 +81,7 @@ func (s *MemoryStore) Summary(ctx context.Context, tenantID, agentID string, sin
 				summary.DurationMS += *event.DurationMS
 			}
 		case TypeModelUsage:
+			usageEvents++
 			if event.InputTokens != nil {
 				summary.InputTokens += *event.InputTokens
 			}
@@ -88,11 +90,12 @@ func (s *MemoryStore) Summary(ctx context.Context, tenantID, agentID string, sin
 			}
 			if event.CostUSD != nil {
 				summary.CostUSD += *event.CostUSD
-				summary.CostKnown = true
+				usageEventsWithCost++
 			}
 		case TypeSessionEnded:
 		}
 	}
 	summary.Sessions = int64(len(sessions))
+	summary.CostKnown = usageEvents > 0 && usageEventsWithCost == usageEvents
 	return summary, nil
 }

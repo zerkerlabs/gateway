@@ -73,9 +73,10 @@ func (s *PostgresStore) Summary(ctx context.Context, tenantID, agentID string, s
 			COALESCE(SUM(input_tokens) FILTER (WHERE event_type = 'model.usage'), 0),
 			COALESCE(SUM(output_tokens) FILTER (WHERE event_type = 'model.usage'), 0),
 			COALESCE(SUM(cost_usd) FILTER (WHERE event_type = 'model.usage'), 0),
-			COUNT(cost_usd) FILTER (WHERE event_type = 'model.usage') > 0,
-			(SELECT MAX(received_at) FROM agent_events all_events
-			 WHERE all_events.tenant_id=$1 AND all_events.agent_id=$2)
+			COUNT(*) FILTER (WHERE event_type = 'model.usage') > 0
+				AND COUNT(cost_usd) FILTER (WHERE event_type = 'model.usage')
+					= COUNT(*) FILTER (WHERE event_type = 'model.usage'),
+			MAX(received_at)
 		FROM agent_events
 		WHERE tenant_id=$1 AND agent_id=$2 AND occurred_at >= $3 AND occurred_at < $4
 	`, tenantID, agentID, since, until).Scan(
