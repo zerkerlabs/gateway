@@ -40,7 +40,7 @@ func openTestPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	if _, err := pool.Exec(ctx, `TRUNCATE TABLE invocations, agents`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE TABLE invocations, agents CASCADE`); err != nil {
 		t.Fatalf("truncate tables: %v", err)
 	}
 
