@@ -131,6 +131,16 @@ python3 integrations/codex/install.py
 
 Restart Codex and approve the new user hook when its hook-trust prompt appears. The adapter records hashed session lifecycle plus tool name, coarse outcome, and duration. See [`../integrations/codex/README.md`](../integrations/codex/README.md).
 
+## Connect Gemini CLI measurement
+
+Gemini CLI 0.55.1 or later exposes native lifecycle and tool hooks. Install the adapter with:
+
+```bash
+python3 integrations/gemini-cli/install.py
+```
+
+The hook sanitizes each event before handing it to a detached emitter, so Gemini CLI does not wait for Gateway. See [`../integrations/gemini-cli/README.md`](../integrations/gemini-cli/README.md).
+
 ## Connect Hermes measurement
 
 The Hermes adapter uses native read-only observer hooks rather than scraping session files:
@@ -146,4 +156,4 @@ It emits hashed session lifecycle, tool name/outcome/duration, model identity, a
 
 ## Next dogfood slice
 
-Use Pi, Claude Code, Codex, and Hermes during normal work, then connect Gemini CLI through the same event contract.
+Use Pi, Claude Code, Codex, Gemini CLI, and Hermes during normal work, then evaluate Cursor's available extension boundary.

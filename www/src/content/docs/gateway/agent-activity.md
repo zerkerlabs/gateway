@@ -51,6 +51,16 @@ python3 integrations/codex/install.py
 
 Restart Codex and approve the new user hook when prompted. See the [Codex adapter README](https://github.com/zerkerlabs/gateway/tree/main/integrations/codex) for setup and removal instructions.
 
+## Gemini CLI adapter
+
+Gemini CLI 0.55.1 or later exposes native lifecycle and tool hooks. The adapter sanitizes events before sending them through a detached background emitter:
+
+```bash
+python3 integrations/gemini-cli/install.py
+```
+
+See the [Gemini CLI adapter README](https://github.com/zerkerlabs/gateway/tree/main/integrations/gemini-cli) for the exact boundary.
+
 ## Hermes adapter
 
 `integrations/hermes/zerker-observer` uses Hermes' native, fail-open observer hooks. It subscribes only to session boundaries, completed tools, and provider usage. Hook fields containing prompts, arguments, results, commands, paths, and provider payloads are ignored.
