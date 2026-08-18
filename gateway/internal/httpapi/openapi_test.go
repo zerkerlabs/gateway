@@ -11,6 +11,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 
 	"github.com/zerkerlabs/gateway/gateway/internal/agent"
+	"github.com/zerkerlabs/gateway/gateway/internal/agentevent"
 	"github.com/zerkerlabs/gateway/gateway/internal/credential"
 	"github.com/zerkerlabs/gateway/gateway/internal/httpapi"
 	"github.com/zerkerlabs/gateway/gateway/internal/invocation"
@@ -36,6 +37,9 @@ var registeredRoutes = []string{
 	"GET /v1/agents/{id}",
 	"PATCH /v1/agents/{id}",
 	"DELETE /v1/agents/{id}",
+
+	"POST /v1/agent-events",
+	"GET /v1/agent-events/summary",
 
 	"POST /v1/credentials",
 	"GET /v1/credentials",
@@ -81,6 +85,7 @@ func fullyWiredHandler(t *testing.T) *httpapi.Handler {
 	credSvc := credential.NewService(credStore, kekStore, provider, credential.StubVaultResolver{})
 
 	return httpapi.NewHandler(agent.NewMemoryStore(), slog.New(slog.NewTextHandler(io.Discard, nil))).
+		WithAgentEvents(agentevent.NewMemoryStore()).
 		WithCredentials(credSvc).
 		WithProxy(&mockForwarder{}, invocation.NewMemoryStore()).
 		WithSettlement(settlement.NewMemoryStore()).

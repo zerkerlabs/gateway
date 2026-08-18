@@ -59,7 +59,7 @@ func openTestPool(t *testing.T) *pgxpool.Pool {
 
 	if _, err := pool.Exec(
 		ctx,
-		`TRUNCATE TABLE settlement_config, invocations, agents, upstream_credentials, tenant_keks`,
+		`TRUNCATE TABLE settlement_config, invocations, agents, upstream_credentials, tenant_keks CASCADE`,
 	); err != nil {
 		t.Fatalf("truncate tables: %v", err)
 	}

@@ -16,6 +16,8 @@ gate, and per-tenant credential isolation. All of it is OSS and self-hostable
   catalog agent and get method/tool-aware routing and observability.
 - **[Observability & analytics](/gateway/observability/)** — list and
   inspect invocations, pull aggregate latency/error metrics per agent.
+- **[Agent activity](/gateway/agent-activity/)** — measure metadata-only
+  sessions, tool outcomes, model usage, and cost from connected adapters.
 
 Payments and the facilitator are documented separately under
 [Payments (x402)](/payments/) and [Facilitator](/facilitator/).

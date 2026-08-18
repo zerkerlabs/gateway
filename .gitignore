@@ -9,6 +9,10 @@ bin/
 
 # Go
 /vendor/
+
+# Python integration adapters
+__pycache__/
+*.py[cod]
 # go.work IS committed — it defines the monorepo workspace (ADR-0010).
 go.work.sum
 
