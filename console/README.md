@@ -35,7 +35,7 @@ npm run improve:status
 npm run improve:stop
 ```
 
-The durable contract lives in `PRODUCT_GOAL.md`, `BACKLOG.md`, and `UX_RUBRIC.md`. Runtime state and logs stay under ignored `.loop/`. The runner is restricted to `console/`, cancels extension dialogs, stops on out-of-scope changes or repeated verification failures, and never pushes, merges, deploys, or accesses production.
+The durable contract lives in `PRODUCT_GOAL.md`, `CAPABILITY_COVERAGE.md`, `BACKLOG.md`, and `UX_RUBRIC.md`. The coverage ledger maps the current public docs and all 23 Gateway REST operations to honest operator destinations. Runtime state and logs stay under ignored `.loop/`. The runner is restricted to `console/`, cancels extension dialogs, stops on out-of-scope changes or repeated verification failures, and never pushes, merges, deploys, or accesses production.
 
 For an unattended terminal on macOS, keep the process awake:
 

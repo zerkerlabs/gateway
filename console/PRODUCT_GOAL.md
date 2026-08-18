@@ -17,6 +17,7 @@ Within 30 seconds, an operator should be able to answer:
 - The logged-in console is operational software, not a marketing page.
 - The logged-out website explains capabilities. The console helps operate them.
 - Prefer compact hierarchy, tables, filters, timestamps, provenance, and evidence over large promotional copy.
+- Treat `CAPABILITY_COVERAGE.md` as the parity ledger for current `docs.zerker.ai`, authored repository docs, and Gateway OpenAPI capabilities.
 - Unknown, stale, unavailable, and zero are different states.
 - Every number must have a source and freshness state before live mode ships.
 - Available, in-review, standalone, integration-path, and planned capabilities remain visibly distinct.
@@ -53,4 +54,4 @@ It must not:
 
 ## Completion definition
 
-The campaign is complete when all safe items in `BACKLOG.md` are checked, `npm run check` passes, desktop and mobile browser QA are clean, and `AUTH_ARCHITECTURE.md` clearly identifies decisions requiring human approval.
+The campaign is complete when all safe items in `BACKLOG.md` are checked, every `CAPABILITY_COVERAGE.md` row has an honest operator destination or explicit rationale, `npm run check` passes, desktop and mobile browser QA are clean, and `AUTH_ARCHITECTURE.md` clearly identifies decisions requiring human approval.

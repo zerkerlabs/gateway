@@ -25,7 +25,7 @@ Score every completed cycle against this rubric. A cycle may checkpoint at 80/10
 - 5: Operate, Traffic, Control, Revenue, and System remain coherent.
 - 5: Shipped operations are more prominent than planned products.
 - 5: Dense information remains scannable.
-- 5: Terminology matches Gateway contracts and documentation.
+- 5: Terminology and delivery truth match every relevant `CAPABILITY_COVERAGE.md` row.
 
 ## Interaction quality — 15 points
 

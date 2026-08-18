@@ -1,6 +1,6 @@
 # Gateway Console Improvement Backlog
 
-The autonomous loop completes one safe vertical slice per cycle, in order. It may split an item when the acceptance criteria cannot fit safely in one cycle.
+The autonomous loop completes one safe vertical slice per cycle, in order. It may split an item when the acceptance criteria cannot fit safely in one cycle. `CAPABILITY_COVERAGE.md` is the parity ledger for the current `docs.zerker.ai` and OpenAPI surface.
 
 ## Safe campaign
 
@@ -39,6 +39,14 @@ The autonomous loop completes one safe vertical slice per cycle, in order. It ma
   - Fix keyboard, focus, overflow, contrast, and reduced-motion defects.
   - Run the full console quality gate and browser-console checks.
   - Produce `AUTH_ARCHITECTURE.md` comparing same-origin BFF sessions with SPA PKCE and stop before implementation.
+
+- [ ] **C07 — Close documentation and OpenAPI parity**
+  - Reconcile every row in `CAPABILITY_COVERAGE.md` with an operator surface or an explicit non-console rationale.
+  - Strengthen analytics with count, errors, latency percentiles, TTFT, fixed windows, limits, and truthful empty states.
+  - Strengthen Stack & health with health/version, Postgres, OIDC, KMS, migrations, replicas, rate-limit caveats, facilitator posture, and known limitations.
+  - Map all 23 current Gateway REST operations to their destination without making fixture writes operational.
+  - Surface the documented TypeScript SDK discrepancy rather than claiming an absent `sdk/ts/` is shipped.
+  - Run final desktop/mobile/browser-console QA across every navigation surface.
 
 ## Human-gated follow-up
 

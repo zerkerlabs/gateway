@@ -58,7 +58,7 @@ acquireLock();
 
 const startedAt = Date.now();
 const deadline = startedAt + maxMinutes * 60_000;
-const protectedFiles = ["PRODUCT_GOAL.md", "UX_RUBRIC.md", "scripts/improve-loop.mjs"];
+const protectedFiles = ["PRODUCT_GOAL.md", "CAPABILITY_COVERAGE.md", "UX_RUBRIC.md", "scripts/improve-loop.mjs"];
 const protectedDigests = new Map(protectedFiles.map((path) => [path, digest(resolve(consoleDir, path))]));
 const transcript = createWriteStream(transcriptPath, { flags: "a" });
 const events = createWriteStream(eventLogPath, { flags: "a" });
@@ -161,7 +161,7 @@ function positiveNumber(raw, label) {
 }
 
 function validateSetup() {
-  for (const file of ["PRODUCT_GOAL.md", "BACKLOG.md", "UX_RUBRIC.md", "package.json"]) {
+  for (const file of ["PRODUCT_GOAL.md", "CAPABILITY_COVERAGE.md", "BACKLOG.md", "UX_RUBRIC.md", "package.json"]) {
     if (!existsSync(resolve(consoleDir, file))) throw new Error(`missing console/${file}`);
   }
   const pi = spawnSync("pi", ["--version"], { cwd: repoRoot, encoding: "utf8" });
@@ -299,7 +299,7 @@ function checkpointCycle(cycle) {
 function plannerPrompt(cycle) {
   return `You are the PLANNER node for bounded Gateway console improvement cycle ${cycle} of ${maxCycles}.
 
-Read console/PRODUCT_GOAL.md, console/BACKLOG.md, console/UX_RUBRIC.md, the current console implementation, and recent git history. Select exactly one highest-priority unchecked item from the Safe campaign. Do not edit tracked product files in this stage.
+Read console/PRODUCT_GOAL.md, console/CAPABILITY_COVERAGE.md, console/BACKLOG.md, console/UX_RUBRIC.md, the current console implementation, and recent git history. Select exactly one highest-priority unchecked item from the Safe campaign. Reconcile its work against the relevant capability-ledger rows. Do not edit tracked product files in this stage.
 
 Write console/.loop/next-task.md with:
 - backlog ID and title;
@@ -317,7 +317,7 @@ Do not ask the user questions. Do not commit, push, merge, deploy, install globa
 function builderPrompt(cycle) {
   return `You are the BUILDER node for bounded Gateway console improvement cycle ${cycle}.
 
-Read console/PRODUCT_GOAL.md, console/UX_RUBRIC.md, console/BACKLOG.md, and console/.loop/next-task.md. Implement exactly that vertical slice inside console/.
+Read console/PRODUCT_GOAL.md, console/CAPABILITY_COVERAGE.md, console/UX_RUBRIC.md, console/BACKLOG.md, and console/.loop/next-task.md. Implement exactly that vertical slice inside console/.
 
 Requirements:
 - logged-in operational UX, not marketing;
@@ -350,7 +350,7 @@ Fix the root cause inside console/ only. Do not weaken tests or quality gates. D
 function reviewPrompt(cycle) {
   return `You are the REVIEW + QA node for bounded Gateway console improvement cycle ${cycle}.
 
-Review the uncommitted console/ diff against console/PRODUCT_GOAL.md, console/.loop/next-task.md, and every section of console/UX_RUBRIC.md. Then:
+Review the uncommitted console/ diff against console/PRODUCT_GOAL.md, console/CAPABILITY_COVERAGE.md, console/.loop/next-task.md, and every section of console/UX_RUBRIC.md. Then:
 
 1. Run browser QA with gstack against the local console at http://127.0.0.1:5174 when available. If unavailable, start only the local Vite preview and stop it when done.
 2. Check desktop 1440x1000 and mobile 375x812.
@@ -468,7 +468,7 @@ async function selfTest() {
   console.log(JSON.stringify({ ok: true, tests: ["event-redaction", "strict-jsonl", "control-files-present"] }, null, 2));
 }
 function assertProtectedFilesForSelfTest() {
-  for (const path of ["PRODUCT_GOAL.md", "UX_RUBRIC.md", "scripts/improve-loop.mjs"]) {
+  for (const path of ["PRODUCT_GOAL.md", "CAPABILITY_COVERAGE.md", "UX_RUBRIC.md", "scripts/improve-loop.mjs"]) {
     if (!existsSync(resolve(consoleDir, path))) throw new Error(`self-test missing ${path}`);
   }
 }
