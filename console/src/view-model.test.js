@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { agents, attention, credentials, environmentSnapshot, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, stack, trafficSnapshot } from "./data.js";
-import { buildAgentResults, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveDataState, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, filterCredentials, filterInvocations, filterPaymentOperations, filterPolicyDecisions, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, metricValueState, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, stateLabel, summarizeAgents, summarizeOverview, summarizePayments } from "./view-model.js";
+import { buildAgentResults, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveDataState, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, filterCredentials, filterInvocations, filterPaymentOperations, filterPolicyDecisions, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, metricValueState, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizeOverview, summarizePayments } from "./view-model.js";
 
 test("catalog status derivation preserves pending, active, inactive, and suspension independence", () => {
   assert.equal(deriveCatalogStatus({ upstreamConfigured: false, inactiveAt: null }), "pending");
@@ -75,6 +75,12 @@ test("unknown states never become active", () => {
   assert.equal(stateLabel("active"), "Active");
   assert.equal(stateLabel("discovered"), "Discovered");
   assert.equal(stateLabel("unexpected"), "Unknown");
+});
+
+test("scroll behavior respects the reduced-motion preference deterministically", () => {
+  assert.equal(scrollBehaviorForMotion(true), "auto");
+  assert.equal(scrollBehaviorForMotion(false), "smooth");
+  assert.equal(scrollBehaviorForMotion(undefined), "smooth");
 });
 
 test("policy model preserves order, aggregate action counts, defaults, and fail-closed posture", () => {

@@ -1,10 +1,14 @@
 import "./styles.css";
 import { activity, agents, attention, catalogSnapshot, credentialSnapshot, credentials, environmentSnapshot, environments, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, policySnapshot, privacy, products, stack, trafficSnapshot } from "./data.js";
-import { buildAgentResults, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, formatCount, formatCurrency, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, stateLabel, summarizeAgents, summarizePayments } from "./view-model.js";
+import { buildAgentResults, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, formatCount, formatCurrency, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizePayments } from "./view-model.js";
 
 const main = document.querySelector("#main-content");
 const modalRoot = document.querySelector("#modal-root");
 const toastRegion = document.querySelector("#toast-region");
+const appShell = document.querySelector("#app");
+const skipLink = document.querySelector(".skip-link");
+const searchTrigger = document.querySelector("#open-search");
+const mobileMenuTrigger = document.querySelector("#mobile-menu");
 const stackSummary = capabilityCounts(stack);
 let activeOverviewScenario = "complete";
 let invocationFilters = { ...defaultInvocationFilters };
@@ -22,11 +26,11 @@ const labels = {
 };
 
 function status(value, tone = value.toLowerCase().replaceAll(" ", "_")) {
-  return `<span class="status ${tone}"><i></i>${value}</span>`;
+  return `<span class="status ${tone}"><i aria-hidden="true"></i>${value}</span>`;
 }
 
 function pageHeader(kicker, title, description, actions = "") {
-  return `<header class="page-heading"><div><p class="kicker">${kicker}</p><h1>${title}</h1><p class="page-description">${description}</p></div><div class="page-actions">${actions}</div></header>`;
+  return `<header class="page-heading"><div><p class="kicker">${kicker}</p><h1 id="page-title">${title}</h1><p class="page-description">${description}</p></div><div class="page-actions">${actions}</div></header>`;
 }
 
 function fixtureContext(snapshot, label) {
@@ -82,7 +86,7 @@ function renderOverviewAttention(model) {
 }
 
 function renderOverviewRuntime(model) {
-  return `<section class="panel system-card"><div class="panel-heading"><div><p class="kicker">Runtime evidence</p><h2>Production Gateway</h2></div>${status(model.runtime.label, model.runtime.tone)}</div><dl class="system-facts"><div><dt>Evidence</dt><dd>${model.runtime.detail}</dd></div><div><dt>Version</dt><dd>development</dd></div><div><dt>Storage</dt><dd>Postgres</dd></div><div><dt>Identity</dt><dd>OIDC configured</dd></div><div><dt>Tenancy</dt><dd>Isolated</dd></div></dl><button class="button secondary wide" data-view="stack">Open runtime evidence</button></section>`;
+  return `<section class="panel system-card"><div class="panel-heading"><div><p class="kicker">Runtime evidence</p><h2>Production Gateway</h2></div>${status(model.runtime.label, model.runtime.tone)}</div><dl class="system-facts"><div><dt>Evidence</dt><dd>${model.runtime.detail}</dd></div><div><dt>Version</dt><dd>development</dd></div><div><dt>Storage</dt><dd>Postgres</dd></div><div><dt>Identity</dt><dd>Gateway API OIDC · fixture</dd></div><div><dt>Console session</dt><dd>Not implemented</dd></div></dl><button class="button secondary wide" data-view="stack">Open runtime evidence</button></section>`;
 }
 
 function renderOverviewTraffic(model) {
@@ -123,7 +127,7 @@ function overviewView() {
   const model = currentOverviewModel();
   const attentionAction = model.attentionItems?.length ? '<button class="button secondary" data-view="attention">Open attention queue →</button>' : "";
   return `<section class="page-enter overview-page">
-    <header class="page-heading operational-heading"><div><p class="kicker">Operate</p><h1>Overview</h1><p class="page-description">Attention, traffic, policy, cost, and runtime evidence from a fixed sample window.</p></div>${attentionAction}</header>
+    <header class="page-heading operational-heading"><div><p class="kicker">Operate</p><h1 id="page-title">Overview</h1><p class="page-description">Attention, traffic, policy, cost, and runtime evidence from a fixed sample window.</p></div>${attentionAction}</header>
     <section class="overview-snapshot" aria-label="Preview snapshot context">
       <div class="preview-state"><span class="fixture-dot"></span><span><strong>Preview data</strong><small>Not connected to Gateway</small></span></div>
       <div class="snapshot-fact"><span>Workspace</span><strong>${overviewSnapshot.workspace}</strong></div>
@@ -132,7 +136,8 @@ function overviewView() {
       <div class="snapshot-fact"><span>Fixture captured</span><strong>${model.capturedAt}</strong></div>
       <label class="scenario-control" for="overview-scenario"><span>Preview scenario</span><select id="overview-scenario">${overviewScenarios.map((scenario) => `<option value="${scenario.id}"${scenario.id === model.scenario.id ? " selected" : ""}>${scenario.label}</option>`).join("")}</select><small>In-memory only</small></label>
     </section>
-    <div id="overview-state-region" aria-live="polite">${renderOverviewOperations(model)}</div>
+    <p class="sr-only" role="status" aria-live="polite">Preview scenario: ${model.scenario.label}</p>
+    <div id="overview-state-region">${renderOverviewOperations(model)}</div>
     ${renderCapabilitySection()}
   </section>`;
 }
@@ -150,8 +155,8 @@ function attentionView() {
 
 function activityView() {
   return `<section class="page-enter">
-    ${pageHeader("Operate · in review", "Agent activity", "Privacy-bounded lifecycle and usage signals from native agent hooks.", '<button class="button secondary" data-action="privacy">Privacy boundary</button><button class="button primary" data-action="connect">＋ Connect observer</button>')}
-    <div class="availability-banner review"><div>${status("In review · PR #46", "review")}<h2>Discover → enroll → observe</h2><p>This surface maps the local onboarding branch. It is not on Gateway main yet and does not claim a persistent connection.</p></div><a href="https://github.com/zerkerlabs/gateway/pull/46" target="_blank" rel="noreferrer">Open PR #46 ↗</a></div>
+    ${pageHeader("Operate · in review", "Agent activity", "Privacy-bounded lifecycle and usage signals from native agent hooks.", '<button class="button secondary" data-action="privacy">Privacy boundary</button><button class="button secondary" data-action="connect">Review observer concept</button>')}
+    <div class="availability-banner review"><div>${status("In review · PR #46", "review")}<h2>Discover → enroll → observe</h2><p>This surface maps the local onboarding branch. It is not on Gateway main yet and does not claim a persistent connection.</p></div><a href="https://github.com/zerkerlabs/gateway/pull/46" target="_blank" rel="noreferrer" aria-label="Open pull request 46 in a new tab">Open PR #46 <span aria-hidden="true">↗</span></a></div>
     <section class="metric-strip compact"><div><span>5</span><small>Measured agents</small><em>1 awaiting setup</em></div><div><span>18</span><small>Sessions today</small><em>Across native hooks</em></div><div><span>97</span><small>Tool calls</small><em>92 succeeded</em></div><div><span>592k</span><small>Tokens reported</small><em>Content excluded</em></div></section>
     <div class="two-column">
       <section class="panel"><div class="panel-heading"><div><p class="kicker">Event stream</p><h2>Metadata only</h2></div>${status("Observe · no blocking", "available")}</div><div class="event-list">${activity.map((item) => `<div class="event-row"><span class="event-mark"></span><span><strong>${item.agent} · ${item.event}</strong><small>${item.detail}</small></span><em>${item.time}</em></div>`).join("")}</div></section>
@@ -170,7 +175,7 @@ function trafficRangeLabel(value) {
 }
 
 function captureBoundary(compact = false) {
-  return `<section class="capture-boundary${compact ? " compact" : ""}" aria-labelledby="${compact ? "drawer-capture-title" : "capture-title"}"><div><p class="kicker">Capture boundary</p><h2 id="${compact ? "drawer-capture-title" : "capture-title"}">Metadata visible. Bodies off.</h2></div><div class="capture-facts"><span><b>Proxy invocations</b>Metadata only</span><span><b>Request / response bodies</b>Off in this fixture · separate Gateway feature</span><span><b>Body reads</b>Require separate authorization</span><span><b>Native agent activity</b>Separate contract · never prompts, messages, arguments, outputs, commands, paths, files, environment values, or credentials</span></div></section>`;
+  return `<section class="capture-boundary${compact ? " compact" : ""}" aria-labelledby="${compact ? "drawer-capture-title" : "capture-title"}"><div><p class="kicker">Capture boundary</p><h2 id="${compact ? "drawer-capture-title" : "capture-title"}">Metadata visible. Bodies off.</h2></div><div class="capture-facts"><span><b>Proxy invocations</b>Metadata only</span><span><b>Request / response bodies</b>Off in this fixture · separate off-by-default Gateway feature</span><span><b>Body reads</b>Require <code>invocations:read_body</code> · response capped at 1 MiB</span><span><b>Native agent activity</b>Separate contract · never prompts, messages, arguments, outputs, commands, paths, files, environment values, or credentials</span></div></section>`;
 }
 
 function invocationResultsMarkup(result) {
@@ -205,7 +210,7 @@ function invocationsView() {
 function analyticsView() {
   const rows = [{ name: "Support agent", calls: "486", success: "99.2%", latency: "1.4s", width: "w-92" }, { name: "Docs search", calls: "301", success: "99.7%", latency: "720ms", width: "w-68" }, { name: "Research agent", calls: "214", success: "98.1%", latency: "2.8s", width: "w-52" }, { name: "Release reviewer", calls: "173", success: "100%", latency: "3.1s", width: "w-44" }, { name: "Code generator", calls: "82", success: "91.4%", latency: "8.6s", width: "w-24" }];
   return `<section class="page-enter">
-    ${pageHeader("Traffic · available OSS", "Analytics", "Latency, error and volume summaries over bounded time windows.", '<button class="button secondary">Last 24 hours⌄</button>')}
+    ${pageHeader("Traffic · available OSS", "Analytics", "Latency, error and volume summaries over bounded time windows.", '<span class="range-evidence" aria-label="Fixture window: Last 24 hours">Last 24 hours · fixture</span>')}
     <section class="metric-strip"><div><span>1,256</span><small>Total calls</small><em>+12.4% vs prior day</em></div><div><span>1.3%</span><small>Error rate</small><em>16 failed calls</em></div><div><span>1.8s</span><small>p95 latency</small><em>p50 620ms</em></div><div><span>720ms</span><small>p95 TTFT</small><em>Streaming only</em></div><div><span>58 MB</span><small>Data moved</small><em>Metadata aggregate</em></div></section>
     <div class="analytics-grid"><section class="panel chart-panel"><div class="panel-heading"><div><p class="kicker">Volume</p><h2>Calls by agent</h2></div><span class="mono muted">GET /v1/analytics</span></div><div class="bar-chart">${rows.map((row) => `<div class="bar-row"><span>${row.name}</span><div><i class="${row.width}"></i></div><strong>${row.calls}</strong></div>`).join("")}</div></section><section class="panel"><div class="panel-heading"><div><p class="kicker">Quality</p><h2>Service levels</h2></div></div><div class="quality-list">${rows.map((row) => `<div><span><strong>${row.name}</strong><small>${row.calls} calls</small></span><span><strong>${row.success}</strong><small>Success</small></span><span><strong>${row.latency}</strong><small>p95</small></span></div>`).join("")}</div></section></div>
     <div class="availability-note">Analytics requires an explicit <code>since</code> value, caps windows at 31 days, and excludes in-flight calls from latency percentiles.</div>
@@ -234,7 +239,7 @@ function agentRows(items) {
       ? `<span class="agent-evidence review-evidence"><b>In review · PR #46</b><small>${observerEvidenceLabel(observer, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)}</small></span>`
       : '<span class="agent-evidence"><b>Native observer</b><small>Unavailable in this fixture</small></span>';
     return `<article class="catalog-row${agent.suspended ? " is-suspended" : ""}">
-      <span class="agent-identity" data-label="Catalog agent"><span class="agent-symbol">${agent.runtime === "Pi" ? "π" : agent.runtime.slice(0, 2).toUpperCase()}</span><span><strong>${agent.name}</strong><small class="mono">${agent.id}</small></span></span>
+      <span class="agent-identity" data-label="Catalog agent"><span class="agent-symbol" aria-hidden="true">${agent.runtime === "Pi" ? "π" : agent.runtime.slice(0, 2).toUpperCase()}</span><span><strong>${agent.name}</strong><small class="mono">${agent.id}</small></span></span>
       <span data-label="Catalog status">${status(stateLabel(catalogStatus), catalogStatus)}<small>${catalogStatusReason(agent)}</small></span>
       <span data-label="Suspension">${agent.suspended ? status("Suspended", "suspended") : '<strong>Not suspended</strong>'}<small>${agent.suspended ? "Invocations blocked" : "Separate from catalog status"}</small></span>
       <span data-label="Protocol"><strong>${protocolLabel(agent.protocol)}</strong><small>${protocolTransportLabel(agent)}</small></span>
@@ -281,7 +286,7 @@ function environmentCard(environment) {
   const facts = gateway
     ? [["Catalog", environment.catalogAgents], ["Pending", environment.pendingAgents], ["Suspended", environment.suspendedAgents]]
     : [["Observed", environment.observed], ["Enrolled", environment.enrolled], ["Discovered", environment.discovered]];
-  return `<article class="environment-card"><div class="environment-top"><span class="environment-icon">${gateway ? "G" : "⌘"}</span><span class="environment-badges">${status(gateway ? "Available OSS · fixture" : "In review · PR #46", gateway ? "available" : "review")}${status(stateLabel(evidenceState), evidenceState)}</span></div><p class="kicker">${environment.kind}</p><h2>${environment.name}</h2><p>${evidenceCopy}. This is not persistent connectivity.</p><dl>${facts.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join("")}</dl><button class="inspect-button" data-environment="${environment.id}" aria-label="Inspect environment evidence for ${environment.name}">Inspect evidence →</button></article>`;
+  return `<article class="environment-card"><div class="environment-top"><span class="environment-icon" aria-hidden="true">${gateway ? "G" : "⌘"}</span><span class="environment-badges">${status(gateway ? "Available OSS · fixture" : "In review · PR #46", gateway ? "available" : "review")}${status(stateLabel(evidenceState), evidenceState)}</span></div><p class="kicker">${environment.kind}</p><h2>${environment.name}</h2><p>${evidenceCopy}. This is not persistent connectivity.</p><dl>${facts.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join("")}</dl><button class="inspect-button" data-environment="${environment.id}" aria-label="Inspect environment evidence for ${environment.name}">Inspect evidence →</button></article>`;
 }
 
 function onboardingRows() {
@@ -354,7 +359,7 @@ function credentialsView() {
   return `<section class="page-enter governance-page credential-page">
     ${pageHeader("Control · available OSS", "Credentials", "Safe metadata for write-only managed values and external references.", '<button class="button secondary" data-action="add-credential">Store credential concept</button>')}
     ${fixtureContext(credentialSnapshot, "Credential metadata")}
-    <section class="credential-safety"><span class="credential-safety-icon">⌑</span><div><p class="kicker">Hard boundary</p><h2>Metadata visible. Credential values absent.</h2><p>No plaintext, token, vault path, reveal, copy, or input surface exists in this fixture.</p></div>${status("Tenant isolated", "available")}</section>
+    <section class="credential-safety"><span class="credential-safety-icon" aria-hidden="true">⌑</span><div><p class="kicker">Hard boundary</p><h2>Metadata visible. Credential values absent.</h2><p>No plaintext, token, vault path, reveal, copy, or input surface exists in this fixture.</p></div>${status("Tenant isolated", "available")}</section>
     <section class="metric-strip governance-metrics"><div><span>${safeCredentials.length}</span><small>Metadata records</small><em>Fixture count</em></div><div><span>${managed}</span><small>Managed</small><em>Envelope-encrypted posture</em></div><div><span>${external}</span><small>External vault</small><em>Path never returned</em></div><div><span>${referenced}</span><small>Referenced</small><em>Delete would conflict</em></div><div><span>${unreferenced}</span><small>Unreferenced</small><em>Preview still read-only</em></div></section>
     <section class="governance-filters credential-filters" aria-label="Filter fixture credential metadata"><label class="governance-search"><span>Search</span><input id="credential-search" data-credential-filter="query" type="search" placeholder="ID, name, auth type, or referencing agent" autocomplete="off"></label><label><span>Source</span><select id="credential-source" data-credential-filter="source"><option value="all">All</option><option value="managed">Managed</option><option value="external_vault">External vault</option></select></label><label><span>Auth type</span><select id="credential-auth" data-credential-filter="authType"><option value="all">All</option><option value="bearer">Bearer</option><option value="api_key">API key</option><option value="none">None</option></select></label><label><span>Reference state</span><select id="credential-reference" data-credential-filter="reference"><option value="all">All</option><option value="referenced">Referenced</option><option value="unreferenced">Unreferenced</option></select></label><button class="button secondary" id="clear-credential-filters">Clear filters</button></section>
     <div class="governance-results-heading"><p id="credential-result-count" aria-live="polite"><strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small></p><span>Allowlisted metadata only</span></div>
@@ -368,7 +373,7 @@ function productsView() {
   return `<section class="page-enter governance-page products-page">
     ${pageHeader("Revenue · planned product direction", "Products & portals", "Planned packaging concepts for access, documentation, usage, and payment.", '<button class="button secondary" data-action="new-product">Review product concept</button>')}
     <div class="availability-banner planned"><div>${status("Planned", "planned")}<h2>Not part of the current Gateway release.</h2><p>This preview shows the intended admin model without claiming that customer portals, plans or hosted billing are operational.</p></div><button class="button secondary" data-view="stack">See delivery status</button></div>
-    <div class="product-grid">${products.map((product) => `<article class="product-card"><div class="product-preview"><span class="mini-brand">Z</span><span class="mini-url">Concept URL · ${product.domain}</span><strong>${product.name}</strong><small>Powered by ${product.agent}</small></div><div class="product-copy"><span>${status(product.status, "planned")}</span><h2>${product.name}</h2><dl><div><dt>Agent concept</dt><dd>${product.agent}</dd></div><div><dt>Access concept</dt><dd>${product.access}</dd></div><div><dt>Price concept</dt><dd>${product.price}</dd></div></dl><button class="button secondary wide" data-action="product-preview">Open product concept</button></div></article>`).join("")}</div>
+    <div class="product-grid">${products.map((product) => `<article class="product-card"><div class="product-preview"><span class="mini-brand" aria-hidden="true">Z</span><span class="mini-url">Concept URL · ${product.domain}</span><strong>${product.name}</strong><small>Powered by ${product.agent}</small></div><div class="product-copy"><span>${status(product.status, "planned")}</span><h2>${product.name}</h2><dl><div><dt>Agent concept</dt><dd>${product.agent}</dd></div><div><dt>Access concept</dt><dd>${product.access}</dd></div><div><dt>Price concept</dt><dd>${product.price}</dd></div></dl><button class="button secondary wide" data-action="product-preview" aria-label="Open product concept for ${product.name}">Open product concept</button></div></article>`).join("")}</div>
     <section class="capability-checklist"><div><strong>Product manifest</strong><small>Machine-readable capabilities and terms</small>${status("Direction", "planned")}</div><div><strong>Customer access</strong><small>OIDC, plans, quotas and documentation</small>${status("Planned", "planned")}</div><div><strong>Usage & billing</strong><small>Metering, invoices and spend limits</small>${status("Commercial concept", "planned")}</div></section>
   </section>`;
 }
@@ -394,7 +399,7 @@ function paymentsView() {
     ${pageHeader("Revenue · available OSS evidence", "Payments", "Payment-gate, collection, settlement, and upstream outcomes from a fixed fixture.", '<button class="button secondary" data-action="settlement-config">Settlement config concept</button>')}
     ${fixtureContext({ ...paymentSnapshot, range: paymentRangeLabel(paymentFilters.timeRange) }, "Payment operation")}
     <section class="metric-strip governance-metrics payment-metrics"><div><span>${summary.collectedDisplay}</span><small>Collected</small><em>${summary.settledUpstreamFailures} later upstream failure</em></div><div><span>${summary.verified}</span><small>Verified authorizations</small><em>Verification is not collection</em></div><div><span>${summary.gateOnlyDisplay}</span><small>Gate-only verified</small><em>Not collected</em></div><div><span>${summary.settlementFailures}</span><small>Settlement failures</small><em>Upstream not called</em></div><div><span>${summary.challenges}</span><small>402 challenges</small><em>No invocation created</em></div></section>
-    <section class="payment-order"><span><b>1 · Policy</b>Denied requests do not pay</span><i>→</i><span><b>2 · Gateway gate</b>x402 exact · USDC · Base</span><i>→</i><span><b>3 · Facilitator</b>Optional independent settlement</span><i>→</i><span><b>4 · Upstream</b>Only after required settlement</span></section>
+    <section class="payment-order"><span><b>1 · Policy</b>Denied requests do not pay</span><i aria-hidden="true">→</i><span><b>2 · Gateway gate</b>x402 exact · USDC · Base</span><i aria-hidden="true">→</i><span><b>3 · Facilitator</b>Optional independent settlement</span><i aria-hidden="true">→</i><span><b>4 · Upstream</b>Only after required settlement</span></section>
     <section class="governance-filters payment-filters" aria-label="Filter fixture payment operations"><label class="governance-search"><span>Search</span><input id="payment-search" data-payment-filter="query" type="search" placeholder="ID, invocation, agent, or operation" autocomplete="off"></label><label><span>Gateway gate</span><select id="payment-gate" data-payment-filter="gate"><option value="all">All</option><option value="challenged">Challenged</option><option value="verified">Verified</option></select></label><label><span>Settlement</span><select id="payment-settlement" data-payment-filter="settlement"><option value="all">All</option>${settlementOptions.map((value) => `<option value="${value}">${value.replaceAll("_", " ")}</option>`).join("")}</select></label><label><span>Time range</span><select id="payment-time-range" data-payment-filter="timeRange"><option value="5m">Last 5 minutes</option><option value="15m">Last 15 minutes</option><option value="24h">Last 24 hours</option></select></label><button class="button secondary" id="clear-payment-filters">Clear filters</button></section>
     <div class="governance-results-heading"><p id="payment-result-count" aria-live="polite"><strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small></p><span>Newest first · fixed fixture clock</span></div>
     <div class="payment-columns" aria-hidden="true"><span>Time / ID</span><span>Agent / operation</span><span>Amount</span><span>Gateway gate</span><span>Collection / settlement</span><span>Upstream</span><span>Facilitator</span><span>Action</span></div>
@@ -407,11 +412,11 @@ function paymentsView() {
 
 function stackView() {
   return `<section class="page-enter">
-    ${pageHeader("System", "Stack & health", "What is available, what works independently, and what remains an integration path.", '<a class="button secondary" href="https://docs.zerker.ai" target="_blank" rel="noreferrer">Open documentation ↗</a>')}
-    <section class="runtime-strip"><div><span class="fixture-health-dot"></span><span><strong>Gateway API healthy · fixture</strong><small>Probe captured 12s before fixed snapshot</small></span></div><div><strong>Postgres</strong><small>Persistent storage</small></div><div><strong>OIDC</strong><small>Issuer configured</small></div><div><strong>23 operations</strong><small>Gateway REST API</small></div><div><strong>${stackSummary.total} components</strong><small>Across Zerker</small></div></section>
-    <div class="stack-list">${stack.map((component, index) => `<article><span class="stack-number">${String(index + 1).padStart(2, "0")}</span><span><strong>${component.name}</strong><small>${component.job}</small></span>${status(component.status, component.tone)}<button data-stack="${component.name}">Details →</button></article>`).join("")}</div>
+    ${pageHeader("System", "Stack & health", "What is available, what works independently, and what remains an integration path.", '<a class="button secondary" href="https://docs.zerker.ai" target="_blank" rel="noreferrer" aria-label="Open Gateway documentation in a new tab">Open documentation <span aria-hidden="true">↗</span></a>')}
+    <section class="runtime-strip"><div><span class="fixture-health-dot" aria-hidden="true"></span><span><strong>Gateway API healthy · fixture</strong><small>Probe captured 12s before fixed snapshot</small></span></div><div><strong>Postgres</strong><small>Persistent storage</small></div><div><strong>Gateway API OIDC</strong><small>Issuer configured · fixture; console login not implemented</small></div><div><strong>23 operations</strong><small>Gateway REST API</small></div><div><strong>${stackSummary.total} components</strong><small>Across Zerker</small></div></section>
+    <div class="stack-list">${stack.map((component, index) => `<article><span class="stack-number">${String(index + 1).padStart(2, "0")}</span><span><strong>${component.name}</strong><small>${component.job}</small></span>${status(component.status, component.tone)}<button data-stack="${component.name}" aria-label="Details for ${component.name}">Details <span aria-hidden="true">→</span></button></article>`).join("")}</div>
     <section class="api-surface"><div><p class="kicker">Gateway API surface</p><h2>What the admin will eventually operate live.</h2></div><div class="api-groups"><span><b>Catalog</b>5 agent operations</span><span><b>Credentials</b>5 protected-secret operations</span><span><b>Proxy</b>transactional + streaming + poll</span><span><b>Observe</b>invocations + analytics</span><span><b>Govern</b>policy + decisions</span><span><b>Revenue</b>payment gate + settlement config</span></div></section>
-    <section class="deployment-surface"><div><p class="kicker">Deployment posture</p><h2>Self-hosted control without inventing a hosted fleet.</h2></div><div class="deployment-grid"><span><b>Identity</b>OIDC required at startup</span><span><b>Storage</b>Memory for dev · Postgres for persistence</span><span><b>Secrets</b>Managed encryption or external vault reference</span><span><b>Network</b>TLS externally · SSRF checked at write and dial</span><span><b>Capacity</b>Per-caller and per-agent rate boundaries</span><span><b>Operations</b><code>/healthz</code> and <code>/version</code></span></div></section>
+    <section class="deployment-surface"><div><p class="kicker">Deployment posture</p><h2>Self-hosted control without inventing a hosted fleet.</h2></div><div class="deployment-grid"><span><b>Identity</b>Gateway API OIDC required at startup · console login not implemented</span><span><b>Storage</b>Memory for dev · Postgres for persistence</span><span><b>Secrets</b>Managed encryption or external vault reference</span><span><b>Network</b>TLS externally · SSRF checked at write and dial</span><span><b>Capacity</b>Per-caller and per-agent rate boundaries</span><span><b>Operations</b><code>/healthz</code> and <code>/version</code></span></div></section>
   </section>`;
 }
 
@@ -423,7 +428,7 @@ function syncAttentionNavigation() {
   if (!button || !badge) return;
   if (activeView !== "overview") {
     badge.textContent = String(attention.length);
-    button.removeAttribute("aria-label");
+    button.setAttribute("aria-label", `Needs attention: ${attention.length} fixture items`);
     return;
   }
   const metric = currentOverviewModel().metrics.find((item) => item.id === "attention");
@@ -432,19 +437,37 @@ function syncAttentionNavigation() {
   button.setAttribute("aria-label", `Needs attention: ${value === "?" ? "Unknown" : value} in selected preview scenario`);
 }
 
-function render(view = activeView) {
-  activeView = views[view] ? view : "overview";
-  main.innerHTML = views[activeView]();
-  document.title = `${labels[activeView]} — Zerker Gateway preview`;
-  syncAttentionNavigation();
+const mobilePrimaryViews = new Set(["overview", "invocations", "agents", "stack"]);
+
+function syncNavigation() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     const selected = button.dataset.view === activeView;
     button.classList.toggle("active", selected);
     selected ? button.setAttribute("aria-current", "page") : button.removeAttribute("aria-current");
   });
+  const currentUnderMore = !mobilePrimaryViews.has(activeView);
+  mobileMenuTrigger.classList.toggle("active", currentUnderMore);
+  mobileMenuTrigger.setAttribute("aria-label", currentUnderMore ? `More pages, current page: ${labels[activeView]}` : "More pages");
+  currentUnderMore ? mobileMenuTrigger.setAttribute("aria-current", "page") : mobileMenuTrigger.removeAttribute("aria-current");
+}
+
+function render(view = activeView, { focusMain = false, scroll = true } = {}) {
+  activeView = views[view] ? view : "overview";
+  main.innerHTML = views[activeView]();
+  document.title = `${labels[activeView]} — Zerker Gateway preview`;
+  syncAttentionNavigation();
+  syncNavigation();
   bindPageEvents();
   history.replaceState(null, "", `#${activeView}`);
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (scroll) {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: scrollBehaviorForMotion(reducedMotion) });
+  }
+  if (focusMain) main.focus({ preventScroll: true });
+}
+
+function navigate(view) {
+  render(view, { focusMain: true });
 }
 
 function bindInvocationButtons(scope = main) {
@@ -620,7 +643,7 @@ function bindPaymentFilters() {
 }
 
 function bindPageEvents() {
-  main.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => render(button.dataset.view)));
+  main.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.view)));
   bindAgentInspectButtons();
   bindInvocationButtons();
   bindGovernanceInspectButtons();
@@ -629,7 +652,7 @@ function bindPageEvents() {
   main.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
   main.querySelectorAll("[data-stack]").forEach((button) => button.addEventListener("click", () => openStackInfo(button.dataset.stack)));
   const scenario = main.querySelector("#overview-scenario");
-  if (scenario) scenario.addEventListener("change", () => { activeOverviewScenario = scenario.value; render("overview"); main.querySelector("#overview-scenario")?.focus(); });
+  if (scenario) scenario.addEventListener("change", () => { activeOverviewScenario = scenario.value; render("overview", { scroll: false }); main.querySelector("#overview-scenario")?.focus(); });
   bindInvocationFilters();
   bindAgentFilters();
   bindPolicyFilters();
@@ -766,7 +789,7 @@ function openStackInfo(name) {
 }
 
 function openPrivacy() {
-  openModal("Agent activity", "The privacy boundary", `<div class="privacy-modal"><section><h3>Collected</h3><ul>${privacy.collected.map((item) => `<li>${item}</li>`).join("")}</ul></section><section><h3>Never collected</h3><ul>${privacy.excluded.map((item) => `<li>${item}</li>`).join("")}</ul></section></div><p class="modal-lead">Native adapters fail open. Gateway telemetry must never delay or block normal agent work.</p><div class="availability-note">This contract applies to native agent activity. Proxy invocation body capture is a separate, off-by-default Gateway setting and body reads require an additional OAuth scope.</div>`);
+  openModal("Agent activity", "The privacy boundary", `<div class="privacy-modal"><section><h3>Collected</h3><ul>${privacy.collected.map((item) => `<li>${item}</li>`).join("")}</ul></section><section><h3>Never collected</h3><ul>${privacy.excluded.map((item) => `<li>${item}</li>`).join("")}</ul></section></div><p class="modal-lead">Native adapters fail open. Gateway telemetry must never delay or block normal agent work.</p><div class="availability-note">This contract applies to native agent activity. Proxy invocation body capture is a separate, off-by-default Gateway setting. Reading a captured body requires <code>invocations:read_body</code>, and the body-read response is capped at 1 MiB.</div>`);
 }
 
 function openConcept(action) {
@@ -785,65 +808,137 @@ function openConcept(action) {
   openModal(copy[0], copy[1], `<p class="modal-lead">${copy[2]}</p><div class="availability-note"><strong>Preview only.</strong> No mutation, request, credential input, or browser storage write occurred.</div>`);
 }
 
-function openDrawer(title, subtitle, body) {
+function beginOverlay(type) {
   previousFocus = document.activeElement;
-  modalRoot.innerHTML = `<div class="drawer-backdrop" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header><div><p class="kicker">Detail</p><h2 id="drawer-title">${title}</h2><p>${subtitle}</p></div><button class="close-button" data-close aria-label="Close">×</button></header><div class="drawer-body">${body}</div></aside>`;
+  document.body.classList.add("overlay-open");
+  appShell.inert = true;
+  skipLink.inert = true;
+  searchTrigger.setAttribute("aria-expanded", String(type === "search"));
+  mobileMenuTrigger.setAttribute("aria-expanded", String(type === "mobile-menu"));
+  if (type === "search") searchTrigger.setAttribute("aria-controls", "overlay-dialog");
+  if (type === "mobile-menu") mobileMenuTrigger.setAttribute("aria-controls", "overlay-dialog");
+}
+
+function openDrawer(title, subtitle, body) {
+  beginOverlay("drawer");
+  modalRoot.innerHTML = `<div class="drawer-backdrop" data-close aria-hidden="true"></div><aside id="overlay-dialog" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header><div><p class="kicker">Detail</p><h2 id="drawer-title">${title}</h2><p>${subtitle}</p></div><button class="close-button" data-close aria-label="Close ${title}">×</button></header><div class="drawer-body">${body}</div></aside>`;
   bindOverlay();
   modalRoot.querySelector(".close-button").focus();
   modalRoot.querySelectorAll("[data-drawer-action]").forEach((button) => button.addEventListener("click", () => {
     const action = button.dataset.drawerAction;
     const agentName = button.dataset.agentName;
-    closeOverlay();
     if (action === "agent-invocations") {
       invocationFilters = { ...defaultInvocationFilters, agent: agentName };
-      render("invocations");
+      closeOverlay({ restoreFocus: false });
+      navigate("invocations");
       return;
     }
+    closeOverlay();
     if (action === "agent-edit") openConcept("edit-agent");
   }));
 }
 
-function openModal(kicker, title, body) {
-  previousFocus = document.activeElement;
-  modalRoot.innerHTML = `<div class="modal-backdrop" data-close><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" data-modal-panel><header><div><p class="kicker">${kicker}</p><h2 id="modal-title">${title}</h2></div><button class="close-button" data-close aria-label="Close">×</button></header><div class="modal-body">${body}</div></section></div>`;
-  bindOverlay(); modalRoot.querySelector(".close-button").focus();
+function openModal(kicker, title, body, type = "modal") {
+  beginOverlay(type);
+  modalRoot.innerHTML = `<div class="modal-backdrop" data-close><section id="overlay-dialog" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" data-modal-panel><header><div><p class="kicker">${kicker}</p><h2 id="modal-title">${title}</h2></div><button class="close-button" data-close aria-label="Close ${title}">×</button></header><div class="modal-body">${body}</div></section></div>`;
+  bindOverlay();
+  modalRoot.querySelector(".close-button").focus();
+}
+
+function buildSearchResults(query) {
+  const q = query.trim().toLowerCase();
+  const pages = Object.entries(labels).filter(([, label]) => !q || label.toLowerCase().includes(q)).slice(0, 5).map(([view, label]) => `<button data-search-view="${view}"><span class="search-icon" aria-hidden="true">↗</span><strong>${label}</strong><small>Admin surface</small></button>`);
+  const foundAgents = filterAgents(agents, query).slice(0, 4).map((agent) => `<button data-search-agent="${agent.id}"><span class="search-icon" aria-hidden="true">◎</span><strong>${agent.name}</strong><small>${agent.runtime} · fixture agent</small></button>`);
+  const results = [...pages, ...foundAgents];
+  return { count: results.length, markup: results.join("") || '<div class="empty-state">Nothing found in fixture pages or agents.</div>' };
 }
 
 function openSearch() {
-  previousFocus = document.activeElement;
-  modalRoot.innerHTML = `<div class="modal-backdrop" data-close><section class="modal command-menu" role="dialog" aria-modal="true" aria-label="Search Gateway" data-modal-panel><input id="command-input" class="command-input" type="search" placeholder="Search pages and agents…" aria-label="Search Gateway"><div id="command-results" class="command-results">${searchResults("")}</div></section></div>`;
-  bindOverlay(); const input = modalRoot.querySelector("#command-input"); input.addEventListener("input", () => { modalRoot.querySelector("#command-results").innerHTML = searchResults(input.value); bindSearch(); }); bindSearch(); input.focus();
+  const initial = buildSearchResults("");
+  beginOverlay("search");
+  modalRoot.innerHTML = `<div class="modal-backdrop" data-close><section id="overlay-dialog" class="modal command-menu" role="dialog" aria-modal="true" aria-labelledby="command-title" data-modal-panel><h2 id="command-title" class="sr-only">Search Gateway</h2><div class="command-header"><input id="command-input" class="command-input" type="search" placeholder="Search pages and agents…" aria-label="Search fixture pages and agents" aria-controls="command-results" aria-describedby="command-status" autocomplete="off"><button class="close-button" data-close aria-label="Close search">×</button></div><p id="command-status" class="sr-only" role="status" aria-live="polite">${formatCount(initial.count, "result")}</p><div id="command-results" class="command-results">${initial.markup}</div></section></div>`;
+  bindOverlay();
+  const input = modalRoot.querySelector("#command-input");
+  input.addEventListener("input", () => {
+    const result = buildSearchResults(input.value);
+    modalRoot.querySelector("#command-results").innerHTML = result.markup;
+    modalRoot.querySelector("#command-status").textContent = formatCount(result.count, "result");
+    bindSearch();
+  });
+  bindSearch();
+  input.focus();
 }
 
-function searchResults(query) {
-  const q = query.trim().toLowerCase();
-  const pages = Object.entries(labels).filter(([, label]) => !q || label.toLowerCase().includes(q)).slice(0, 5).map(([view, label]) => `<button data-search-view="${view}"><span class="search-icon">↗</span><strong>${label}</strong><small>Admin surface</small></button>`);
-  const foundAgents = filterAgents(agents, query).slice(0, 4).map((agent) => `<button data-search-agent="${agent.id}"><span class="search-icon">◎</span><strong>${agent.name}</strong><small>${agent.runtime}</small></button>`);
-  return [...pages, ...foundAgents].join("") || '<div class="empty-state">Nothing found.</div>';
+function bindSearch() {
+  modalRoot.querySelectorAll("[data-search-view]").forEach((button) => button.addEventListener("click", () => {
+    const view = button.dataset.searchView;
+    closeOverlay({ restoreFocus: false });
+    navigate(view);
+  }));
+  modalRoot.querySelectorAll("[data-search-agent]").forEach((button) => button.addEventListener("click", () => {
+    const id = button.dataset.searchAgent;
+    closeOverlay();
+    openAgent(id);
+  }));
 }
-function bindSearch() { modalRoot.querySelectorAll("[data-search-view]").forEach((button) => button.addEventListener("click", () => { const view = button.dataset.searchView; closeOverlay(); render(view); })); modalRoot.querySelectorAll("[data-search-agent]").forEach((button) => button.addEventListener("click", () => { const id = button.dataset.searchAgent; closeOverlay(); openAgent(id); })); }
 
 function openMobileMenu() {
-  openModal("Navigate", "All Gateway surfaces", `<div class="mobile-menu-grid">${Object.entries(labels).map(([view, label]) => `<button data-mobile-view="${view}">${label}<span>→</span></button>`).join("")}</div>`);
-  modalRoot.querySelectorAll("[data-mobile-view]").forEach((button) => button.addEventListener("click", () => { const view = button.dataset.mobileView; closeOverlay(); render(view); }));
+  openModal("Navigate", "All Gateway surfaces", `<div class="mobile-menu-grid">${Object.entries(labels).map(([view, label]) => `<button data-mobile-view="${view}"${view === activeView ? ' class="current" aria-current="page"' : ""}>${label}<span aria-hidden="true">→</span></button>`).join("")}</div>`, "mobile-menu");
+  modalRoot.querySelectorAll("[data-mobile-view]").forEach((button) => button.addEventListener("click", () => {
+    const view = button.dataset.mobileView;
+    closeOverlay({ restoreFocus: false });
+    navigate(view);
+  }));
 }
 
 function bindOverlay() {
-  document.body.classList.add("overlay-open");
-  modalRoot.querySelectorAll("[data-close]").forEach((element) => element.addEventListener("click", (event) => { if (event.target === element || element.matches("button")) closeOverlay(); }));
+  modalRoot.querySelectorAll("[data-close]").forEach((element) => element.addEventListener("click", (event) => {
+    if (event.target === element || element.matches("button")) closeOverlay();
+  }));
   modalRoot.querySelector("[data-modal-panel]")?.addEventListener("click", (event) => event.stopPropagation());
 }
-function closeOverlay() { modalRoot.innerHTML = ""; document.body.classList.remove("overlay-open"); previousFocus?.focus?.(); previousFocus = null; }
+
+function closeOverlay({ restoreFocus = true } = {}) {
+  const focusTarget = previousFocus;
+  modalRoot.innerHTML = "";
+  document.body.classList.remove("overlay-open");
+  appShell.inert = false;
+  skipLink.inert = false;
+  searchTrigger.setAttribute("aria-expanded", "false");
+  mobileMenuTrigger.setAttribute("aria-expanded", "false");
+  searchTrigger.removeAttribute("aria-controls");
+  mobileMenuTrigger.removeAttribute("aria-controls");
+  previousFocus = null;
+  if (restoreFocus && focusTarget?.isConnected) focusTarget.focus();
+}
 function showToast(message) { const toast = document.createElement("div"); toast.className = "toast"; toast.textContent = message; toastRegion.append(toast); window.setTimeout(() => toast.remove(), 3200); }
 
-document.querySelectorAll(".side-nav [data-view], .mobile-nav [data-view]").forEach((button) => button.addEventListener("click", () => render(button.dataset.view)));
-document.querySelector("[data-nav='overview']").addEventListener("click", (event) => { event.preventDefault(); render("overview"); });
+document.querySelectorAll(".side-nav [data-view], .mobile-nav [data-view]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.view)));
+document.querySelector("[data-nav='overview']").addEventListener("click", (event) => { event.preventDefault(); navigate("overview"); });
 document.querySelector("#open-search").addEventListener("click", openSearch);
 document.querySelector("#mobile-menu").addEventListener("click", openMobileMenu);
 document.addEventListener("keydown", (event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openSearch(); }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (!modalRoot.children.length) openSearch();
+  }
   if (event.key === "Escape" && modalRoot.children.length) closeOverlay();
-  if (event.key === "Tab" && modalRoot.children.length) { const focusable = [...modalRoot.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href]")]; if (!focusable.length) return; const first = focusable[0], last = focusable.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
+  if (event.key === "Tab" && modalRoot.children.length) {
+    const focusable = [...modalRoot.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href]")];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!modalRoot.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 });
 
 render(location.hash.slice(1) || "overview");

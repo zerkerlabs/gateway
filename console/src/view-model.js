@@ -14,6 +14,10 @@ export function stateLabel(state) {
   return stateLabels[state] ?? "Unknown";
 }
 
+export function scrollBehaviorForMotion(prefersReducedMotion) {
+  return prefersReducedMotion === true ? "auto" : "smooth";
+}
+
 export function deriveCatalogStatus(agent) {
   if (typeof agent?.inactiveAt === "string" && agent.inactiveAt.trim()) return "inactive";
   if (agent?.upstreamConfigured === false) return "pending";
@@ -252,7 +256,7 @@ export function deriveInvocationTrace(invocation) {
   const paymentVerified = invocation.paymentState === "verified";
   const proxyFailed = invocation.failure?.stage === "proxy" || invocation.result === "failed";
   return [
-    { id: "identity", label: "Identity", state: "completed", detail: "OIDC identity accepted" },
+    { id: "identity", label: "Identity", state: "completed", detail: "Gateway API OIDC identity accepted · fixture" },
     { id: "policy", label: "Policy", state: invocation.policy === "warn" ? "warning" : invocation.policy === "deny" ? "failed" : "completed", detail: invocation.policy === "warn" ? "Warning recorded · request forwarded" : invocation.policy === "deny" ? "Request denied" : "Request allowed" },
     { id: "payment", label: "Payment", state: paymentVerified ? "completed" : invocation.paymentState === "not_required" ? "skipped" : "not_reached", detail: paymentVerified ? `${invocationPaymentLabel(invocation)} authorization` : invocation.paymentState === "not_required" ? "Not required" : "Payment state unknown" },
     { id: "proxy", label: "Proxy", state: proxyFailed ? "failed" : invocation.policy === "deny" ? "not_reached" : "completed", detail: proxyFailed ? invocation.failure?.label ?? "Proxy failed" : invocation.policy === "deny" ? "Not reached" : `Completed in ${invocation.latency}` },

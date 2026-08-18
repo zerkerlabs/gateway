@@ -34,7 +34,7 @@ The autonomous loop completes one safe vertical slice per cycle, in order. It ma
   - Keep x402 an adapter rather than the product identity.
   - Keep planned payment rails and portals visually subordinate.
 
-- [ ] **C06 — Accessibility, responsive QA, and architecture handoff**
+- [x] **C06 — Accessibility, responsive QA, and architecture handoff**
   - Test all admin surfaces at desktop and 375px.
   - Fix keyboard, focus, overflow, contrast, and reduced-motion defects.
   - Run the full console quality gate and browser-console checks.

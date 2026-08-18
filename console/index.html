@@ -23,59 +23,59 @@
         <nav class="side-nav">
           <div class="nav-group">
             <p>Operate</p>
-            <button class="nav-item active" data-view="overview"><span class="nav-icon">⌂</span><span>Overview</span></button>
-            <button class="nav-item" data-view="attention"><span class="nav-icon">◇</span><span>Needs attention</span><span class="nav-badge">3</span></button>
-            <button class="nav-item" data-view="activity"><span class="nav-icon">↯</span><span>Agent activity</span><span class="status-pin review" title="In review"></span></button>
+            <button class="nav-item active" data-view="overview" aria-label="Overview"><span class="nav-icon" aria-hidden="true">⌂</span><span>Overview</span></button>
+            <button class="nav-item" data-view="attention" aria-label="Needs attention: 3 fixture items"><span class="nav-icon" aria-hidden="true">◇</span><span>Needs attention</span><span class="nav-badge">3</span></button>
+            <button class="nav-item" data-view="activity" aria-label="Agent activity, In review"><span class="nav-icon" aria-hidden="true">↯</span><span>Agent activity</span><span class="status-pin review" aria-hidden="true"></span><span class="sr-only">In review</span></button>
           </div>
           <div class="nav-group">
             <p>Traffic</p>
-            <button class="nav-item" data-view="invocations"><span class="nav-icon">⇄</span><span>Invocations</span></button>
-            <button class="nav-item" data-view="analytics"><span class="nav-icon">⌁</span><span>Analytics</span></button>
+            <button class="nav-item" data-view="invocations" aria-label="Invocations"><span class="nav-icon" aria-hidden="true">⇄</span><span>Invocations</span></button>
+            <button class="nav-item" data-view="analytics" aria-label="Analytics"><span class="nav-icon" aria-hidden="true">⌁</span><span>Analytics</span></button>
           </div>
           <div class="nav-group">
             <p>Control</p>
-            <button class="nav-item" data-view="agents"><span class="nav-icon">◎</span><span>Agent catalog</span><span class="nav-badge">7</span></button>
-            <button class="nav-item" data-view="environments"><span class="nav-icon">⌘</span><span>Environments</span></button>
-            <button class="nav-item" data-view="policies"><span class="nav-icon">⊘</span><span>Policies</span></button>
-            <button class="nav-item" data-view="credentials"><span class="nav-icon">⌑</span><span>Credentials</span></button>
+            <button class="nav-item" data-view="agents" aria-label="Agent catalog: 7 fixture records"><span class="nav-icon" aria-hidden="true">◎</span><span>Agent catalog</span><span class="nav-badge">7</span></button>
+            <button class="nav-item" data-view="environments" aria-label="Environments"><span class="nav-icon" aria-hidden="true">⌘</span><span>Environments</span></button>
+            <button class="nav-item" data-view="policies" aria-label="Policies"><span class="nav-icon" aria-hidden="true">⊘</span><span>Policies</span></button>
+            <button class="nav-item" data-view="credentials" aria-label="Credentials"><span class="nav-icon" aria-hidden="true">⌑</span><span>Credentials</span></button>
           </div>
           <div class="nav-group">
             <p>Revenue</p>
-            <button class="nav-item" data-view="products"><span class="nav-icon">▣</span><span>Products & portals</span><span class="status-pin planned" title="Planned"></span></button>
-            <button class="nav-item" data-view="payments"><span class="nav-icon">◈</span><span>Payments</span></button>
+            <button class="nav-item" data-view="products" aria-label="Products and portals, Planned"><span class="nav-icon" aria-hidden="true">▣</span><span>Products & portals</span><span class="status-pin planned" aria-hidden="true"></span><span class="sr-only">Planned</span></button>
+            <button class="nav-item" data-view="payments" aria-label="Payments"><span class="nav-icon" aria-hidden="true">◈</span><span>Payments</span></button>
           </div>
           <div class="nav-group">
             <p>System</p>
-            <button class="nav-item" data-view="stack"><span class="nav-icon">✣</span><span>Stack & health</span></button>
+            <button class="nav-item" data-view="stack" aria-label="Stack and health"><span class="nav-icon" aria-hidden="true">✣</span><span>Stack & health</span></button>
           </div>
         </nav>
 
         <div class="sidebar-bottom">
           <div class="preview-notice"><span></span><div><strong>Preview data</strong><small>Not connected to Gateway</small></div></div>
-          <button class="workspace-switcher" aria-label="Switch workspace"><span class="workspace-avatar">Z</span><span><strong>Zerker Labs</strong><small>Dogfood workspace</small></span><span>⌄</span></button>
+          <div class="workspace-switcher workspace-context" aria-label="Fixture workspace: Zerker Labs"><span class="workspace-avatar" aria-hidden="true">Z</span><span><strong>Zerker Labs</strong><small>Fixture workspace · no session</small></span></div>
         </div>
       </aside>
 
       <div class="workspace">
         <header class="topbar">
-          <div class="mobile-brand"><span class="brand-glyph">Z</span><strong>ZERKER</strong><span>Gateway</span></div>
-          <button class="search-button" id="open-search" aria-label="Search Gateway"><span>⌕</span><span>Search Gateway</span><kbd>⌘ K</kbd></button>
-          <div class="top-context"><span class="environment-dot"></span><span>Preview fixture</span><span class="separator">/</span><strong>All environments</strong></div>
-          <div class="top-actions"><a class="docs-link" href="https://docs.zerker.ai" target="_blank" rel="noreferrer">Docs</a><button class="avatar-button" aria-label="Open account menu">AZ</button></div>
+          <div class="mobile-brand"><span class="brand-glyph" aria-hidden="true">Z</span><strong>ZERKER</strong><span>Gateway</span></div>
+          <button class="search-button" id="open-search" aria-label="Search Gateway" aria-haspopup="dialog" aria-expanded="false"><span aria-hidden="true">⌕</span><span>Search Gateway</span><kbd aria-hidden="true">⌘ K</kbd></button>
+          <div class="top-context"><span class="environment-dot" aria-hidden="true"></span><span>Preview fixture</span><span class="separator" aria-hidden="true">/</span><strong>All environments</strong></div>
+          <div class="top-actions"><a class="docs-link" href="https://docs.zerker.ai" target="_blank" rel="noreferrer" aria-label="Open Gateway documentation in a new tab">Docs</a><span class="operator-context" aria-label="Fixture operator context; console authentication is not implemented"><span class="avatar-button avatar-context" aria-hidden="true">FX</span><span class="operator-copy"><strong>Fixture operator</strong><small>No session</small></span></span></div>
         </header>
-        <main id="main-content" tabindex="-1"></main>
+        <main id="main-content" tabindex="-1" aria-labelledby="page-title"></main>
       </div>
 
       <nav class="mobile-nav" aria-label="Mobile navigation">
-        <button class="active" data-view="overview"><span>⌂</span>Overview</button>
-        <button data-view="invocations"><span>⇄</span>Traffic</button>
-        <button data-view="agents"><span>◎</span>Agents</button>
-        <button data-view="stack"><span>✣</span>Stack</button>
-        <button id="mobile-menu"><span>≡</span>More</button>
+        <button class="active" data-view="overview"><span aria-hidden="true">⌂</span>Overview</button>
+        <button data-view="invocations"><span aria-hidden="true">⇄</span>Traffic</button>
+        <button data-view="agents"><span aria-hidden="true">◎</span>Agents</button>
+        <button data-view="stack"><span aria-hidden="true">✣</span>Stack</button>
+        <button id="mobile-menu" aria-haspopup="dialog" aria-expanded="false"><span aria-hidden="true">≡</span>More</button>
       </nav>
     </div>
     <div id="modal-root"></div>
-    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
     <script type="module" src="/src/app.js"></script>
   </body>
 </html>
