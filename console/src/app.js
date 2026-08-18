@@ -1,11 +1,11 @@
 import "./styles.css";
-import { activity, agents, attention, credentials, environments, invocations, policies, privacy, products, settlements, stack } from "./data.js";
-import { capabilityCounts, filterAgents, formatCount, stateLabel, summarizeAgents } from "./view-model.js";
+import { activity, agents, attention, credentials, environments, invocations, overviewSnapshot, policies, privacy, products, settlements, stack } from "./data.js";
+import { capabilityCounts, filterAgents, formatCount, stateLabel, summarizeOverview } from "./view-model.js";
 
 const main = document.querySelector("#main-content");
 const modalRoot = document.querySelector("#modal-root");
 const toastRegion = document.querySelector("#toast-region");
-const agentSummary = summarizeAgents(agents);
+const overviewSummary = summarizeOverview({ agents, invocations, attention, policies, snapshot: overviewSnapshot });
 const stackSummary = capabilityCounts(stack);
 let activeView = "overview";
 let previousFocus = null;
@@ -25,62 +25,64 @@ function pageHeader(kicker, title, description, actions = "") {
 }
 
 function overviewView() {
-  return `<section class="page-enter">
-    ${pageHeader("Command center", "Your agent infrastructure,<br> <strong>under control.</strong>", "Traffic, access, policy and revenue across every agent environment.", '<button class="button secondary" data-view="attention">3 things need you</button><button class="button primary" data-action="add-agent">＋ Add agent</button>')}
+  return `<section class="page-enter overview-page">
+    <header class="page-heading operational-heading">
+      <div><p class="kicker">Operate</p><h1>Overview</h1><p class="page-description">Attention, traffic, policy, cost, and runtime evidence from a fixed sample window.</p></div>
+      <button class="button secondary" data-view="attention">Open attention queue →</button>
+    </header>
 
-    <section class="request-path" aria-labelledby="request-path-title">
-      <div class="section-label"><span><b>Live request path</b><small id="request-path-title">What Gateway does on every call</small></span>${status("Gateway available", "available")}</div>
-      <div class="path-flow">
-        <button data-info="identity"><span class="step-number">01</span><strong>Identity</strong><small>OIDC · tenant · user</small></button><i>→</i>
-        <button data-info="policy"><span class="step-number">02</span><strong>Policy</strong><small>allow · warn · deny</small></button><i>→</i>
-        <button data-info="payment"><span class="step-number">03</span><strong>Payment</strong><small>optional · x402</small></button><i>→</i>
-        <button data-info="proxy"><span class="step-number">04</span><strong>Proxy</strong><small>route · protect · retry</small></button><i>→</i>
-        <button data-info="record"><span class="step-number">05</span><strong>Record</strong><small>invocation · decision</small></button>
-      </div>
+    <section class="overview-snapshot" aria-label="Preview snapshot context">
+      <div class="preview-state"><span class="fixture-dot"></span><span><strong>Preview data</strong><small>Not connected to Gateway</small></span></div>
+      <div class="snapshot-fact"><span>Workspace</span><strong>${overviewSnapshot.workspace}</strong></div>
+      <button class="snapshot-fact" data-view="environments"><span>Environment</span><strong>${overviewSnapshot.environment}</strong><small>View evidence →</small></button>
+      <div class="snapshot-fact"><span>Window</span><strong>${overviewSnapshot.range}</strong></div>
+      <div class="snapshot-fact"><span>Fixture captured</span><strong>${overviewSnapshot.capturedAt}</strong></div>
+      <div class="snapshot-fact"><span>Source</span><strong>${overviewSnapshot.source}</strong></div>
     </section>
 
-    <section class="metric-strip" aria-label="Gateway summary">
-      <button data-view="agents"><span>${agentSummary.total}</span><small>Catalog agents</small><em>${agentSummary.active} active</em></button>
-      <button data-view="invocations"><span>${agentSummary.calls.toLocaleString("en-US")}</span><small>Invocations today</small><em>98.7% succeeded</em></button>
-      <button data-view="analytics"><span>1.8s</span><small>p95 latency</small><em>720ms TTFT</em></button>
-      <button data-view="policies"><span>9</span><small>Policy decisions</small><em>2 denied · 7 warned</em></button>
-      <button data-view="payments"><span>$12.40</span><small>Payment volume</small><em>USDC on Base</em></button>
+    <section class="metric-strip operational-metrics" aria-label="Operational fixture summary">
+      <button data-view="attention"><span>${overviewSummary.attentionCount}</span><small>Needs attention</small><em>${formatCount(overviewSummary.attentionCount, "item")} in review queue</em></button>
+      <button data-view="invocations"><span>${overviewSummary.totalCalls.toLocaleString("en-US")}</span><small>Calls · ${overviewSnapshot.range}</small><em>Across ${agents.length} catalog agents</em></button>
+      <button class="failure-metric" data-view="invocations"><span>${overviewSummary.failedCalls}</span><small>Failed calls</small><em>${overviewSummary.failureRate} of fixture traffic</em></button>
+      <button data-view="policies"><span>${overviewSummary.reviewDecisions}</span><small>Policy decisions</small><em>${overviewSummary.deniedDecisions} denied · ${overviewSummary.warnedDecisions} warned</em></button>
+      <button data-view="payments"><span>${overviewSummary.paymentVolume}</span><small>Payment volume</small><em>Fixture value · USDC on Base</em></button>
     </section>
 
     <div class="overview-grid">
       <section class="panel attention-panel">
-        <div class="panel-heading"><div><p class="kicker">Needs attention</p><h2>Three decisions, no noise.</h2></div><button class="text-button" data-view="attention">View queue →</button></div>
+        <div class="panel-heading"><div><p class="kicker">Needs attention</p><h2>${formatCount(overviewSummary.attentionCount, "item")} require review</h2></div><button class="text-button" data-view="attention">View queue →</button></div>
         <div class="attention-list">${attention.map((item) => `<button class="attention-row" data-view="${item.target}"><span class="severity ${item.level}"></span><span><strong>${item.title}</strong><small>${item.detail}</small></span><span>→</span></button>`).join("")}</div>
       </section>
 
       <section class="panel system-card">
-        <div class="panel-heading"><div><p class="kicker">Runtime</p><h2>Production Gateway</h2></div>${status("Healthy", "available")}</div>
-        <dl class="system-facts"><div><dt>Version</dt><dd>development</dd></div><div><dt>Storage</dt><dd>Postgres</dd></div><div><dt>Identity</dt><dd>OIDC configured</dd></div><div><dt>Tenancy</dt><dd>Isolated</dd></div><div><dt>Facilitator</dt><dd>Configured</dd></div></dl>
-        <button class="button secondary wide" data-view="stack">Open stack & health</button>
+        <div class="panel-heading"><div><p class="kicker">Runtime evidence</p><h2>Production Gateway</h2></div>${status("Healthy · fixture", "available")}</div>
+        <dl class="system-facts"><div><dt>Captured</dt><dd>12s after probe</dd></div><div><dt>Version</dt><dd>development</dd></div><div><dt>Storage</dt><dd>Postgres</dd></div><div><dt>Identity</dt><dd>OIDC configured</dd></div><div><dt>Tenancy</dt><dd>Isolated</dd></div></dl>
+        <button class="button secondary wide" data-view="stack">Open runtime evidence</button>
       </section>
     </div>
 
     <section class="panel traffic-panel">
-      <div class="panel-heading"><div><p class="kicker">Live traffic</p><h2>Latest invocations</h2></div><button class="text-button" data-view="invocations">Open traffic explorer →</button></div>
-      ${invocationTable(invocations.slice(0, 4))}
+      <div class="panel-heading"><div><p class="kicker">Fixture evidence</p><h2>Latest invocation sample</h2></div><div class="panel-heading-actions">${status(`${invocations.length} fixture rows`, "review")}<button class="text-button" data-view="invocations">Open traffic explorer →</button></div></div>
+      ${invocationTable(invocations)}
+      <div class="sample-note"><strong>${formatCount(overviewSummary.latestFailures, "failure")}</strong> in this metadata-only sample. Request and response bodies remain off.</div>
     </section>
 
     <section class="capability-section">
-      <div class="section-heading"><div><p class="kicker">Capability map</p><h2>One control plane. <strong>Every layer visible.</strong></h2></div><p>Available products and future integrations are labeled separately.</p></div>
+      <div class="section-heading"><div><p class="kicker">Capability map</p><h2>Capability delivery status</h2></div><p>Roadmap context follows operational evidence. Available products and future integrations remain labeled separately.</p></div>
       <div class="capability-grid">
-        ${capabilityCard("Discover", "Inventory local agents and runtime environments.", ["Catalog", "Local discovery", "Enrollment evidence"], "agents", "In review", "review")}
-        ${capabilityCard("Control", "Apply identity, credentials, rates and policy before traffic moves.", ["OIDC tenancy", "Policy decisions", "Protected credentials"], "policies", "Available", "available")}
-        ${capabilityCard("Observe", "Inspect request and agent metadata without guessing what happened.", ["Invocations", "Latency & errors", "Metadata-only activity"], "analytics", "Available + review", "review")}
-        ${capabilityCard("Monetize", "Gate paid routes and settle through a separate facilitator.", ["x402 gate", "USDC on Base", "Settlement records"], "payments", "Available", "available")}
-        ${capabilityCard("Verify", "Bind high-risk actions to deterministic evidence and signed records.", ["Reason certificates", "Treeship evidence", "Guard enforcement"], "stack", "Integration path", "integration")}
-        ${capabilityCard("Publish & work", "Turn agents into products and dispatch bounded missions.", ["Customer portals", "Plans & docs", "Remote missions"], "products", "Planned", "planned")}
+        ${capabilityCard("Discover", "Inventory local agents and runtime environments.", ["Catalog", "Local discovery", "Enrollment evidence"], "agents", [["Available", "available"], ["In review", "review"]])}
+        ${capabilityCard("Control", "Apply identity, credentials, rates and policy before traffic moves.", ["OIDC tenancy", "Policy decisions", "Protected credentials"], "policies", [["Available", "available"]])}
+        ${capabilityCard("Observe", "Inspect request and agent metadata without guessing what happened.", ["Invocations", "Latency & errors", "Metadata-only activity"], "analytics", [["Available", "available"], ["In review", "review"]])}
+        ${capabilityCard("Monetize", "Gate paid routes and settle through a separate facilitator.", ["x402 gate", "USDC on Base", "Settlement records"], "payments", [["Available", "available"]])}
+        ${capabilityCard("Verify", "Bind high-risk actions to deterministic evidence and signed records.", ["Reason certificates", "Treeship evidence", "Guard enforcement"], "stack", [["Standalone", "standalone"], ["Integration path", "integration"], ["Planned", "planned"]])}
+        ${capabilityCard("Publish & work", "Turn agents into products and dispatch bounded missions.", ["Customer portals", "Plans & docs", "Remote missions"], "products", [["Planned", "planned"]])}
       </div>
     </section>
   </section>`;
 }
 
-function capabilityCard(title, copy, items, target, label, tone) {
-  return `<button class="capability-card" data-view="${target}"><span class="card-top"><strong>${title}</strong>${status(label, tone)}</span><p>${copy}</p><ul>${items.map((item) => `<li>${item}</li>`).join("")}</ul><span class="card-link">Open surface →</span></button>`;
+function capabilityCard(title, copy, items, target, deliveryStates) {
+  return `<button class="capability-card" data-view="${target}"><span class="card-top"><strong>${title}</strong><span class="delivery-badges">${deliveryStates.map(([label, tone]) => status(label, tone)).join("")}</span></span><p>${copy}</p><ul>${items.map((item) => `<li>${item}</li>`).join("")}</ul><span class="card-link">Open surface →</span></button>`;
 }
 
 function attentionView() {
@@ -185,7 +187,7 @@ function paymentsView() {
 function stackView() {
   return `<section class="page-enter">
     ${pageHeader("System", "Stack & health", "What is available, what works independently, and what remains an integration path.", '<a class="button secondary" href="https://docs.zerker.ai" target="_blank" rel="noreferrer">Open documentation ↗</a>')}
-    <section class="runtime-strip"><div><span class="live-dot"></span><span><strong>Gateway API healthy</strong><small>Last probe 12 seconds ago</small></span></div><div><strong>Postgres</strong><small>Persistent storage</small></div><div><strong>OIDC</strong><small>Issuer configured</small></div><div><strong>23 operations</strong><small>Gateway REST API</small></div><div><strong>${stackSummary.total} components</strong><small>Across Zerker</small></div></section>
+    <section class="runtime-strip"><div><span class="fixture-health-dot"></span><span><strong>Gateway API healthy · fixture</strong><small>Probe captured 12s before fixed snapshot</small></span></div><div><strong>Postgres</strong><small>Persistent storage</small></div><div><strong>OIDC</strong><small>Issuer configured</small></div><div><strong>23 operations</strong><small>Gateway REST API</small></div><div><strong>${stackSummary.total} components</strong><small>Across Zerker</small></div></section>
     <div class="stack-list">${stack.map((component, index) => `<article><span class="stack-number">${String(index + 1).padStart(2, "0")}</span><span><strong>${component.name}</strong><small>${component.job}</small></span>${status(component.status, component.tone)}<button data-stack="${component.name}">Details →</button></article>`).join("")}</div>
     <section class="api-surface"><div><p class="kicker">Gateway API surface</p><h2>What the admin will eventually operate live.</h2></div><div class="api-groups"><span><b>Catalog</b>5 agent operations</span><span><b>Credentials</b>5 protected-secret operations</span><span><b>Proxy</b>transactional + streaming + poll</span><span><b>Observe</b>invocations + analytics</span><span><b>Govern</b>policy + decisions</span><span><b>Revenue</b>payment gate + settlement config</span></div></section>
     <section class="deployment-surface"><div><p class="kicker">Deployment posture</p><h2>Self-hosted control without inventing a hosted fleet.</h2></div><div class="deployment-grid"><span><b>Identity</b>OIDC required at startup</span><span><b>Storage</b>Memory for dev · Postgres for persistence</span><span><b>Secrets</b>Managed encryption or external vault reference</span><span><b>Network</b>TLS externally · SSRF checked at write and dial</span><span><b>Capacity</b>Per-caller and per-agent rate boundaries</span><span><b>Operations</b><code>/healthz</code> and <code>/version</code></span></div></section>
@@ -213,7 +215,6 @@ function bindPageEvents() {
   main.querySelectorAll("[data-agent]").forEach((button) => button.addEventListener("click", () => openAgent(button.dataset.agent)));
   main.querySelectorAll("[data-invocation]").forEach((button) => button.addEventListener("click", () => openInvocation(button.dataset.invocation)));
   main.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
-  main.querySelectorAll("[data-info]").forEach((button) => button.addEventListener("click", () => openPathInfo(button.dataset.info)));
   main.querySelectorAll("[data-stack]").forEach((button) => button.addEventListener("click", () => openStackInfo(button.dataset.stack)));
   const query = main.querySelector("#agent-filter");
   const state = main.querySelector("#agent-state");
@@ -242,17 +243,6 @@ function openInvocation(id) {
 }
 
 function detailRows(rows) { return `<dl class="detail-rows">${rows.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join("")}</dl>`; }
-
-function openPathInfo(step) {
-  const info = {
-    identity: ["Identity", "Validate the bearer token against the configured OIDC issuer, derive tenant and acting user, then scope every record before work begins."],
-    policy: ["Policy", "Evaluate ordered rules over agent, MCP tool, body size and caller rate. The result is allow, warn or deny, and the decision is recorded."],
-    payment: ["Payment", "Only priced routes enter the x402 gate. Policy runs first, so payment can never override a denied action."],
-    proxy: ["Proxy", "Resolve the upstream, inject the protected credential, enforce SSRF checks and rate limits, then route transactionally or stream verbatim."],
-    record: ["Record", "Capture invocation status, timing, sizes, error class, MCP method/tool and settlement metadata for the authenticated tenant."],
-  }[step];
-  openModal("Request path", info[0], `<p class="modal-lead">${info[1]}</p><div class="availability-note">This capability is available in the OSS Gateway today.</div>`);
-}
 
 function openStackInfo(name) {
   const component = stack.find((item) => item.name === name); if (!component) return;

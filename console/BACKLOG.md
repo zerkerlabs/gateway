@@ -4,7 +4,7 @@ The autonomous loop completes one safe vertical slice per cycle, in order. It ma
 
 ## Safe campaign
 
-- [ ] **C01 — Operationalize the overview**
+- [x] **C01 — Operationalize the overview**
   - Remove remaining homepage-style presentation from the authenticated surface.
   - Lead with freshness, environment, attention, traffic, failures, decisions, and cost.
   - Keep capability education outside the first operational viewport.

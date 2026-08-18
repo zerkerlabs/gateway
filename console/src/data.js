@@ -1,10 +1,20 @@
+export const overviewSnapshot = {
+  workspace: "Zerker Labs",
+  environment: "All environments",
+  range: "Last 24 hours",
+  capturedAt: "18 Feb 2026 · 14:32 UTC",
+  source: "Bundled fixture v1",
+  paymentVolumeCents: 1240,
+  paymentCurrency: "USD",
+};
+
 export const agents = [
-  { id: "agt_support", name: "Support agent", runtime: "Claude Code", protocol: "http", state: "active", evidence: "Reporting 2m ago", environment: "Alex’s MacBook Pro", calls: 486, success: "99.2%", p95: "1.4s", credential: "support-production", price: "Free", rate: "120/min", receipt: "Off" },
-  { id: "agt_research", name: "Research agent", runtime: "Hermes", protocol: "mcp", state: "active", evidence: "Quiet · 18m ago", environment: "Stefan’s Mac mini", calls: 214, success: "98.1%", p95: "2.8s", credential: "research-vault", price: "$0.25", rate: "60/min", receipt: "Integration path" },
-  { id: "agt_release", name: "Release reviewer", runtime: "Pi", protocol: "mcp", state: "active", evidence: "Reporting now", environment: "Alex’s MacBook Pro", calls: 173, success: "100%", p95: "3.1s", credential: "github-app", price: "Free", rate: "30/min", receipt: "Integration path" },
-  { id: "agt_docs", name: "Docs search", runtime: "Gemini CLI", protocol: "mcp", state: "active", evidence: "Reporting 4m ago", environment: "Stefan’s Mac mini", calls: 301, success: "99.7%", p95: "720ms", credential: "docs-api", price: "$0.05", rate: "240/min", receipt: "Off" },
-  { id: "agt_codegen", name: "Code generator", runtime: "Codex", protocol: "http", state: "suspended", evidence: "Quiet · 1h ago", environment: "Alex’s MacBook Pro", calls: 82, success: "91.4%", p95: "8.6s", credential: "openai-team", price: "Free", rate: "20/min", receipt: "Off" },
-  { id: "agt_cursor", name: "Cursor", runtime: "Cursor", protocol: "local", state: "setup", evidence: "Discovered · not enrolled", environment: "Stefan’s Mac mini", calls: 0, success: "—", p95: "—", credential: "None", price: "—", rate: "—", receipt: "Off" },
+  { id: "agt_support", name: "Support agent", runtime: "Claude Code", protocol: "http", state: "active", evidence: "Reporting 2m ago", environment: "Alex’s MacBook Pro", calls: 486, failures: 4, success: "99.2%", p95: "1.4s", credential: "support-production", price: "Free", rate: "120/min", receipt: "Off" },
+  { id: "agt_research", name: "Research agent", runtime: "Hermes", protocol: "mcp", state: "active", evidence: "Quiet · 18m ago", environment: "Stefan’s Mac mini", calls: 214, failures: 4, success: "98.1%", p95: "2.8s", credential: "research-vault", price: "$0.25", rate: "60/min", receipt: "Integration path" },
+  { id: "agt_release", name: "Release reviewer", runtime: "Pi", protocol: "mcp", state: "active", evidence: "Reporting now", environment: "Alex’s MacBook Pro", calls: 173, failures: 0, success: "100%", p95: "3.1s", credential: "github-app", price: "Free", rate: "30/min", receipt: "Integration path" },
+  { id: "agt_docs", name: "Docs search", runtime: "Gemini CLI", protocol: "mcp", state: "active", evidence: "Reporting 4m ago", environment: "Stefan’s Mac mini", calls: 301, failures: 1, success: "99.7%", p95: "720ms", credential: "docs-api", price: "$0.05", rate: "240/min", receipt: "Off" },
+  { id: "agt_codegen", name: "Code generator", runtime: "Codex", protocol: "http", state: "suspended", evidence: "Quiet · 1h ago", environment: "Alex’s MacBook Pro", calls: 82, failures: 7, success: "91.4%", p95: "8.6s", credential: "openai-team", price: "Free", rate: "20/min", receipt: "Off" },
+  { id: "agt_cursor", name: "Cursor", runtime: "Cursor", protocol: "local", state: "setup", evidence: "Discovered · not enrolled", environment: "Stefan’s Mac mini", calls: 0, failures: 0, success: "—", p95: "—", credential: "None", price: "—", rate: "—", receipt: "Off" },
 ];
 
 export const invocations = [

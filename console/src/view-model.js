@@ -18,10 +18,43 @@ export function summarizeAgents(agents) {
       if (agent.state === "suspended") summary.suspended += 1;
       if (agent.state === "setup") summary.needsAttention += 1;
       summary.calls += agent.calls;
+      summary.failures += agent.failures ?? 0;
       return summary;
     },
-    { total: 0, active: 0, suspended: 0, needsAttention: 0, calls: 0 },
+    { total: 0, active: 0, suspended: 0, needsAttention: 0, calls: 0, failures: 0 },
   );
+}
+
+export function formatCurrency(cents, currency = "USD") {
+  if (!Number.isInteger(cents) || cents < 0) return "Unknown";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(cents / 100);
+}
+
+export function formatPercent(part, total) {
+  if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0) return "Unknown";
+  return `${((part / total) * 100).toFixed(1)}%`;
+}
+
+export function summarizeOverview({ agents, invocations, attention, policies, snapshot }) {
+  const agentSummary = summarizeAgents(agents);
+  const warnedDecisions = policies.rules
+    .filter((rule) => rule.action === "warn")
+    .reduce((total, rule) => total + rule.decisions, 0);
+  const deniedDecisions = policies.rules
+    .filter((rule) => rule.action === "deny")
+    .reduce((total, rule) => total + rule.decisions, 0);
+
+  return {
+    attentionCount: attention.length,
+    totalCalls: agentSummary.calls,
+    failedCalls: agentSummary.failures,
+    failureRate: formatPercent(agentSummary.failures, agentSummary.calls),
+    warnedDecisions,
+    deniedDecisions,
+    reviewDecisions: warnedDecisions + deniedDecisions,
+    paymentVolume: formatCurrency(snapshot.paymentVolumeCents, snapshot.paymentCurrency),
+    latestFailures: invocations.filter((invocation) => invocation.result === "failed").length,
+  };
 }
 
 export function filterAgents(agents, query = "", state = "all") {
