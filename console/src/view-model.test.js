@@ -1,21 +1,79 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agents, attention, invocations, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, stack, trafficSnapshot } from "./data.js";
-import { buildInvocationResults, buildOverviewModel, capabilityCounts, defaultInvocationFilters, deriveDataState, deriveFailureDiagnosis, deriveInvocationTrace, filterAgents, filterInvocations, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, metricValueState, stateLabel, summarizeAgents, summarizeOverview } from "./view-model.js";
+import { agents, attention, environmentSnapshot, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, stack, trafficSnapshot } from "./data.js";
+import { buildAgentResults, buildInvocationResults, buildOverviewModel, capabilityCounts, catalogStatusReason, credentialReferenceLabel, defaultAgentFilters, defaultInvocationFilters, deriveCatalogStatus, deriveDataState, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, filterAgents, filterInvocations, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, metricValueState, observerEvidenceLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, stateLabel, summarizeAgents, summarizeOverview } from "./view-model.js";
 
-test("summarizeAgents keeps catalog states distinct", () => {
-  assert.deepEqual(summarizeAgents(agents), { total: 6, active: 4, suspended: 1, needsAttention: 1, calls: 1256, failures: 16 });
+test("catalog status derivation preserves pending, active, inactive, and suspension independence", () => {
+  assert.equal(deriveCatalogStatus({ upstreamConfigured: false, inactiveAt: null }), "pending");
+  assert.equal(deriveCatalogStatus({ upstreamConfigured: true, inactiveAt: null }), "active");
+  assert.equal(deriveCatalogStatus({ upstreamConfigured: true, inactiveAt: "2026-08-12T17:10:00Z" }), "inactive");
+  assert.equal(deriveCatalogStatus({ upstreamConfigured: false, inactiveAt: "2026-08-12T17:10:00Z" }), "inactive");
+  assert.equal(deriveCatalogStatus({}), "unknown");
+  assert.match(catalogStatusReason({ upstreamConfigured: false, inactiveAt: null }), /no upstream/i);
+
+  const suspended = agents.find((agent) => agent.id === "agt_codegen");
+  assert.equal(deriveCatalogStatus(suspended), "active");
+  assert.equal(suspended.suspended, true);
+  assert.deepEqual(summarizeAgents(agents), { total: 7, active: 5, pending: 1, inactive: 1, suspended: 1, needsAttention: 2, calls: 1256, failures: 16 });
 });
 
-test("filterAgents searches control-plane dimensions without changing source data", () => {
-  assert.deepEqual(filterAgents(agents, "mcp").map((agent) => agent.id), ["agt_research", "agt_release", "agt_docs"]);
-  assert.deepEqual(filterAgents(agents, "stefan").map((agent) => agent.id), ["agt_research", "agt_docs", "agt_cursor"]);
-  assert.deepEqual(filterAgents(agents, "", "suspended").map((agent) => agent.id), ["agt_codegen"]);
-  assert.equal(agents.length, 6);
+test("catalog filters use safe dimensions, AND semantics, and never mutate source fixtures", () => {
+  const sourceOrder = agents.map((agent) => agent.id);
+  assert.deepEqual(filterAgents(agents, { query: "  MCP " }).map((agent) => agent.id), ["agt_research", "agt_release", "agt_docs"]);
+  assert.deepEqual(filterAgents(agents, { query: "AGT_TRIAGE" }).map((agent) => agent.id), ["agt_triage"]);
+  assert.deepEqual(filterAgents(agents, { status: "pending" }).map((agent) => agent.id), ["agt_triage"]);
+  assert.deepEqual(filterAgents(agents, { status: "inactive" }).map((agent) => agent.id), ["agt_legacy"]);
+  assert.deepEqual(filterAgents(agents, { protocol: "mcp" }).map((agent) => agent.id), ["agt_research", "agt_release", "agt_docs"]);
+  assert.deepEqual(filterAgents(agents, { suspension: "suspended" }).map((agent) => agent.id), ["agt_codegen"]);
+  assert.deepEqual(filterAgents(agents, { query: "code", status: "active", protocol: "http", suspension: "suspended" }).map((agent) => agent.id), ["agt_codegen"]);
+  assert.deepEqual(filterAgents(agents, { status: "pending", protocol: "mcp" }), []);
+  assert.deepEqual(agents.map((agent) => agent.id), sourceOrder);
+});
+
+test("catalog result model preserves default, active-filter, and truthful zero-result shapes", () => {
+  const all = buildAgentResults(agents, defaultAgentFilters);
+  assert.equal(all.summary, "7 of 7 fixture catalog agents");
+  assert.deepEqual(all.activeFilters, []);
+  const zero = buildAgentResults(agents, { ...defaultAgentFilters, query: "missing fixture row", protocol: "mcp" });
+  assert.deepEqual(zero.rows, []);
+  assert.equal(zero.summary, "0 of 7 fixture catalog agents");
+  assert.deepEqual(zero.activeFilters, ["query", "protocol"]);
+});
+
+test("catalog labels keep protocol, rate, credential reference, and pricing truth explicit", () => {
+  const http = agents.find((agent) => agent.id === "agt_support");
+  const mcp = agents.find((agent) => agent.id === "agt_research");
+  const pending = agents.find((agent) => agent.id === "agt_triage");
+  assert.equal(protocolLabel(http.protocol), "HTTP");
+  assert.equal(protocolLabel(mcp.protocol), "MCP");
+  assert.equal(protocolLabel("local"), "Unknown");
+  assert.equal(protocolTransportLabel(mcp), "Streamable HTTP");
+  assert.equal(protocolTransportLabel({ protocol: "mcp", mcpTransport: "stdio" }), "Unknown");
+  assert.equal(rateBoundaryLabel(http), "2 req/s · burst 20");
+  assert.equal(rateBoundaryLabel(pending), "Not configured");
+  assert.equal(rateBoundaryLabel({}), "Unknown");
+  assert.equal(credentialReferenceLabel(http), "Reference · support-production");
+  assert.equal(credentialReferenceLabel(pending), "None");
+  assert.equal(credentialReferenceLabel({}), "Unknown");
+  assert.equal(pricingLabel(mcp), "x402 exact · $0.25 / call");
+  assert.equal(pricingLabel(http), "Unpriced");
+  assert.equal(pricingLabel({}), "Unknown");
+});
+
+test("observer evidence uses only the fixed fixture clock at reporting and quiet boundaries", () => {
+  const states = onboardingEvidence.map((evidence) => deriveObserverEvidenceState(evidence, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs));
+  assert.deepEqual(states, ["reporting", "quiet", "enrolled", "discovered"]);
+  const boundary = { enrollmentState: "enrolled", lastEventAt: "2026-08-18T09:07:00Z" };
+  assert.equal(deriveObserverEvidenceState(boundary, environmentSnapshot.evaluatedAt, 5 * 60 * 1000), "reporting");
+  assert.equal(deriveObserverEvidenceState({ ...boundary, lastEventAt: "2026-08-18T09:06:59.999Z" }, environmentSnapshot.evaluatedAt, 5 * 60 * 1000), "quiet");
+  assert.equal(deriveObserverEvidenceState({ enrollmentState: "enrolled", lastEventAt: "2026-08-18T09:13:00Z" }, environmentSnapshot.evaluatedAt, 5 * 60 * 1000), "unknown");
+  assert.equal(observerEvidenceLabel(onboardingEvidence[0], environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs), "Reporting · event 18 Aug 2026 · 09:10 UTC");
+  assert.equal(observerEvidenceLabel(onboardingEvidence[2], environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs), "Enrolled · no recent event evidence");
 });
 
 test("unknown states never become active", () => {
   assert.equal(stateLabel("active"), "Active");
+  assert.equal(stateLabel("discovered"), "Discovered");
   assert.equal(stateLabel("unexpected"), "Unknown");
 });
 

@@ -22,7 +22,7 @@ The autonomous loop completes one safe vertical slice per cycle, in order. It ma
   - Keep request and response body capture clearly separate and off by default.
   - Verify keyboard and narrow-screen behavior.
 
-- [ ] **C04 — Strengthen agent and environment operations**
+- [x] **C04 — Strengthen agent and environment operations**
   - Make catalog configuration, protocol, suspension, rates, credential reference, pricing, and evidence easy to scan.
   - Separate catalog status from activity evidence.
   - Improve environment health and onboarding-state presentation.

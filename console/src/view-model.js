@@ -1,8 +1,12 @@
 export const stateLabels = {
   active: "Active",
+  pending: "Pending",
+  inactive: "Inactive",
   suspended: "Suspended",
-  setup: "Finish setup",
   reporting: "Reporting",
+  quiet: "Quiet",
+  enrolled: "Enrolled",
+  discovered: "Discovered",
   healthy: "Healthy",
 };
 
@@ -10,18 +14,34 @@ export function stateLabel(state) {
   return stateLabels[state] ?? "Unknown";
 }
 
+export function deriveCatalogStatus(agent) {
+  if (typeof agent?.inactiveAt === "string" && agent.inactiveAt.trim()) return "inactive";
+  if (agent?.upstreamConfigured === false) return "pending";
+  if (agent?.upstreamConfigured === true) return "active";
+  return "unknown";
+}
+
+export function catalogStatusReason(agent) {
+  const status = deriveCatalogStatus(agent);
+  if (status === "inactive") return "Inactive after soft deletion; the audit record remains.";
+  if (status === "pending") return "Pending because no upstream is configured.";
+  if (status === "active") return "Active because an upstream is configured.";
+  return "Status derivation inputs are unavailable.";
+}
+
 export function summarizeAgents(agents) {
   return agents.reduce(
     (summary, agent) => {
+      const catalogStatus = deriveCatalogStatus(agent);
       summary.total += 1;
-      if (agent.state === "active") summary.active += 1;
-      if (agent.state === "suspended") summary.suspended += 1;
-      if (agent.state === "setup") summary.needsAttention += 1;
-      summary.calls += agent.calls;
-      summary.failures += agent.failures ?? 0;
+      if (catalogStatus in summary) summary[catalogStatus] += 1;
+      if (agent.suspended === true) summary.suspended += 1;
+      if (catalogStatus === "pending" || agent.suspended === true) summary.needsAttention += 1;
+      summary.calls += Number.isFinite(agent.calls) ? agent.calls : 0;
+      summary.failures += Number.isFinite(agent.failures) ? agent.failures : 0;
       return summary;
     },
-    { total: 0, active: 0, suspended: 0, needsAttention: 0, calls: 0, failures: 0 },
+    { total: 0, active: 0, pending: 0, inactive: 0, suspended: 0, needsAttention: 0, calls: 0, failures: 0 },
   );
 }
 
@@ -251,14 +271,89 @@ export function deriveFailureDiagnosis(invocation) {
   };
 }
 
-export function filterAgents(agents, query = "", state = "all") {
-  const normalized = query.trim().toLocaleLowerCase();
+export const defaultAgentFilters = Object.freeze({ query: "", status: "all", protocol: "all", suspension: "all" });
+
+export function protocolLabel(protocol) {
+  if (protocol === "http") return "HTTP";
+  if (protocol === "mcp") return "MCP";
+  return "Unknown";
+}
+
+export function protocolTransportLabel(agent) {
+  if (agent?.protocol === "http") return "HTTP";
+  if (agent?.protocol !== "mcp") return "Unknown";
+  if (agent.mcpTransport === "streamable_http") return "Streamable HTTP";
+  return "Unknown";
+}
+
+export function rateBoundaryLabel(agent) {
+  if (agent?.ratePerSecond === undefined) return "Unknown";
+  if (agent.ratePerSecond === null) return "Not configured";
+  if (!Number.isFinite(agent.ratePerSecond) || agent.ratePerSecond <= 0) return "Unknown";
+  if (agent.burst === undefined) return "Unknown";
+  if (agent.burst === null) return `${agent.ratePerSecond} req/s · burst default 20`;
+  if (!Number.isInteger(agent.burst) || agent.burst < 1) return "Unknown";
+  return `${agent.ratePerSecond} req/s · burst ${agent.burst}`;
+}
+
+export function credentialReferenceLabel(agent) {
+  if (agent?.credentialRef === undefined) return "Unknown";
+  if (agent.credentialRef === null || agent.credentialRef === "") return "None";
+  return `Reference · ${agent.credentialRef}`;
+}
+
+export function pricingLabel(agent) {
+  if (agent?.pricing === undefined) return "Unknown";
+  if (agent.pricing === null) return "Unpriced";
+  if (agent.pricing.scheme !== "exact" || agent.pricing.asset !== "USDC" || agent.pricing.network !== "base" || !agent.pricing.displayAmount) return "Unknown";
+  return `x402 exact · ${agent.pricing.displayAmount}`;
+}
+
+export function deriveObserverEvidenceState(evidence, evaluatedAt, recentWithinMs) {
+  if (evidence?.enrollmentState === "discovered") return "discovered";
+  if (evidence?.enrollmentState !== "enrolled") return "unknown";
+  if (evidence.lastEventAt === null) return "enrolled";
+  const eventTime = new Date(evidence.lastEventAt).getTime();
+  const evaluationTime = new Date(evaluatedAt).getTime();
+  if (!Number.isFinite(eventTime) || !Number.isFinite(evaluationTime) || !Number.isFinite(recentWithinMs) || recentWithinMs < 0 || eventTime > evaluationTime) return "unknown";
+  return evaluationTime - eventTime <= recentWithinMs ? "reporting" : "quiet";
+}
+
+export function observerEvidenceLabel(evidence, evaluatedAt, recentWithinMs) {
+  const state = deriveObserverEvidenceState(evidence, evaluatedAt, recentWithinMs);
+  if (state === "discovered") return `Discovered · ${formatTimestamp(evidence.discoveredAt)}`;
+  if (state === "enrolled") return "Enrolled · no recent event evidence";
+  if (state === "reporting") return `Reporting · event ${formatTimestamp(evidence.lastEventAt)}`;
+  if (state === "quiet") return `Quiet · last event ${formatTimestamp(evidence.lastEventAt)}`;
+  return "Unknown evidence state";
+}
+
+export function filterAgents(agents, filters = defaultAgentFilters, legacyStatus = "all") {
+  const input = typeof filters === "string" ? { ...defaultAgentFilters, query: filters, status: legacyStatus } : { ...defaultAgentFilters, ...filters };
+  const normalizedQuery = (input.query ?? "").trim().toLocaleLowerCase();
   return agents.filter((agent) => {
-    const haystack = `${agent.name} ${agent.runtime} ${agent.environment} ${agent.protocol}`.toLocaleLowerCase();
-    const matchesQuery = !normalized || haystack.includes(normalized);
-    const matchesState = state === "all" || agent.state === state;
-    return matchesQuery && matchesState;
+    const catalogStatus = deriveCatalogStatus(agent);
+    const haystack = `${agent.id} ${agent.name} ${agent.runtime} ${agent.protocol}`.toLocaleLowerCase();
+    const matchesSuspension = input.suspension === "all"
+      || (input.suspension === "suspended" && agent.suspended === true)
+      || (input.suspension === "not_suspended" && agent.suspended !== true);
+    return (!normalizedQuery || haystack.includes(normalizedQuery))
+      && (input.status === "all" || catalogStatus === input.status)
+      && (input.protocol === "all" || agent.protocol === input.protocol)
+      && matchesSuspension;
   });
+}
+
+export function buildAgentResults(agents, filters = defaultAgentFilters) {
+  const normalized = { ...defaultAgentFilters, ...filters, query: (filters?.query ?? "").trim() };
+  const rows = filterAgents(agents, normalized);
+  const activeFilters = Object.keys(defaultAgentFilters).filter((key) => normalized[key] !== defaultAgentFilters[key]);
+  return {
+    rows,
+    total: agents.length,
+    activeFilters,
+    summary: `${rows.length} of ${agents.length} fixture catalog ${agents.length === 1 ? "agent" : "agents"}`,
+  };
 }
 
 export function formatCount(value, singular, plural = `${singular}s`) {

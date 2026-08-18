@@ -33,13 +33,66 @@ export const trafficSnapshot = {
   defaultRange: "24h",
 };
 
+export const catalogSnapshot = {
+  workspace: "Zerker Labs",
+  environment: "All environments",
+  source: "Tenant catalog fixture v1",
+  refreshedAt: "2026-08-18T09:12:00Z",
+  evaluatedAt: "2026-08-18T09:12:00Z",
+};
+
+export const environmentSnapshot = {
+  workspace: "Zerker Labs",
+  environment: "All environments",
+  source: "Environment evidence fixture v1",
+  refreshedAt: "2026-08-18T09:12:00Z",
+  evaluatedAt: "2026-08-18T09:12:00Z",
+  observerRecentWithinMs: 5 * 60 * 1000,
+};
+
 export const agents = [
-  { id: "agt_support", name: "Support agent", runtime: "Claude Code", protocol: "http", state: "active", evidence: "Reporting 2m ago", environment: "Alex’s MacBook Pro", calls: 486, failures: 4, success: "99.2%", p95: "1.4s", credential: "support-production", price: "Free", rate: "120/min", receipt: "Off" },
-  { id: "agt_research", name: "Research agent", runtime: "Hermes", protocol: "mcp", state: "active", evidence: "Quiet · 18m ago", environment: "Stefan’s Mac mini", calls: 214, failures: 4, success: "98.1%", p95: "2.8s", credential: "research-vault", price: "$0.25", rate: "60/min", receipt: "Integration path" },
-  { id: "agt_release", name: "Release reviewer", runtime: "Pi", protocol: "mcp", state: "active", evidence: "Reporting now", environment: "Alex’s MacBook Pro", calls: 173, failures: 0, success: "100%", p95: "3.1s", credential: "github-app", price: "Free", rate: "30/min", receipt: "Integration path" },
-  { id: "agt_docs", name: "Docs search", runtime: "Gemini CLI", protocol: "mcp", state: "active", evidence: "Reporting 4m ago", environment: "Stefan’s Mac mini", calls: 301, failures: 1, success: "99.7%", p95: "720ms", credential: "docs-api", price: "$0.05", rate: "240/min", receipt: "Off" },
-  { id: "agt_codegen", name: "Code generator", runtime: "Codex", protocol: "http", state: "suspended", evidence: "Quiet · 1h ago", environment: "Alex’s MacBook Pro", calls: 82, failures: 7, success: "91.4%", p95: "8.6s", credential: "openai-team", price: "Free", rate: "20/min", receipt: "Off" },
-  { id: "agt_cursor", name: "Cursor", runtime: "Cursor", protocol: "local", state: "setup", evidence: "Discovered · not enrolled", environment: "Stefan’s Mac mini", calls: 0, failures: 0, success: "—", p95: "—", credential: "None", price: "—", rate: "—", receipt: "Off" },
+  {
+    id: "agt_support", name: "Support agent", runtime: "Claude Code", protocol: "http", upstreamConfigured: true, inactiveAt: null, suspended: false,
+    createdAt: "2026-07-04T11:20:00Z", updatedAt: "2026-08-17T16:40:00Z", latestInvocationAt: "2026-08-18T09:12:00Z",
+    calls: 486, failures: 4, success: "99.2%", p95: "1.4s", credentialRef: "support-production", ratePerSecond: 2, burst: 20,
+    pricing: null, captureBody: false, emitReceipts: false,
+  },
+  {
+    id: "agt_research", name: "Research agent", runtime: "Hermes", protocol: "mcp", mcpTransport: "streamable_http", mcpProtocolVersion: "2025-03-26", upstreamConfigured: true, inactiveAt: null, suspended: false,
+    createdAt: "2026-07-08T08:15:00Z", updatedAt: "2026-08-18T07:55:00Z", latestInvocationAt: "2026-08-18T09:09:00Z",
+    calls: 214, failures: 4, success: "98.1%", p95: "2.8s", credentialRef: "research-vault", ratePerSecond: 1, burst: 20,
+    pricing: { scheme: "exact", asset: "USDC", network: "base", displayAmount: "$0.25 / call", tool: "research.report" }, captureBody: false, emitReceipts: true,
+  },
+  {
+    id: "agt_release", name: "Release reviewer", runtime: "Pi", protocol: "mcp", mcpTransport: "streamable_http", mcpProtocolVersion: "2025-03-26", upstreamConfigured: true, inactiveAt: null, suspended: false,
+    createdAt: "2026-07-11T14:05:00Z", updatedAt: "2026-08-16T10:22:00Z", latestInvocationAt: "2026-08-18T09:11:00Z",
+    calls: 173, failures: 0, success: "100%", p95: "3.1s", credentialRef: "github-app", ratePerSecond: 0.5, burst: 10,
+    pricing: null, captureBody: false, emitReceipts: true,
+  },
+  {
+    id: "agt_docs", name: "Docs search", runtime: "Gemini CLI", protocol: "mcp", mcpTransport: "streamable_http", mcpProtocolVersion: "2025-03-26", upstreamConfigured: true, inactiveAt: null, suspended: false,
+    createdAt: "2026-07-15T09:30:00Z", updatedAt: "2026-08-18T08:20:00Z", latestInvocationAt: "2026-08-18T09:08:00Z",
+    calls: 301, failures: 1, success: "99.7%", p95: "720ms", credentialRef: "docs-api", ratePerSecond: 4, burst: 30,
+    pricing: { scheme: "exact", asset: "USDC", network: "base", displayAmount: "$0.05 / call", tool: "search_docs" }, captureBody: false, emitReceipts: false,
+  },
+  {
+    id: "agt_codegen", name: "Code generator", runtime: "Codex", protocol: "http", upstreamConfigured: true, inactiveAt: null, suspended: true,
+    createdAt: "2026-07-18T12:00:00Z", updatedAt: "2026-08-18T09:04:00Z", latestInvocationAt: "2026-08-18T09:03:00Z",
+    calls: 82, failures: 7, success: "91.4%", p95: "8.6s", credentialRef: "openai-team", ratePerSecond: 0.33, burst: 8,
+    pricing: null, captureBody: false, emitReceipts: false,
+  },
+  {
+    id: "agt_triage", name: "Customer triage", runtime: "HTTP service", protocol: "http", upstreamConfigured: false, inactiveAt: null, suspended: false,
+    createdAt: "2026-08-18T08:35:00Z", updatedAt: "2026-08-18T08:35:00Z", latestInvocationAt: null,
+    calls: 0, failures: 0, success: null, p95: null, credentialRef: null, ratePerSecond: null, burst: null,
+    pricing: null, captureBody: false, emitReceipts: false,
+  },
+  {
+    id: "agt_legacy", name: "Legacy summarizer", runtime: "HTTP service", protocol: "http", upstreamConfigured: true, inactiveAt: "2026-08-12T17:10:00Z", suspended: false,
+    createdAt: "2026-06-20T10:00:00Z", updatedAt: "2026-08-12T17:10:00Z", latestInvocationAt: null,
+    calls: 0, failures: 0, success: null, p95: null, credentialRef: null, ratePerSecond: null, burst: null,
+    pricing: null, captureBody: false, emitReceipts: false,
+  },
 ];
 
 export const invocations = [
@@ -54,12 +107,12 @@ export const activity = [
   { agent: "Pi", event: "Tool completed", detail: "bash · success · 1.8s", time: "Now", kind: "agent event" },
   { agent: "Research agent", event: "Payment settled", detail: "USDC · Base · $0.25", time: "3m", kind: "settlement" },
   { agent: "Docs search", event: "Policy warning", detail: "large-response · request forwarded", time: "4m", kind: "decision" },
-  { agent: "Code generator", event: "Circuit opened", detail: "upstream timeout · agent suspended", time: "9m", kind: "runtime" },
+  { agent: "Code generator", event: "Circuit opened", detail: "upstream timeout · runtime protection", time: "9m", kind: "runtime" },
   { agent: "Hermes", event: "Session ended", detail: "3 tools · 11m duration", time: "18m", kind: "agent event" },
 ];
 
 export const attention = [
-  { level: "high", title: "Code generator is suspended", detail: "Three upstream timeouts opened the circuit. Review before resuming traffic.", action: "Inspect failures", target: "invocations" },
+  { level: "high", title: "Code generator is suspended", detail: "Its catalog status remains active, but the independent suspension blocks invocations. Review the timeout evidence before any human-approved resume.", action: "Inspect failures", target: "invocations" },
   { level: "medium", title: "Cursor is ready for enrollment", detail: "Discovered on Stefan’s Mac mini. Observe-only enrollment is available in PR #46.", action: "Review setup", target: "environments" },
   { level: "low", title: "Seven policy warnings today", detail: "All requests continued. The large-response rule accounts for six warnings.", action: "Review decisions", target: "policies" },
 ];
@@ -100,9 +153,26 @@ export const settlements = [
 ];
 
 export const environments = [
-  { name: "Alex’s MacBook Pro", kind: "Local", agents: 3, state: "reporting", evidence: "Event received now", storage: "Adapter hooks", version: "6 observers" },
-  { name: "Stefan’s Mac mini", kind: "Local", agents: 3, state: "reporting", evidence: "Event received 4m ago", storage: "Adapter hooks", version: "3 observers" },
-  { name: "Production Gateway", kind: "Self-hosted", agents: 5, state: "healthy", evidence: "Health probe 12s ago", storage: "Postgres", version: "gateway dev" },
+  {
+    id: "env_gateway", name: "Production Gateway", kind: "Self-hosted Gateway", delivery: "available", source: "Gateway health fixture",
+    probeAt: "2026-08-18T09:11:48Z", healthState: "healthy", catalogAgents: 7, pendingAgents: 1, suspendedAgents: 1,
+    storage: "Postgres", version: "gateway development",
+  },
+  {
+    id: "env_alex", name: "Alex’s MacBook Pro", kind: "Local observer", delivery: "review", source: "Agent activity fixture · PR #46",
+    lastEvidenceAt: "2026-08-18T09:12:00Z", enrollmentState: "enrolled", observed: 3, enrolled: 3, discovered: 0,
+  },
+  {
+    id: "env_stefan", name: "Stefan’s Mac mini", kind: "Local observer", delivery: "review", source: "Agent activity fixture · PR #46",
+    lastEvidenceAt: "2026-08-18T09:02:00Z", enrollmentState: "enrolled", observed: 2, enrolled: 3, discovered: 1,
+  },
+];
+
+export const onboardingEvidence = [
+  { id: "obs_support", agentID: "agt_support", name: "Support agent", runtime: "Claude Code", environmentID: "env_alex", environment: "Alex’s MacBook Pro", enrollmentState: "enrolled", lastEventAt: "2026-08-18T09:10:00Z", source: "Native observer fixture · PR #46" },
+  { id: "obs_research", agentID: "agt_research", name: "Research agent", runtime: "Hermes", environmentID: "env_stefan", environment: "Stefan’s Mac mini", enrollmentState: "enrolled", lastEventAt: "2026-08-18T08:54:00Z", source: "Native observer fixture · PR #46" },
+  { id: "obs_triage", agentID: "agt_triage", name: "Customer triage", runtime: "HTTP service", environmentID: "env_stefan", environment: "Stefan’s Mac mini", enrollmentState: "enrolled", lastEventAt: null, source: "Native observer fixture · PR #46" },
+  { id: "obs_cursor", agentID: null, name: "Cursor", runtime: "Cursor", environmentID: "env_stefan", environment: "Stefan’s Mac mini", enrollmentState: "discovered", lastEventAt: null, discoveredAt: "2026-08-18T09:06:00Z", source: "Local discovery fixture · PR #46" },
 ];
 
 export const stack = [

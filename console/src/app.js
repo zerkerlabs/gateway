@@ -1,6 +1,6 @@
 import "./styles.css";
-import { activity, agents, attention, credentials, environments, invocations, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, privacy, products, settlements, stack, trafficSnapshot } from "./data.js";
-import { buildInvocationResults, buildOverviewModel, capabilityCounts, defaultInvocationFilters, deriveFailureDiagnosis, deriveInvocationTrace, filterAgents, formatCount, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, stateLabel } from "./view-model.js";
+import { activity, agents, attention, catalogSnapshot, credentials, environmentSnapshot, environments, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, privacy, products, settlements, stack, trafficSnapshot } from "./data.js";
+import { buildAgentResults, buildInvocationResults, buildOverviewModel, capabilityCounts, catalogStatusReason, credentialReferenceLabel, defaultAgentFilters, defaultInvocationFilters, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, filterAgents, formatCount, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, stateLabel, summarizeAgents } from "./view-model.js";
 
 const main = document.querySelector("#main-content");
 const modalRoot = document.querySelector("#modal-root");
@@ -8,6 +8,7 @@ const toastRegion = document.querySelector("#toast-region");
 const stackSummary = capabilityCounts(stack);
 let activeOverviewScenario = "complete";
 let invocationFilters = { ...defaultInvocationFilters };
+let agentFilters = { ...defaultAgentFilters };
 let activeView = "overview";
 let previousFocus = null;
 
@@ -23,6 +24,10 @@ function status(value, tone = value.toLowerCase().replaceAll(" ", "_")) {
 
 function pageHeader(kicker, title, description, actions = "") {
   return `<header class="page-heading"><div><p class="kicker">${kicker}</p><h1>${title}</h1><p class="page-description">${description}</p></div><div class="page-actions">${actions}</div></header>`;
+}
+
+function fixtureContext(snapshot, label) {
+  return `<section class="control-evidence" aria-label="${label} fixture context"><div class="control-preview"><span class="fixture-dot"></span><span><strong>Preview data</strong><small>Not connected to Gateway</small></span></div><div><span>Workspace</span><strong>${snapshot.workspace}</strong></div><div><span>Environment scope</span><strong>${snapshot.environment}</strong></div><div><span>Source</span><strong>${snapshot.source}</strong></div><div><span>Refreshed</span><strong>${formatTimestamp(snapshot.refreshedAt)}</strong></div></section>`;
 }
 
 function currentOverviewModel() {
@@ -173,7 +178,7 @@ function invocationResultsMarkup(result) {
 
 function invocationsView() {
   const result = buildInvocationResults(invocations, invocationFilters, trafficSnapshot.evaluatedAt);
-  const agentsInFixture = [...new Set(invocations.map((item) => item.agent))].toSorted();
+  const agentsInFixture = agents.map((agent) => agent.name).toSorted();
   return `<section class="page-enter traffic-page">
     ${pageHeader("Traffic · available OSS", "Invocations", "Filter tenant-scoped fixture metadata and inspect the exact request path.", '<button class="button secondary" data-action="export">Export view</button>')}
     <section class="traffic-evidence" aria-label="Traffic fixture context"><div class="traffic-preview"><span class="fixture-dot"></span><span><strong>Preview data</strong><small>Not connected to Gateway</small></span></div><div><span>Workspace</span><strong>${trafficSnapshot.workspace}</strong></div><div><span>Environment</span><strong>${trafficSnapshot.environment}</strong></div><div><span>Source</span><strong>${trafficSnapshot.source}</strong></div><div><span>Refreshed</span><strong>${formatTimestamp(trafficSnapshot.refreshedAt)}</strong></div><div><span>Window</span><strong id="traffic-window-label">${trafficRangeLabel(invocationFilters.timeRange)}</strong></div></section>
@@ -203,25 +208,96 @@ function analyticsView() {
   </section>`;
 }
 
+function onboardingForAgent(agentID) {
+  return onboardingEvidence.find((item) => item.agentID === agentID) ?? null;
+}
+
+function invocationEvidenceLabel(agent) {
+  if (!Number.isFinite(agent.calls)) return "Unknown invocation count";
+  if (agent.calls === 0) return "0 calls · complete fixture window";
+  const latest = agent.latestInvocationAt ? ` · latest ${formatTimestamp(agent.latestInvocationAt)}` : " · latest time Unknown";
+  return `${agent.calls.toLocaleString("en-US")} calls${latest}`;
+}
+
 function agentRows(items) {
-  if (!items.length) return '<div class="empty-state">No agents match this view.</div>';
-  return items.map((agent) => `<button class="catalog-row" data-agent="${agent.id}"><span class="agent-symbol">${agent.runtime === "Pi" ? "π" : agent.runtime.slice(0,2).toUpperCase()}</span><span><strong>${agent.name}</strong><small>${agent.runtime} · ${agent.environment}</small></span><span><strong>${agent.protocol.toUpperCase()}</strong><small>Protocol</small></span><span><strong>${agent.calls.toLocaleString("en-US")}</strong><small>Calls today</small></span><span><strong>${agent.p95}</strong><small>p95 latency</small></span>${status(stateLabel(agent.state), agent.state)}<span>→</span></button>`).join("");
+  if (!items.length) {
+    return `<div class="catalog-empty"><p class="kicker">Filtered fixture</p><h2>No fixture catalog agents match</h2><p>Adjust the in-memory filters. This does not mean the tenant catalog is empty or Gateway is unavailable.</p><button class="button secondary" id="empty-clear-agent-filters">Clear filters</button></div>`;
+  }
+  return items.map((agent) => {
+    const catalogStatus = deriveCatalogStatus(agent);
+    const observer = onboardingForAgent(agent.id);
+    const observerMarkup = observer
+      ? `<span class="agent-evidence review-evidence"><b>In review · PR #46</b><small>${observerEvidenceLabel(observer, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)}</small></span>`
+      : '<span class="agent-evidence"><b>Native observer</b><small>Unavailable in this fixture</small></span>';
+    return `<article class="catalog-row${agent.suspended ? " is-suspended" : ""}">
+      <span class="agent-identity" data-label="Catalog agent"><span class="agent-symbol">${agent.runtime === "Pi" ? "π" : agent.runtime.slice(0, 2).toUpperCase()}</span><span><strong>${agent.name}</strong><small class="mono">${agent.id}</small></span></span>
+      <span data-label="Catalog status">${status(stateLabel(catalogStatus), catalogStatus)}<small>${catalogStatusReason(agent)}</small></span>
+      <span data-label="Suspension">${agent.suspended ? status("Suspended", "suspended") : '<strong>Not suspended</strong>'}<small>${agent.suspended ? "Invocations blocked" : "Separate from catalog status"}</small></span>
+      <span data-label="Protocol"><strong>${protocolLabel(agent.protocol)}</strong><small>${protocolTransportLabel(agent)}</small></span>
+      <span data-label="Rate boundary"><strong>${rateBoundaryLabel(agent)}</strong><small>Per agent</small></span>
+      <span data-label="Credential reference"><strong>${credentialReferenceLabel(agent)}</strong><small>Metadata only</small></span>
+      <span data-label="Pricing"><strong>${pricingLabel(agent)}</strong><small>${agent.pricing ? "Gate configuration" : "No payment gate"}</small></span>
+      <span class="catalog-evidence" data-label="Evidence"><span class="agent-evidence"><b>Available · invocation fixture</b><small>${invocationEvidenceLabel(agent)}</small></span>${observerMarkup}</span>
+      <span class="catalog-inspect"><button class="inspect-button" data-agent="${agent.id}" aria-label="Inspect catalog agent ${agent.name}">Inspect →</button></span>
+    </article>`;
+  }).join("");
 }
 
 function agentsView() {
-  return `<section class="page-enter">
-    ${pageHeader("Control · available OSS", "Agent catalog", "The tenant-scoped system of record for every HTTP agent and MCP server.", '<button class="button primary" data-action="add-agent">＋ Register agent</button>')}
-    <section class="metric-strip compact"><div><span>6</span><small>Catalog entries</small><em>3 MCP · 2 HTTP · 1 local</em></div><div><span>5</span><small>Credential references</small><em>Secrets never returned</em></div><div><span>2</span><small>Priced agents</small><em>x402 gate active</em></div><div><span>1</span><small>Suspended</small><em>Traffic blocked</em></div></section>
-    <div class="filter-bar"><input id="agent-filter" type="search" placeholder="Search name, runtime, environment or protocol" aria-label="Search agents"><select id="agent-state" aria-label="Agent state"><option value="all">All states</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="setup">Needs setup</option></select><button class="button secondary">Protocol⌄</button><button class="button secondary">Tags⌄</button></div>
-    <section class="catalog-list" id="catalog-list">${agentRows(agents)}</section>
+  const summary = summarizeAgents(agents);
+  const result = buildAgentResults(agents, agentFilters);
+  return `<section class="page-enter catalog-page">
+    ${pageHeader("Control · available OSS", "Agent catalog", "Tenant-scoped routing configuration, independent suspension, and fixed evidence for HTTP agents and MCP servers.", '<button class="button primary" data-action="add-agent">＋ Register agent</button>')}
+    ${fixtureContext(catalogSnapshot, "Agent catalog")}
+    <section class="metric-strip catalog-metrics"><div><span>${summary.total}</span><small>Catalog records</small><em>Tenant-scoped fixture</em></div><div><span>${summary.active}</span><small>Active</small><em>Upstream configured</em></div><div><span>${summary.pending}</span><small>Pending</small><em>No upstream configured</em></div><div><span>${summary.inactive}</span><small>Inactive</small><em>Soft-deleted audit record</em></div><div><span>${summary.suspended}</span><small>Suspended</small><em>Counted separately · blocked</em></div></section>
+    <section class="catalog-filters" aria-label="Filter fixture catalog agents">
+      <label class="catalog-search"><span>Search</span><input id="agent-filter" data-agent-filter="query" type="search" placeholder="ID, name, runtime, or protocol" autocomplete="off"></label>
+      <label><span>Catalog status</span><select id="agent-status" data-agent-filter="status"><option value="all">All</option><option value="active">Active</option><option value="pending">Pending</option><option value="inactive">Inactive</option></select></label>
+      <label><span>Protocol</span><select id="agent-protocol" data-agent-filter="protocol"><option value="all">All</option><option value="http">HTTP</option><option value="mcp">MCP</option></select></label>
+      <label><span>Suspension</span><select id="agent-suspension" data-agent-filter="suspension"><option value="all">All</option><option value="suspended">Suspended</option><option value="not_suspended">Not suspended</option></select></label>
+      <button class="button secondary clear-agent-filters" id="clear-agent-filters">Clear filters</button>
+    </section>
+    <div class="catalog-results-heading"><p id="agent-result-count" aria-live="polite"><strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small></p><span>Catalog status ≠ suspension ≠ activity evidence</span></div>
+    <div class="catalog-columns" aria-hidden="true"><span>Catalog agent</span><span>Catalog status</span><span>Suspension</span><span>Protocol</span><span>Rate boundary</span><span>Credential reference</span><span>Pricing</span><span>Evidence</span><span>Action</span></div>
+    <section class="catalog-list" id="catalog-list" aria-label="Fixture catalog agents">${agentRows(result.rows)}</section>
   </section>`;
 }
 
+function environmentEvidenceState(environment) {
+  if (environment.delivery === "available") return environment.healthState ?? "unknown";
+  return deriveObserverEvidenceState({ enrollmentState: environment.enrollmentState, lastEventAt: environment.lastEvidenceAt }, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs);
+}
+
+function environmentCard(environment) {
+  const evidenceState = environmentEvidenceState(environment);
+  const gateway = environment.delivery === "available";
+  const evidenceCopy = gateway
+    ? `Probe captured ${formatTimestamp(environment.probeAt)} · evidence only`
+    : observerEvidenceLabel({ enrollmentState: environment.enrollmentState, lastEventAt: environment.lastEvidenceAt }, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs);
+  const facts = gateway
+    ? [["Catalog", environment.catalogAgents], ["Pending", environment.pendingAgents], ["Suspended", environment.suspendedAgents]]
+    : [["Observed", environment.observed], ["Enrolled", environment.enrolled], ["Discovered", environment.discovered]];
+  return `<article class="environment-card"><div class="environment-top"><span class="environment-icon">${gateway ? "G" : "⌘"}</span><span class="environment-badges">${status(gateway ? "Available OSS · fixture" : "In review · PR #46", gateway ? "available" : "review")}${status(stateLabel(evidenceState), evidenceState)}</span></div><p class="kicker">${environment.kind}</p><h2>${environment.name}</h2><p>${evidenceCopy}. This is not persistent connectivity.</p><dl>${facts.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join("")}</dl><button class="inspect-button" data-environment="${environment.id}" aria-label="Inspect environment evidence for ${environment.name}">Inspect evidence →</button></article>`;
+}
+
+function onboardingRows() {
+  return onboardingEvidence.map((item) => {
+    const evidenceState = deriveObserverEvidenceState(item, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs);
+    return `<article class="onboarding-row"><span><strong>${item.name}</strong><small>${item.runtime} · ${item.environment}</small></span>${status(stateLabel(evidenceState), evidenceState)}<span><strong>${observerEvidenceLabel(item, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)}</strong><small>Evidence only · not a persistent connection</small></span><button class="inspect-button" data-onboarding="${item.id}" aria-label="Inspect onboarding evidence for ${item.name}">Inspect →</button></article>`;
+  }).join("");
+}
+
 function environmentsView() {
-  return `<section class="page-enter">
-    ${pageHeader("Control", "Environments", "Where Gateway and observed agents run. Evidence is not presented as a permanent connection.", '<button class="button primary" data-action="connect">＋ Connect environment</button>')}
-    <div class="environment-list">${environments.map((environment) => `<article class="environment-card"><div class="environment-top"><span class="environment-icon">${environment.kind === "Self-hosted" ? "G" : "⌘"}</span>${status(stateLabel(environment.state), "available")}</div><p class="kicker">${environment.kind}</p><h2>${environment.name}</h2><p>${environment.evidence}</p><dl><div><dt>Agents</dt><dd>${environment.agents}</dd></div><div><dt>Storage</dt><dd>${environment.storage}</dd></div><div><dt>Runtime</dt><dd>${environment.version}</dd></div></dl><button class="text-button">Inspect environment →</button></article>`).join("")}<button class="environment-card add-card" data-action="connect"><span>＋</span><h2>Another environment</h2><p>Local discovery is in review. Remote pairing is planned.</p></button></div>
-    <div class="availability-banner split"><div><p class="kicker">Enrollment status</p><h2>Reporting is evidence, not connectivity.</h2><p><b>Reporting</b> means an event arrived within five minutes. <b>Quiet</b> means older evidence exists. <b>Enrolled</b> means inventory exists without recent events.</p></div>${status("Contract in PR #46", "review")}</div>
+  const gatewayEnvironments = environments.filter((environment) => environment.delivery === "available");
+  const observerEnvironments = environments.filter((environment) => environment.delivery === "review");
+  return `<section class="page-enter environments-page">
+    ${pageHeader("Control", "Environments", "Captured Gateway probes and in-review observer evidence, separated by delivery truth.", '<button class="button secondary" data-action="connect">Review environment concept</button>')}
+    ${fixtureContext(environmentSnapshot, "Environment")}
+    <section class="environment-group"><div class="environment-group-heading"><div><p class="kicker">Available OSS · fixture</p><h2>Gateway runtime evidence</h2></div><p>A captured health probe describes only that fixed point in time.</p></div><div class="environment-list gateway-environments">${gatewayEnvironments.map(environmentCard).join("")}</div></section>
+    <section class="environment-group"><div class="environment-group-heading"><div><p class="kicker">In review · PR #46</p><h2>Local observer evidence</h2></div><p>Discovery, enrollment, reporting, and quiet are evidence states—not connection states.</p></div><div class="environment-list">${observerEnvironments.map(environmentCard).join("")}</div></section>
+    <section class="panel onboarding-panel"><div class="panel-heading"><div><p class="kicker">In review · PR #46</p><h2>Onboarding evidence</h2></div>${status("Metadata only", "review")}</div><div class="onboarding-list">${onboardingRows()}</div></section>
+    <section class="planned-environment"><div><p class="kicker">Planned</p><h2>Remote pairing and missions</h2><p>Remote operation remains separate from observe-only evidence and is not available in this fixture.</p></div>${status("Planned", "planned")}</section>
+    <section class="environment-privacy"><div><p class="kicker">Native activity privacy</p><h2>Evidence without conversation content</h2></div><p>Observer summaries never include prompts, messages, arguments, outputs, commands, paths, files, environment values, or credentials. No pairing token or credential is accepted here.</p></section>
   </section>`;
 }
 
@@ -339,21 +415,53 @@ function bindInvocationFilters() {
   main.querySelector("#clear-invocation-filters")?.addEventListener("click", () => clearInvocationFilterState());
 }
 
+function bindAgentInspectButtons(scope = main) {
+  scope.querySelectorAll("[data-agent]").forEach((button) => button.addEventListener("click", () => openAgent(button.dataset.agent)));
+}
+
+function refreshAgentResults() {
+  const container = main.querySelector("#catalog-list");
+  const count = main.querySelector("#agent-result-count");
+  if (!container || !count) return;
+  const result = buildAgentResults(agents, agentFilters);
+  container.innerHTML = agentRows(result.rows);
+  count.innerHTML = `<strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small>`;
+  bindAgentInspectButtons(container);
+  container.querySelector("#empty-clear-agent-filters")?.addEventListener("click", () => clearAgentFilterState(true));
+}
+
+function clearAgentFilterState(focusSearch = false) {
+  agentFilters = { ...defaultAgentFilters };
+  main.querySelectorAll("[data-agent-filter]").forEach((control) => { control.value = agentFilters[control.dataset.agentFilter]; });
+  refreshAgentResults();
+  (focusSearch ? main.querySelector("#agent-filter") : main.querySelector("#clear-agent-filters"))?.focus();
+}
+
+function bindAgentFilters() {
+  const controls = main.querySelectorAll("[data-agent-filter]");
+  if (!controls.length) return;
+  controls.forEach((control) => {
+    control.value = agentFilters[control.dataset.agentFilter];
+    control.addEventListener(control.matches("input") ? "input" : "change", () => {
+      agentFilters = { ...agentFilters, [control.dataset.agentFilter]: control.value };
+      refreshAgentResults();
+    });
+  });
+  main.querySelector("#clear-agent-filters")?.addEventListener("click", () => clearAgentFilterState());
+}
+
 function bindPageEvents() {
   main.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => render(button.dataset.view)));
-  main.querySelectorAll("[data-agent]").forEach((button) => button.addEventListener("click", () => openAgent(button.dataset.agent)));
+  bindAgentInspectButtons();
   bindInvocationButtons();
+  main.querySelectorAll("[data-environment]").forEach((button) => button.addEventListener("click", () => openEnvironment(button.dataset.environment)));
+  main.querySelectorAll("[data-onboarding]").forEach((button) => button.addEventListener("click", () => openOnboardingEvidence(button.dataset.onboarding)));
   main.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
   main.querySelectorAll("[data-stack]").forEach((button) => button.addEventListener("click", () => openStackInfo(button.dataset.stack)));
   const scenario = main.querySelector("#overview-scenario");
   if (scenario) scenario.addEventListener("change", () => { activeOverviewScenario = scenario.value; render("overview"); main.querySelector("#overview-scenario")?.focus(); });
   bindInvocationFilters();
-  const query = main.querySelector("#agent-filter");
-  const state = main.querySelector("#agent-state");
-  if (query && state) {
-    const update = () => { main.querySelector("#catalog-list").innerHTML = agentRows(filterAgents(agents, query.value, state.value)); main.querySelectorAll("[data-agent]").forEach((button) => button.addEventListener("click", () => openAgent(button.dataset.agent))); };
-    query.addEventListener("input", update); state.addEventListener("change", update);
-  }
+  bindAgentFilters();
 }
 
 function handleAction(action) {
@@ -366,7 +474,67 @@ function handleAction(action) {
 
 function openAgent(id) {
   const agent = agents.find((item) => item.id === id); if (!agent) return;
-  openDrawer(`${agent.name}`, `${agent.runtime} · ${agent.environment}`, `${status(stateLabel(agent.state), agent.state)}<div class="drawer-grid"><div><strong>${agent.calls.toLocaleString("en-US")}</strong><small>Calls today</small></div><div><strong>${agent.success}</strong><small>Success rate</small></div><div><strong>${agent.p95}</strong><small>p95 latency</small></div><div><strong>${agent.price}</strong><small>Per call</small></div></div><h3>Gateway configuration</h3>${detailRows([["Catalog ID", agent.id], ["Protocol", agent.protocol.toUpperCase()], ["Credential", agent.credential], ["Rate boundary", agent.rate], ["Activity evidence", agent.evidence], ["Receipt setting", agent.receipt]])}<div class="drawer-actions"><button class="button secondary" data-drawer-action="invoke">View invocations</button><button class="button primary" data-drawer-action="edit">Edit configuration</button></div>`);
+  const catalogStatus = deriveCatalogStatus(agent);
+  const observer = onboardingForAgent(agent.id);
+  const observerMarkup = observer
+    ? `<div class="drawer-evidence review-evidence">${status("In review · PR #46", "review")}<strong>${observerEvidenceLabel(observer, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)}</strong><small>Native observer metadata · evidence only, not persistent connectivity</small></div>`
+    : `<div class="drawer-evidence">${status("Unavailable", "unavailable")}<strong>Native observer evidence unavailable</strong><small>Unavailable is not zero and does not imply disconnection.</small></div>`;
+  const mcpReliability = agent.protocol === "mcp"
+    ? "Known-idempotent MCP methods may be retried. tools/call is never automatically retried."
+    : "Transient upstream failures may be retried; circuit breaking protects a consistently failing upstream.";
+  const pricingRows = agent.pricing
+    ? [["Gate configuration", pricingLabel(agent)], ["Scheme / asset / network", "exact · USDC · Base"], ["Scope", agent.pricing.tool ? `Per-tool · ${agent.pricing.tool}` : "Per call"]]
+    : [["Gate configuration", pricingLabel(agent)], ["Payment requirement", "None"]];
+  openDrawer(
+    agent.name,
+    `${agent.runtime} · tenant catalog fixture`,
+    `<div class="drawer-statuses">${status(stateLabel(catalogStatus), catalogStatus)}${agent.suspended ? status("Suspended · invocations blocked", "suspended") : status("Not suspended", "empty")}</div>
+    <div class="read-only-banner"><strong>Read-only preview</strong><span>No Gateway request or catalog mutation occurs here.</span></div>
+    <div class="drawer-grid"><div><strong>${Number.isFinite(agent.calls) ? agent.calls.toLocaleString("en-US") : "Unknown"}</strong><small>Calls · complete fixture window</small></div><div><strong>${Number.isFinite(agent.failures) ? agent.failures.toLocaleString("en-US") : "Unknown"}</strong><small>Failures · fixture</small></div><div><strong>${agent.success ?? "Unknown"}</strong><small>Success rate</small></div><div><strong>${agent.p95 ?? "Unknown"}</strong><small>p95 latency</small></div></div>
+    <section class="drawer-section"><h3>Catalog</h3>${detailRows([["Catalog ID", agent.id], ["Derived status", stateLabel(catalogStatus)], ["Derivation", catalogStatusReason(agent)], ["Suspension", agent.suspended ? "Suspended · invocations blocked" : "Not suspended"], ["Created", formatTimestamp(agent.createdAt)], ["Updated", formatTimestamp(agent.updatedAt)]])}</section>
+    <section class="drawer-section"><h3>Routing</h3>${detailRows([["Upstream", agent.upstreamConfigured ? "Configured" : "Not configured"], ["Protocol", protocolLabel(agent.protocol)], ["Transport", protocolTransportLabel(agent)], ["MCP protocol version", agent.protocol === "mcp" ? agent.mcpProtocolVersion ?? "Unknown" : "Not applicable"], ["MCP limitation", agent.protocol === "mcp" ? "Streamable HTTP only · stdio unsupported" : "Not applicable"]])}</section>
+    <section class="drawer-section"><h3>Protection</h3>${detailRows([["Credential reference", credentialReferenceLabel(agent)], ["Credential injection", agent.credentialRef ? "Configured reference resolved after policy" : agent.credentialRef === null ? "None configured" : "Unknown"], ["Caller authorization", "Stripped before upstream injection"], ["Rate boundary", rateBoundaryLabel(agent)], ["SSRF posture", "Checked at write and dial time"], ["Proxy body capture", agent.captureBody === false ? "Off in this fixture" : "Unknown"]])}</section>
+    <section class="drawer-section"><h3>Reliability</h3><div class="drawer-copy"><strong>Retries and circuit breaking</strong><p>${mcpReliability}</p><small>No current circuit state or retry event is claimed by this configuration fixture.</small></div></section>
+    <section class="drawer-section"><h3>Pricing</h3>${detailRows(pricingRows)}<div class="drawer-copy compact"><p>This configures a payment gate. It does not prove verification, collection, or settlement.</p></div></section>
+    <section class="drawer-section"><h3>Evidence</h3><div class="drawer-evidence"><span>${status("Available OSS · fixture", "available")}</span><strong>${invocationEvidenceLabel(agent)}</strong><small>Invocation metadata source · refreshed ${formatTimestamp(catalogSnapshot.refreshedAt)}</small></div>${observerMarkup}</section>
+    <div class="drawer-actions"><button class="button secondary" data-drawer-action="agent-invocations" data-agent-name="${agent.name}">View invocations</button><button class="button secondary" data-drawer-action="agent-edit">Edit configuration</button></div>`,
+  );
+}
+
+function openEnvironment(id) {
+  const environment = environments.find((item) => item.id === id); if (!environment) return;
+  const gateway = environment.delivery === "available";
+  const evidenceState = environmentEvidenceState(environment);
+  const evidenceAt = gateway ? environment.probeAt : environment.lastEvidenceAt;
+  const countRows = gateway
+    ? [["Catalog records", environment.catalogAgents], ["Pending", environment.pendingAgents], ["Suspended", environment.suspendedAgents]]
+    : [["Observed", environment.observed], ["Enrolled", environment.enrolled], ["Discovered", environment.discovered]];
+  const runtimeRows = gateway ? [["Storage", environment.storage], ["Version", environment.version]] : [];
+  openDrawer(
+    environment.name,
+    `${environment.kind} · environment fixture`,
+    `<div class="drawer-statuses">${status(gateway ? "Available OSS · fixture" : "In review · PR #46", gateway ? "available" : "review")}${status(stateLabel(evidenceState), evidenceState)}</div>
+    <div class="read-only-banner"><strong>Captured evidence</strong><span>This record does not represent a persistent connection.</span></div>
+    <section class="drawer-section"><h3>Provenance</h3>${detailRows([["Source", environment.source], ["Delivery", gateway ? "Available OSS · fixture" : "In review · PR #46"], ["Evidence state", stateLabel(evidenceState)], ["Evidence captured", formatTimestamp(evidenceAt)], ["Fixture refreshed", formatTimestamp(environmentSnapshot.refreshedAt)]])}</section>
+    <section class="drawer-section"><h3>${gateway ? "Gateway inventory" : "Observer inventory"}</h3>${detailRows([...countRows, ...runtimeRows])}</section>
+    ${gateway ? '<div class="drawer-copy"><strong>Probe boundary</strong><p>Healthy describes only the captured fixture probe. It is not a current or continuous health claim.</p></div>' : '<div class="drawer-copy"><strong>Observer boundary</strong><p>Reporting means a recent event; Quiet means older evidence; Enrolled means inventory without recent event evidence. None is a connection state.</p></div>'}
+    <section class="drawer-section"><h3>Privacy boundary</h3><div class="drawer-copy compact"><p>Native observer summaries never contain prompts, messages, arguments, outputs, commands, paths, files, environment values, or credentials.</p></div></section>`,
+  );
+}
+
+function openOnboardingEvidence(id) {
+  const evidence = onboardingEvidence.find((item) => item.id === id); if (!evidence) return;
+  const evidenceState = deriveObserverEvidenceState(evidence, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs);
+  const evidenceAt = evidenceState === "discovered" ? evidence.discoveredAt : evidence.lastEventAt;
+  openDrawer(
+    evidence.name,
+    `${evidence.runtime} · onboarding evidence fixture`,
+    `<div class="drawer-statuses">${status("In review · PR #46", "review")}${status(stateLabel(evidenceState), evidenceState)}</div>
+    <div class="read-only-banner"><strong>Evidence, not connectivity</strong><span>No enrollment, pairing, or observer mutation occurs here.</span></div>
+    <section class="drawer-section"><h3>Onboarding evidence</h3>${detailRows([["State", stateLabel(evidenceState)], ["Meaning", observerEvidenceLabel(evidence, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)], ["Environment", evidence.environment], ["Source", evidence.source], ["Evidence timestamp", evidenceAt ? formatTimestamp(evidenceAt) : "No recent event evidence"], ["Fixture refreshed", formatTimestamp(environmentSnapshot.refreshedAt)]])}</section>
+    <div class="drawer-copy"><strong>State contract</strong><p>Reporting is an event within five minutes of the fixed fixture clock. Quiet is older event evidence. Enrolled is inventory without a recent event. Discovered is a candidate not enrolled.</p><small>These states never prove a persistent connection or disconnection.</small></div>
+    <section class="drawer-section"><h3>Privacy boundary</h3><div class="drawer-copy compact"><p>Metadata summaries only. Never prompts, messages, arguments, outputs, commands, paths, files, environment values, or credentials. No pairing token or credential field is present.</p></div></section>`,
+  );
 }
 
 function openInvocation(id) {
@@ -392,8 +560,9 @@ function openPrivacy() {
 
 function openConcept(action) {
   const copy = {
-    "add-agent": ["Agent catalog", "Register an agent", "The API supports catalog registration today. This static admin preview will not write to Gateway."],
-    connect: ["Environments", "Connect an environment", "Local discovery and observe-only enrollment are in PR #46. Human-approved remote pairing is planned."],
+    "add-agent": ["Agent catalog", "Register an agent", "The Gateway API supports tenant-scoped catalog registration. This fixture preview accepts no configuration or credential input and will not write to Gateway."],
+    "edit-agent": ["Agent catalog", "Edit agent configuration", "The Gateway API supports catalog updates. This read-only fixture does not change routing, suspension, rates, credentials, pricing, or any other configuration."],
+    connect: ["Environments", "Review environment concept", "Local discovery and observe-only enrollment are in review in PR #46. Remote pairing and missions are planned; this fixture performs neither."],
     "add-credential": ["Credentials", "Store a credential", "The API accepts managed secrets or external vault references. This preview never accepts or stores secret material."],
     "new-product": ["Product direction", "Create an agent product", "Customer portals, plan management and hosted billing are product direction, not shipped Gateway capabilities."],
     "product-preview": ["Product direction", "Customer portal concept", "A future portal will expose capabilities, documentation, access and optional payment under the operator’s domain."],
@@ -401,7 +570,8 @@ function openConcept(action) {
     "edit-policy": ["Policies", "Edit policy document", "Gateway supports replacing the tenant policy today. This preview does not mutate a live policy."],
     simulate: ["Policies", "Simulate a request", "A safe policy simulator is a useful admin capability, but it is not currently exposed by the Gateway API."],
   }[action];
-  openModal(copy[0], copy[1], `<p class="modal-lead">${copy[2]}</p><div class="concept-form"><label>Name or objective<input placeholder="Preview only" disabled></label><button class="button primary" disabled>Not connected</button></div>`);
+  if (!copy) return;
+  openModal(copy[0], copy[1], `<p class="modal-lead">${copy[2]}</p><div class="availability-note"><strong>Preview only.</strong> No mutation, request, credential input, or browser storage write occurred.</div>`);
 }
 
 function openDrawer(title, subtitle, body) {
@@ -409,7 +579,17 @@ function openDrawer(title, subtitle, body) {
   modalRoot.innerHTML = `<div class="drawer-backdrop" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header><div><p class="kicker">Detail</p><h2 id="drawer-title">${title}</h2><p>${subtitle}</p></div><button class="close-button" data-close aria-label="Close">×</button></header><div class="drawer-body">${body}</div></aside>`;
   bindOverlay();
   modalRoot.querySelector(".close-button").focus();
-  modalRoot.querySelectorAll("[data-drawer-action]").forEach((button) => button.addEventListener("click", () => { closeOverlay(); if (button.dataset.drawerAction === "invoke") render("invocations"); else openConcept("add-agent"); }));
+  modalRoot.querySelectorAll("[data-drawer-action]").forEach((button) => button.addEventListener("click", () => {
+    const action = button.dataset.drawerAction;
+    const agentName = button.dataset.agentName;
+    closeOverlay();
+    if (action === "agent-invocations") {
+      invocationFilters = { ...defaultInvocationFilters, agent: agentName };
+      render("invocations");
+      return;
+    }
+    if (action === "agent-edit") openConcept("edit-agent");
+  }));
 }
 
 function openModal(kicker, title, body) {
