@@ -22,6 +22,12 @@
 | `ZERKER_OIDC_USER_CLAIM` | No | `sub` | JWT claim carrying the acting user's subject. `sub` is the OIDC standard. |
 | `ZERKER_OIDC_SCOPE_CLAIM` | No | `scope` | JWT claim carrying the token's OAuth scopes (a space-separated string or a JSON array). Leave empty to disable scope extraction. `scp` is common on Microsoft/Auth0. |
 
+### Action authorization
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `ZERKER_REASON_BINARY` | No | — | Path or executable name for the Zerker Reason CLI. When set, MCP tools/call requests must use the transactional exact-call authorization envelope, and MCP streaming is rejected; startup fails if the executable cannot be resolved. Each verification is capped at 1 MiB input, 64 KiB output, and two seconds. When unset, Reason enforcement is disabled. |
+
 ### Secrets & KMS
 
 | Variable | Required | Default | Description |

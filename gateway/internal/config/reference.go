@@ -39,14 +39,15 @@ type Var struct {
 
 // Group names, in the order they render in the reference.
 const (
-	groupServer  = "Server"
-	groupStorage = "Storage"
-	groupAuth    = "Authentication (OIDC)"
-	groupSecrets = "Secrets & KMS" //nolint:gosec // G101 false positive: a UI section label, not a credential value
+	groupServer        = "Server"
+	groupStorage       = "Storage"
+	groupAuth          = "Authentication (OIDC)"
+	groupAuthorization = "Action authorization"
+	groupSecrets       = "Secrets & KMS" //nolint:gosec // G101 false positive: a UI section label, not a credential value
 )
 
 // Groups is the render order for the reference's sections.
-var Groups = []string{groupServer, groupStorage, groupAuth, groupSecrets}
+var Groups = []string{groupServer, groupStorage, groupAuth, groupAuthorization, groupSecrets}
 
 // Reference is the canonical list of environment variables the gateway honors.
 // It reflects existing behavior only; no setting is invented here.
@@ -101,6 +102,15 @@ var Reference = []Var{
 		HasDefault: true,
 		Description: "JWT claim carrying the token's OAuth scopes (a space-separated string " +
 			"or a JSON array). Leave empty to disable scope extraction. `scp` is common on Microsoft/Auth0.",
+	},
+	{
+		Name:  "ZERKER_REASON_BINARY",
+		Group: groupAuthorization,
+		Description: "Path or executable name for the Zerker Reason CLI. When set, MCP tools/call requests " +
+			"must use the transactional exact-call authorization envelope, and MCP streaming is rejected; " +
+			"startup fails if the executable cannot be resolved. Each verification is capped at 1 MiB input, " +
+			"64 KiB output, and two seconds. " +
+			"When unset, Reason enforcement is disabled.",
 	},
 	{
 		Name:  "ZERKER_KMS_KEY",

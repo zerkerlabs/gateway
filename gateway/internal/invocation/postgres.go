@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/zerkerlabs/gateway/gateway/internal/resource"
@@ -31,6 +32,7 @@ const selectCols = `id, tenant_id, agent_id, mode, status,
 	upstream_status, latency_ms, req_size, resp_size, req_body, resp_body,
 	ttft_ms, error_class, model, mcp_method, mcp_tool,
 	payment_network, payment_asset, payment_amount, payment_payer, payment_nonce,
+	reason_request_digest, reasoning_result_digest,
 	settlement_status, settlement_tx_hash, settled_amount, operator_amount,
 	facilitator_fee, settlement_attempts, settlement_reason, settled_at`
 
@@ -43,34 +45,36 @@ type rowScanner interface {
 // scanInvocation reads one row into an Invocation.
 func scanInvocation(row rowScanner) (*Invocation, error) {
 	var (
-		inv                Invocation
-		mode               string
-		status             string
-		completedAt        *time.Time
-		upstreamStatus     *int
-		latencyMS          *int64
-		reqSize            *int64
-		respSize           *int64
-		reqBody            []byte
-		respBody           []byte
-		ttftMS             *int64
-		errorClass         *string
-		model              *string
-		mcpMethod          *string
-		mcpTool            *string
-		paymentNetwork     *string
-		paymentAsset       *string
-		paymentAmount      *string
-		paymentPayer       *string
-		paymentNonce       *string
-		settlementStatus   *string
-		settlementTxHash   *string
-		settledAmount      *string
-		operatorAmount     *string
-		facilitatorFee     *string
-		settlementAttempts *int
-		settlementReason   *string
-		settledAt          *time.Time
+		inv                   Invocation
+		mode                  string
+		status                string
+		completedAt           *time.Time
+		upstreamStatus        *int
+		latencyMS             *int64
+		reqSize               *int64
+		respSize              *int64
+		reqBody               []byte
+		respBody              []byte
+		ttftMS                *int64
+		errorClass            *string
+		model                 *string
+		mcpMethod             *string
+		mcpTool               *string
+		paymentNetwork        *string
+		paymentAsset          *string
+		paymentAmount         *string
+		paymentPayer          *string
+		paymentNonce          *string
+		reasonRequestDigest   *string
+		reasoningResultDigest *string
+		settlementStatus      *string
+		settlementTxHash      *string
+		settledAmount         *string
+		operatorAmount        *string
+		facilitatorFee        *string
+		settlementAttempts    *int
+		settlementReason      *string
+		settledAt             *time.Time
 	)
 	if err := row.Scan(
 		&inv.ID, &inv.TenantID, &inv.AgentID, &mode, &status,
@@ -78,6 +82,7 @@ func scanInvocation(row rowScanner) (*Invocation, error) {
 		&upstreamStatus, &latencyMS, &reqSize, &respSize, &reqBody, &respBody,
 		&ttftMS, &errorClass, &model, &mcpMethod, &mcpTool,
 		&paymentNetwork, &paymentAsset, &paymentAmount, &paymentPayer, &paymentNonce,
+		&reasonRequestDigest, &reasoningResultDigest,
 		&settlementStatus, &settlementTxHash, &settledAmount, &operatorAmount,
 		&facilitatorFee, &settlementAttempts, &settlementReason, &settledAt,
 	); err != nil {
@@ -105,6 +110,8 @@ func scanInvocation(row rowScanner) (*Invocation, error) {
 	inv.PaymentAmount = paymentAmount
 	inv.PaymentPayer = paymentPayer
 	inv.PaymentNonce = paymentNonce
+	inv.ReasonRequestDigest = reasonRequestDigest
+	inv.ReasoningResultDigest = reasoningResultDigest
 	if settlementStatus != nil {
 		ss := SettlementStatus(*settlementStatus)
 		inv.SettlementStatus = &ss
@@ -144,21 +151,27 @@ func (s *PostgresStore) Create(ctx context.Context, tenantID string, inv *Invoca
 			(id, tenant_id, agent_id, mode, status, req_size, req_body,
 			 ttft_ms, error_class, model, mcp_method, mcp_tool,
 			 payment_network, payment_asset, payment_amount, payment_payer, payment_nonce,
+			 reason_request_digest, reasoning_result_digest,
 			 settlement_status, settlement_tx_hash, settled_amount, operator_amount,
 			 facilitator_fee, settlement_attempts, settlement_reason, settled_at,
 			 created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-		        $18, $19, $20, $21, $22, $23, $24, $25, NOW(), NOW())
+		        $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, NOW(), NOW())
 		RETURNING `+selectCols,
 		id, tenantID, inv.AgentID, string(inv.Mode), string(inv.Status), inv.RequestSize, inv.RequestBody,
 		inv.TTFTMS, errorClassStr, inv.Model, inv.MCPMethod, inv.MCPTool,
 		inv.PaymentNetwork, inv.PaymentAsset, inv.PaymentAmount, inv.PaymentPayer, inv.PaymentNonce,
+		inv.ReasonRequestDigest, inv.ReasoningResultDigest,
 		settlementStatusStr, inv.SettlementTxHash, inv.SettledAmount, inv.OperatorAmount,
 		inv.FacilitatorFee, inv.SettlementAttempts, inv.SettlementReason, inv.SettledAt,
 	)
 
 	got, err := scanInvocation(row)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "invocations_tenant_reason_request_digest_unique" {
+			return ErrReasonAuthorizationReplay
+		}
 		return fmt.Errorf("create invocation: %w", err)
 	}
 	*inv = *got
@@ -180,6 +193,19 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (*Invocati
 		return nil, fmt.Errorf("get invocation: %w", err)
 	}
 	return inv, nil
+}
+
+// ReasonAuthorizationUsed implements Store.
+func (s *PostgresStore) ReasonAuthorizationUsed(ctx context.Context, tenantID, requestDigest string) (bool, error) {
+	var used bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM invocations
+			WHERE tenant_id=$1 AND reason_request_digest=$2
+		)`, tenantID, requestDigest).Scan(&used); err != nil {
+		return false, fmt.Errorf("check Reason authorization replay: %w", err)
+	}
+	return used, nil
 }
 
 // List implements Store.

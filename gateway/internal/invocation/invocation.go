@@ -43,6 +43,10 @@ const (
 // but not yours" — both cases return this error (invariant #2, AGENTS.md).
 var ErrNotFound = errors.New("invocation not found")
 
+// ErrReasonAuthorizationReplay is returned when the tenant has already created
+// an invocation for the same independently verified Reason request digest.
+var ErrReasonAuthorizationReplay = errors.New("reason authorization already used")
+
 // SettlementStatus is the lifecycle state of an invocation's settlement
 // sub-record (spec 0006). pending is included even though v1 settlement is
 // synchronous, so the later async orchestration flip needs no contract change
@@ -108,6 +112,12 @@ type Invocation struct {
 	PaymentAmount  *string     // x402 payment amount, smallest unit, as TEXT; nil for unpriced routes (spec 0005)
 	PaymentPayer   *string     // payer address from the verified x402 authorization; nil for unpriced routes (spec 0005)
 	PaymentNonce   *string     // x402 authorization nonce (best-effort replay tracking); nil for unpriced routes (spec 0005)
+
+	// Reason commitments are set only for independently verified, exact-match
+	// MCP tools/call envelopes. ReasonRequestDigest is tenant-unique and acts as
+	// the durable one-shot replay reservation.
+	ReasonRequestDigest   *string
+	ReasoningResultDigest *string
 
 	// Settlement sub-record (spec 0006) — the canonical receipt. All nil for
 	// unpriced/gate-only routes and until settle-then-forward orchestration
@@ -187,6 +197,12 @@ type Store interface {
 	// Get fetches one invocation by ID. Returns ErrNotFound if the ID does not
 	// exist or belongs to a different tenant.
 	Get(ctx context.Context, tenantID, id string) (*Invocation, error)
+
+	// ReasonAuthorizationUsed reports whether tenantID has already created an
+	// invocation for requestDigest. The unique Create constraint remains the
+	// authoritative concurrent replay guard; this preflight prevents a known
+	// replay from reaching policy webhooks or x402 first.
+	ReasonAuthorizationUsed(ctx context.Context, tenantID, requestDigest string) (bool, error)
 
 	// List returns invocations for agentID within tenantID, ordered by
 	// created_at descending (most recent first). page is 1-based; perPage is the

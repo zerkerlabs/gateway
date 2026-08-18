@@ -38,6 +38,14 @@ func (s *MemoryStore) Create(ctx context.Context, tenantID string, inv *Invocati
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if inv.ReasonRequestDigest != nil {
+		for _, existing := range s.records[tenantID] {
+			if existing.ReasonRequestDigest != nil && *existing.ReasonRequestDigest == *inv.ReasonRequestDigest {
+				return ErrReasonAuthorizationReplay
+			}
+		}
+	}
+
 	now := time.Now().UTC()
 	inv.ID = id
 	inv.TenantID = tenantID
@@ -62,6 +70,21 @@ func (s *MemoryStore) Get(ctx context.Context, tenantID, id string) (*Invocation
 		return nil, err
 	}
 	return cloneInvocation(rec), nil
+}
+
+// ReasonAuthorizationUsed implements Store.
+func (s *MemoryStore) ReasonAuthorizationUsed(ctx context.Context, tenantID, requestDigest string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, existing := range s.records[tenantID] {
+		if existing.ReasonRequestDigest != nil && *existing.ReasonRequestDigest == requestDigest {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // List implements Store.
@@ -406,6 +429,14 @@ func cloneInvocation(inv *Invocation) *Invocation {
 	if inv.PaymentNonce != nil {
 		pn := *inv.PaymentNonce
 		c.PaymentNonce = &pn
+	}
+	if inv.ReasonRequestDigest != nil {
+		rd := *inv.ReasonRequestDigest
+		c.ReasonRequestDigest = &rd
+	}
+	if inv.ReasoningResultDigest != nil {
+		rd := *inv.ReasoningResultDigest
+		c.ReasoningResultDigest = &rd
 	}
 	if inv.SettlementStatus != nil {
 		ss := *inv.SettlementStatus

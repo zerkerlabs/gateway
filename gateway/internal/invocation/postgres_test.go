@@ -77,6 +77,49 @@ func pgMustCreate(t *testing.T, s *invocation.PostgresStore, tenantID string, in
 
 // ------------------------------------------------------------------ Create ---
 
+func TestPG_Create_ReasonDigestRejectsReplay(t *testing.T) {
+	s := newPGStore(t)
+	digest := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	resultDigest := "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	used, err := s.ReasonAuthorizationUsed(context.Background(), tenantA, digest)
+	if err != nil || used {
+		t.Fatalf("preflight before create = %v, %v; want false, nil", used, err)
+	}
+
+	first := &invocation.Invocation{
+		AgentID:               agentID,
+		Mode:                  invocation.ModeTransactional,
+		Status:                invocation.StatusPending,
+		ReasonRequestDigest:   &digest,
+		ReasoningResultDigest: &resultDigest,
+	}
+	pgMustCreate(t, s, tenantA, first)
+	used, err = s.ReasonAuthorizationUsed(context.Background(), tenantA, digest)
+	if err != nil || !used {
+		t.Fatalf("preflight after create = %v, %v; want true, nil", used, err)
+	}
+
+	replay := &invocation.Invocation{
+		AgentID:               agentID,
+		Mode:                  invocation.ModeTransactional,
+		Status:                invocation.StatusPending,
+		ReasonRequestDigest:   &digest,
+		ReasoningResultDigest: &resultDigest,
+	}
+	if err := s.Create(context.Background(), tenantA, replay); !errors.Is(err, invocation.ErrReasonAuthorizationReplay) {
+		t.Fatalf("replay error = %v, want ErrReasonAuthorizationReplay", err)
+	}
+
+	stored, err := s.Get(context.Background(), tenantA, first.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if stored.ReasonRequestDigest == nil || *stored.ReasonRequestDigest != digest ||
+		stored.ReasoningResultDigest == nil || *stored.ReasoningResultDigest != resultDigest {
+		t.Fatalf("stored Reason commitments = %v %v", stored.ReasonRequestDigest, stored.ReasoningResultDigest)
+	}
+}
+
 func TestPG_Create_AssignsServerFields(t *testing.T) {
 	s := newPGStore(t)
 	inv := &invocation.Invocation{
