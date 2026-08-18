@@ -24,6 +24,25 @@ Vite serves the preview at `http://127.0.0.1:5173` by default.
 npm run check
 ```
 
+## Bounded improvement loop
+
+The repository includes a resumable Pi RPC campaign runner. It plans one safe backlog slice, implements it, runs deterministic checks, performs browser QA and rubric review, then creates a local checkpoint commit.
+
+```bash
+npm run improve:check
+npm run improve -- --cycles 6 --minutes 240 --repairs 2 --max-cost 25
+npm run improve:status
+npm run improve:stop
+```
+
+The durable contract lives in `PRODUCT_GOAL.md`, `BACKLOG.md`, and `UX_RUBRIC.md`. Runtime state and logs stay under ignored `.loop/`. The runner is restricted to `console/`, cancels extension dialogs, stops on out-of-scope changes or repeated verification failures, and never pushes, merges, deploys, or accesses production.
+
+For an unattended terminal on macOS, keep the process awake:
+
+```bash
+caffeinate -dimsu npm run improve -- --cycles 6 --minutes 240 --max-cost 25
+```
+
 The console has `noindex,nofollow` metadata. Delivery states are part of the product contract:
 
 - **Available** for current OSS Gateway and facilitator capabilities;

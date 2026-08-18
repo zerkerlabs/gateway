@@ -3,11 +3,15 @@
   "version": "0.0.0",
   "description": "Static product preview of the Zerker Gateway operator console.",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test && node scripts/improve-loop.mjs --self-test",
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "check": "npm run test && npm run build"
+    "check": "npm run test && npm run build",
+    "improve": "node scripts/improve-loop.mjs",
+    "improve:status": "node scripts/improve-loop.mjs --status",
+    "improve:stop": "node scripts/improve-loop.mjs --stop",
+    "improve:check": "node --check scripts/improve-loop.mjs && node scripts/improve-loop.mjs --dry-run"
   },
   "devDependencies": {
     "vite": "^8.2.1"
