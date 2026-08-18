@@ -4,77 +4,76 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex,nofollow" />
-    <meta name="theme-color" content="#fafaf8" />
-    <meta name="description" content="A static product preview of the Zerker Gateway operator console." />
-    <title>Zerker Gateway — Console preview</title>
+    <meta name="theme-color" content="#f8f8f5" />
+    <meta name="description" content="A fixture-backed product preview of the Zerker Gateway administration console." />
+    <title>Zerker Gateway — Admin preview</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@300..600&display=swap" rel="stylesheet" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <div class="ambient" aria-hidden="true"></div>
     <div id="app" class="app-shell">
       <aside class="sidebar" aria-label="Primary navigation">
         <div class="brand-row">
-          <a class="brand" href="#today" data-nav="today" aria-label="Zerker Gateway home">
-            <span class="brand-mark" aria-hidden="true">Z</span>
-            <span>ZERKER</span>
-          </a>
+          <a class="brand" href="#overview" data-nav="overview" aria-label="Zerker Gateway overview"><span class="brand-glyph" aria-hidden="true">Z</span><span>ZERKER</span></a>
           <span class="product-name">Gateway</span>
         </div>
 
         <nav class="side-nav">
-          <button class="nav-item active" data-view="today" aria-current="page">
-            <span class="nav-icon" aria-hidden="true">⌂</span><span>Today</span>
-          </button>
-          <button class="nav-item" data-view="agents">
-            <span class="nav-icon" aria-hidden="true">◎</span><span>Agents</span><span class="nav-count">6</span>
-          </button>
-          <button class="nav-item" data-view="attention">
-            <span class="nav-icon" aria-hidden="true">◇</span><span>Needs attention</span><span class="attention-dot" aria-label="1 item"></span>
-          </button>
-          <button class="nav-item" data-view="environments">
-            <span class="nav-icon" aria-hidden="true">⌘</span><span>Environments</span>
-          </button>
-          <button class="nav-item" data-view="privacy">
-            <span class="nav-icon" aria-hidden="true">◒</span><span>Privacy</span>
-          </button>
+          <div class="nav-group">
+            <p>Operate</p>
+            <button class="nav-item active" data-view="overview"><span class="nav-icon">⌂</span><span>Overview</span></button>
+            <button class="nav-item" data-view="attention"><span class="nav-icon">◇</span><span>Needs attention</span><span class="nav-badge">3</span></button>
+            <button class="nav-item" data-view="activity"><span class="nav-icon">↯</span><span>Agent activity</span><span class="status-pin review" title="In review"></span></button>
+          </div>
+          <div class="nav-group">
+            <p>Traffic</p>
+            <button class="nav-item" data-view="invocations"><span class="nav-icon">⇄</span><span>Invocations</span></button>
+            <button class="nav-item" data-view="analytics"><span class="nav-icon">⌁</span><span>Analytics</span></button>
+          </div>
+          <div class="nav-group">
+            <p>Control</p>
+            <button class="nav-item" data-view="agents"><span class="nav-icon">◎</span><span>Agent catalog</span><span class="nav-badge">6</span></button>
+            <button class="nav-item" data-view="environments"><span class="nav-icon">⌘</span><span>Environments</span></button>
+            <button class="nav-item" data-view="policies"><span class="nav-icon">⊘</span><span>Policies</span></button>
+            <button class="nav-item" data-view="credentials"><span class="nav-icon">⌑</span><span>Credentials</span></button>
+          </div>
+          <div class="nav-group">
+            <p>Revenue</p>
+            <button class="nav-item" data-view="products"><span class="nav-icon">▣</span><span>Products & portals</span><span class="status-pin planned" title="Planned"></span></button>
+            <button class="nav-item" data-view="payments"><span class="nav-icon">◈</span><span>Payments</span></button>
+          </div>
+          <div class="nav-group">
+            <p>System</p>
+            <button class="nav-item" data-view="stack"><span class="nav-icon">✣</span><span>Stack & health</span></button>
+          </div>
         </nav>
 
         <div class="sidebar-bottom">
-          <button class="workspace-switcher" aria-label="Switch workspace">
-            <span class="workspace-avatar">Z</span>
-            <span class="workspace-copy"><strong>Zerker Labs</strong><small>Dogfood workspace</small></span>
-            <span aria-hidden="true">⌄</span>
-          </button>
-          <div class="preview-notice"><span></span> Preview data</div>
+          <div class="preview-notice"><span></span><div><strong>Preview data</strong><small>Not connected to Gateway</small></div></div>
+          <button class="workspace-switcher" aria-label="Switch workspace"><span class="workspace-avatar">Z</span><span><strong>Zerker Labs</strong><small>Dogfood workspace</small></span><span>⌄</span></button>
         </div>
       </aside>
 
       <div class="workspace">
         <header class="topbar">
-          <div class="mobile-brand"><span class="brand-mark">Z</span><strong>ZERKER</strong><span>Gateway</span></div>
-          <button class="search-button" id="open-search" aria-label="Search agents and environments">
-            <span aria-hidden="true">⌕</span><span>Find anything</span><kbd>⌘ K</kbd>
-          </button>
-          <div class="top-actions">
-            <button class="icon-button" aria-label="Notifications"><span aria-hidden="true">◌</span><span class="notification-dot"></span></button>
-            <button class="avatar-button" aria-label="Open account menu">AZ</button>
-          </div>
+          <div class="mobile-brand"><span class="brand-glyph">Z</span><strong>ZERKER</strong><span>Gateway</span></div>
+          <button class="search-button" id="open-search" aria-label="Search Gateway"><span>⌕</span><span>Search Gateway</span><kbd>⌘ K</kbd></button>
+          <div class="top-context"><span class="environment-dot"></span><span>Dogfood</span><span class="separator">/</span><strong>All environments</strong></div>
+          <div class="top-actions"><a class="docs-link" href="https://docs.zerker.ai" target="_blank" rel="noreferrer">Docs</a><button class="avatar-button" aria-label="Open account menu">AZ</button></div>
         </header>
-
         <main id="main-content" tabindex="-1"></main>
       </div>
 
       <nav class="mobile-nav" aria-label="Mobile navigation">
-        <button class="active" data-view="today"><span>⌂</span>Today</button>
+        <button class="active" data-view="overview"><span>⌂</span>Overview</button>
+        <button data-view="invocations"><span>⇄</span>Traffic</button>
         <button data-view="agents"><span>◎</span>Agents</button>
-        <button data-view="attention"><span>◇</span>Attention</button>
-        <button data-view="environments"><span>⌘</span>Places</button>
+        <button data-view="stack"><span>✣</span>Stack</button>
+        <button id="mobile-menu"><span>≡</span>More</button>
       </nav>
     </div>
-
     <div id="modal-root"></div>
     <div id="toast-region" class="toast-region" aria-live="polite"></div>
     <script type="module" src="/src/app.js"></script>

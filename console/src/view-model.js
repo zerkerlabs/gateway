@@ -1,8 +1,9 @@
 export const stateLabels = {
+  active: "Active",
+  suspended: "Suspended",
+  setup: "Finish setup",
   reporting: "Reporting",
-  quiet: "Quiet",
-  enrolled: "Enrolled",
-  not_enrolled: "Finish setup",
+  healthy: "Healthy",
 };
 
 export function stateLabel(state) {
@@ -13,24 +14,37 @@ export function summarizeAgents(agents) {
   return agents.reduce(
     (summary, agent) => {
       summary.total += 1;
-      if (agent.state === "reporting") summary.reporting += 1;
-      if (agent.state === "quiet") summary.quiet += 1;
-      if (agent.state === "not_enrolled") summary.needsAttention += 1;
+      if (agent.state === "active") summary.active += 1;
+      if (agent.state === "suspended") summary.suspended += 1;
+      if (agent.state === "setup") summary.needsAttention += 1;
+      summary.calls += agent.calls;
       return summary;
     },
-    { total: 0, reporting: 0, quiet: 0, needsAttention: 0 },
+    { total: 0, active: 0, suspended: 0, needsAttention: 0, calls: 0 },
   );
 }
 
 export function filterAgents(agents, query = "", state = "all") {
   const normalized = query.trim().toLocaleLowerCase();
   return agents.filter((agent) => {
-    const matchesQuery = !normalized || `${agent.name} ${agent.location}`.toLocaleLowerCase().includes(normalized);
+    const haystack = `${agent.name} ${agent.runtime} ${agent.environment} ${agent.protocol}`.toLocaleLowerCase();
+    const matchesQuery = !normalized || haystack.includes(normalized);
     const matchesState = state === "all" || agent.state === state;
     return matchesQuery && matchesState;
   });
 }
 
 export function formatCount(value, singular, plural = `${singular}s`) {
-  return `${value} ${value === 1 ? singular : plural}`;
+  return `${value.toLocaleString("en-US")} ${value === 1 ? singular : plural}`;
+}
+
+export function capabilityCounts(stack) {
+  return stack.reduce(
+    (counts, capability) => {
+      counts.total += 1;
+      counts[capability.tone] = (counts[capability.tone] ?? 0) + 1;
+      return counts;
+    },
+    { total: 0 },
+  );
 }
