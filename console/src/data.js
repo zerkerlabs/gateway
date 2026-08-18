@@ -24,6 +24,15 @@ export const overviewScenarios = [
   { id: "error", label: "Error", phase: "error", completeness: "unknown", recordCount: 0, hasUsableData: false, evaluatedAt: "2026-08-18T09:12:00Z", staleAfterMs: 15 * 60 * 1000, availableSources: [], publicMessage: "The fixture snapshot could not be prepared. No Gateway request was made." },
 ];
 
+export const trafficSnapshot = {
+  workspace: "Zerker Labs",
+  environment: "All environments",
+  source: "Invocation fixture v1",
+  refreshedAt: "2026-08-18T09:12:00Z",
+  evaluatedAt: "2026-08-18T09:12:00Z",
+  defaultRange: "24h",
+};
+
 export const agents = [
   { id: "agt_support", name: "Support agent", runtime: "Claude Code", protocol: "http", state: "active", evidence: "Reporting 2m ago", environment: "Alex’s MacBook Pro", calls: 486, failures: 4, success: "99.2%", p95: "1.4s", credential: "support-production", price: "Free", rate: "120/min", receipt: "Off" },
   { id: "agt_research", name: "Research agent", runtime: "Hermes", protocol: "mcp", state: "active", evidence: "Quiet · 18m ago", environment: "Stefan’s Mac mini", calls: 214, failures: 4, success: "98.1%", p95: "2.8s", credential: "research-vault", price: "$0.25", rate: "60/min", receipt: "Integration path" },
@@ -34,11 +43,11 @@ export const agents = [
 ];
 
 export const invocations = [
-  { id: "inv_7HF3", agent: "Support agent", mode: "stream", method: "HTTP", result: "succeeded", latency: "1.2s", size: "24 KB", policy: "allow", payment: "—", time: "Just now" },
-  { id: "inv_7HF2", agent: "Release reviewer", mode: "transaction", method: "tools/call · check_release", result: "succeeded", latency: "3.1s", size: "18 KB", policy: "allow", payment: "—", time: "1m" },
-  { id: "inv_7HF1", agent: "Research agent", mode: "stream", method: "tools/call · research.report", result: "succeeded", latency: "2.6s", size: "41 KB", policy: "allow", payment: "$0.25", time: "3m" },
-  { id: "inv_7HE9", agent: "Docs search", mode: "transaction", method: "tools/call · search_docs", result: "succeeded", latency: "680ms", size: "9 KB", policy: "warn", payment: "$0.05", time: "4m" },
-  { id: "inv_7HE8", agent: "Code generator", mode: "transaction", method: "HTTP", result: "failed", latency: "10.0s", size: "3 KB", policy: "allow", payment: "—", time: "9m" },
+  { id: "inv_7HF3", agent: "Support agent", mode: "stream", method: "HTTP", result: "succeeded", occurredAt: "2026-08-18T09:12:00Z", completedAt: "2026-08-18T09:12:01.200Z", latency: "1.2s", latencyMs: 1200, size: "24 KB", policy: "allow", paymentState: "not_required", paymentAmountCents: null, paymentCurrency: "USD", time: "Just now" },
+  { id: "inv_7HF2", agent: "Release reviewer", mode: "transaction", method: "tools/call · check_release", result: "succeeded", occurredAt: "2026-08-18T09:11:00Z", completedAt: "2026-08-18T09:11:03.100Z", latency: "3.1s", latencyMs: 3100, size: "18 KB", policy: "allow", paymentState: "not_required", paymentAmountCents: null, paymentCurrency: "USD", time: "1m" },
+  { id: "inv_7HF1", agent: "Research agent", mode: "stream", method: "tools/call · research.report", result: "succeeded", occurredAt: "2026-08-18T09:09:00Z", completedAt: "2026-08-18T09:09:02.600Z", latency: "2.6s", latencyMs: 2600, size: "41 KB", policy: "allow", paymentState: "verified", paymentAmountCents: 25, paymentCurrency: "USD", paymentRail: "x402 · USDC on Base", time: "3m" },
+  { id: "inv_7HE9", agent: "Docs search", mode: "transaction", method: "tools/call · search_docs", result: "succeeded", occurredAt: "2026-08-18T09:08:00Z", completedAt: "2026-08-18T09:08:00.680Z", latency: "680ms", latencyMs: 680, size: "9 KB", policy: "warn", paymentState: "verified", paymentAmountCents: 5, paymentCurrency: "USD", paymentRail: "x402 · USDC on Base", time: "4m" },
+  { id: "inv_7HE8", agent: "Code generator", mode: "transaction", method: "HTTP", result: "failed", occurredAt: "2026-08-18T09:03:00Z", completedAt: "2026-08-18T09:03:10.000Z", latency: "10.0s", latencyMs: 10000, size: "3 KB", policy: "allow", paymentState: "not_required", paymentAmountCents: null, paymentCurrency: "USD", time: "9m", failure: { stage: "proxy", class: "upstream_timeout", label: "Upstream timeout", upstreamStatus: null, retryability: null } },
 ];
 
 export const activity = [

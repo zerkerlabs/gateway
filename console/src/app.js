@@ -1,12 +1,13 @@
 import "./styles.css";
-import { activity, agents, attention, credentials, environments, invocations, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, privacy, products, settlements, stack } from "./data.js";
-import { buildOverviewModel, capabilityCounts, filterAgents, formatCount, stateLabel } from "./view-model.js";
+import { activity, agents, attention, credentials, environments, invocations, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, privacy, products, settlements, stack, trafficSnapshot } from "./data.js";
+import { buildInvocationResults, buildOverviewModel, capabilityCounts, defaultInvocationFilters, deriveFailureDiagnosis, deriveInvocationTrace, filterAgents, formatCount, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, stateLabel } from "./view-model.js";
 
 const main = document.querySelector("#main-content");
 const modalRoot = document.querySelector("#modal-root");
 const toastRegion = document.querySelector("#toast-region");
 const stackSummary = capabilityCounts(stack);
 let activeOverviewScenario = "complete";
+let invocationFilters = { ...defaultInvocationFilters };
 let activeView = "overview";
 let previousFocus = null;
 
@@ -151,15 +152,44 @@ function activityView() {
 }
 
 function invocationTable(items) {
-  return `<div class="data-table invocation-table" role="table" aria-label="Invocations"><div class="table-row table-head" role="row"><span>Invocation</span><span>Agent / operation</span><span>Policy</span><span>Result</span><span>Latency</span><span>Payment</span><span></span></div>${items.map((item) => `<button class="table-row" role="row" data-invocation="${item.id}"><span class="mono">${item.id}</span><span><strong>${item.agent}</strong><small>${item.method}</small></span><span>${status(item.policy, item.policy)}</span><span>${status(item.result, item.result)}</span><span>${item.latency}</span><span>${item.payment}</span><span>→</span></button>`).join("")}</div>`;
+  const columns = ["Time", "Invocation", "Agent / operation", "Mode", "Policy", "Result", "Latency", "Payment", ""];
+  return `<div class="invocation-list" role="table" aria-label="Fixture invocations"><div class="invocation-row invocation-head" role="row">${columns.map((column) => `<span role="columnheader">${column}</span>`).join("")}</div>${items.map((item) => `<div class="invocation-row ${item.result}" role="row"><span class="invocation-time" role="cell" data-label="Time"><strong>${invocationTimestampLabel(item.occurredAt)}</strong><small>${invocationRelativeLabel(item.occurredAt, trafficSnapshot.evaluatedAt)}</small></span><span class="mono" role="cell" data-label="Invocation">${item.id}</span><span role="cell" data-label="Agent / operation"><strong>${item.agent}</strong><small>${item.method}</small></span><span role="cell" data-label="Mode">${invocationModeLabel(item.mode)}</span><span role="cell" data-label="Policy">${status(item.policy, item.policy)}</span><span role="cell" data-label="Result">${status(item.result, item.result)}</span><span role="cell" data-label="Latency">${item.latency}</span><span class="payment-state ${item.paymentState}" role="cell" data-label="Payment">${invocationPaymentLabel(item)}</span><span role="cell"><button class="inspect-button" data-invocation="${item.id}" aria-label="Inspect invocation ${item.id}">Inspect →</button></span></div>`).join("")}</div>`;
+}
+
+function trafficRangeLabel(value) {
+  return { "5m": "Last 5 minutes", "1h": "Last hour", "24h": "Last 24 hours" }[value] ?? "Last 24 hours";
+}
+
+function captureBoundary(compact = false) {
+  return `<section class="capture-boundary${compact ? " compact" : ""}" aria-labelledby="${compact ? "drawer-capture-title" : "capture-title"}"><div><p class="kicker">Capture boundary</p><h2 id="${compact ? "drawer-capture-title" : "capture-title"}">Metadata visible. Bodies off.</h2></div><div class="capture-facts"><span><b>Proxy invocations</b>Metadata only</span><span><b>Request / response bodies</b>Off in this fixture · separate Gateway feature</span><span><b>Body reads</b>Require separate authorization</span><span><b>Native agent activity</b>Separate contract · never prompts, messages, arguments, outputs, commands, paths, files, environment values, or credentials</span></div></section>`;
+}
+
+function invocationResultsMarkup(result) {
+  if (!result.rows.length) {
+    return `<div class="traffic-empty"><p class="kicker">Filtered fixture</p><h2>No fixture invocations match</h2><p>Adjust the in-memory filters. This does not mean the Gateway has no tenant traffic or is disconnected.</p><button class="button secondary" id="empty-clear-invocation-filters">Clear filters</button></div>`;
+  }
+  return invocationTable(result.rows);
 }
 
 function invocationsView() {
-  return `<section class="page-enter">
-    ${pageHeader("Traffic · available OSS", "Invocations", "Every transactional and streaming call, tenant-scoped and addressable by ID.", '<button class="button secondary" data-action="export">Export view</button>')}
-    <div class="filter-bar"><input id="invocation-search" type="search" placeholder="Search invocation or agent" aria-label="Search invocations"><select aria-label="Result"><option>All results</option><option>Succeeded</option><option>Failed</option></select><select aria-label="Mode"><option>All modes</option><option>Transactional</option><option>Streaming</option></select><button class="button secondary">Last 24 hours⌄</button></div>
-    <section class="panel">${invocationTable(invocations)}</section>
-    <div class="footnote"><span>Bodies are off by default.</span><span>Body reads require <code>invocations:read_body</code>.</span><span>Windows are tenant-scoped.</span></div>
+  const result = buildInvocationResults(invocations, invocationFilters, trafficSnapshot.evaluatedAt);
+  const agentsInFixture = [...new Set(invocations.map((item) => item.agent))].toSorted();
+  return `<section class="page-enter traffic-page">
+    ${pageHeader("Traffic · available OSS", "Invocations", "Filter tenant-scoped fixture metadata and inspect the exact request path.", '<button class="button secondary" data-action="export">Export view</button>')}
+    <section class="traffic-evidence" aria-label="Traffic fixture context"><div class="traffic-preview"><span class="fixture-dot"></span><span><strong>Preview data</strong><small>Not connected to Gateway</small></span></div><div><span>Workspace</span><strong>${trafficSnapshot.workspace}</strong></div><div><span>Environment</span><strong>${trafficSnapshot.environment}</strong></div><div><span>Source</span><strong>${trafficSnapshot.source}</strong></div><div><span>Refreshed</span><strong>${formatTimestamp(trafficSnapshot.refreshedAt)}</strong></div><div><span>Window</span><strong id="traffic-window-label">${trafficRangeLabel(invocationFilters.timeRange)}</strong></div></section>
+    <section class="traffic-filters" aria-label="Filter fixture invocations">
+      <label class="traffic-search"><span>Search</span><input id="invocation-search" data-invocation-filter="query" type="search" placeholder="ID, agent, or operation" autocomplete="off"></label>
+      <label><span>Result</span><select id="invocation-result" data-invocation-filter="result"><option value="all">All</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option></select></label>
+      <label><span>Mode</span><select id="invocation-mode" data-invocation-filter="mode"><option value="all">All</option><option value="transaction">Transactional</option><option value="stream">Streaming</option></select></label>
+      <label><span>Agent</span><select id="invocation-agent" data-invocation-filter="agent"><option value="all">All</option>${agentsInFixture.map((agent) => `<option value="${agent}">${agent}</option>`).join("")}</select></label>
+      <label><span>Policy</span><select id="invocation-policy" data-invocation-filter="policy"><option value="all">All</option><option value="allow">Allow</option><option value="warn">Warn</option><option value="deny">Deny</option></select></label>
+      <label><span>Payment</span><select id="invocation-payment" data-invocation-filter="payment"><option value="all">All</option><option value="not_required">Not required</option><option value="verified">Verified</option></select></label>
+      <label><span>Time range</span><select id="invocation-time-range" data-invocation-filter="timeRange"><option value="5m">Last 5 minutes</option><option value="1h">Last hour</option><option value="24h">Last 24 hours</option></select></label>
+      <button class="button secondary clear-filters" id="clear-invocation-filters">Clear filters</button>
+    </section>
+    <div class="traffic-results-heading"><p id="invocation-result-count" aria-live="polite"><strong>${result.summary}</strong><small>${result.activeFilters.length ? `${formatCount(result.activeFilters.length, "active filter")}` : "Default fixture view"}</small></p><span>Newest first · fixed fixture clock</span></div>
+    <section class="panel traffic-results" id="invocation-results">${invocationResultsMarkup(result)}</section>
+    ${captureBoundary()}
   </section>`;
 }
 
@@ -272,14 +302,52 @@ function render(view = activeView) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function bindInvocationButtons(scope = main) {
+  scope.querySelectorAll("[data-invocation]").forEach((button) => button.addEventListener("click", () => openInvocation(button.dataset.invocation)));
+}
+
+function refreshInvocationResults() {
+  const container = main.querySelector("#invocation-results");
+  const count = main.querySelector("#invocation-result-count");
+  if (!container || !count) return;
+  const result = buildInvocationResults(invocations, invocationFilters, trafficSnapshot.evaluatedAt);
+  container.innerHTML = invocationResultsMarkup(result);
+  count.innerHTML = `<strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small>`;
+  const windowLabel = main.querySelector("#traffic-window-label");
+  if (windowLabel) windowLabel.textContent = trafficRangeLabel(invocationFilters.timeRange);
+  bindInvocationButtons(container);
+  container.querySelector("#empty-clear-invocation-filters")?.addEventListener("click", () => clearInvocationFilterState(true));
+}
+
+function clearInvocationFilterState(focusSearch = false) {
+  invocationFilters = { ...defaultInvocationFilters };
+  main.querySelectorAll("[data-invocation-filter]").forEach((control) => { control.value = invocationFilters[control.dataset.invocationFilter]; });
+  refreshInvocationResults();
+  (focusSearch ? main.querySelector("#invocation-search") : main.querySelector("#clear-invocation-filters"))?.focus();
+}
+
+function bindInvocationFilters() {
+  const controls = main.querySelectorAll("[data-invocation-filter]");
+  if (!controls.length) return;
+  controls.forEach((control) => {
+    control.value = invocationFilters[control.dataset.invocationFilter];
+    control.addEventListener(control.matches("input") ? "input" : "change", () => {
+      invocationFilters = { ...invocationFilters, [control.dataset.invocationFilter]: control.value };
+      refreshInvocationResults();
+    });
+  });
+  main.querySelector("#clear-invocation-filters")?.addEventListener("click", () => clearInvocationFilterState());
+}
+
 function bindPageEvents() {
   main.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => render(button.dataset.view)));
   main.querySelectorAll("[data-agent]").forEach((button) => button.addEventListener("click", () => openAgent(button.dataset.agent)));
-  main.querySelectorAll("[data-invocation]").forEach((button) => button.addEventListener("click", () => openInvocation(button.dataset.invocation)));
+  bindInvocationButtons();
   main.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
   main.querySelectorAll("[data-stack]").forEach((button) => button.addEventListener("click", () => openStackInfo(button.dataset.stack)));
   const scenario = main.querySelector("#overview-scenario");
   if (scenario) scenario.addEventListener("change", () => { activeOverviewScenario = scenario.value; render("overview"); main.querySelector("#overview-scenario")?.focus(); });
+  bindInvocationFilters();
   const query = main.querySelector("#agent-filter");
   const state = main.querySelector("#agent-state");
   if (query && state) {
@@ -303,7 +371,12 @@ function openAgent(id) {
 
 function openInvocation(id) {
   const item = invocations.find((invocation) => invocation.id === id); if (!item) return;
-  openDrawer(item.id, `${item.agent} · ${item.time} ago`, `${status(item.result, item.result)}<div class="trace"><div class="done"><span>Identity</span><small>OIDC accepted</small></div><div class="${item.policy === "warn" ? "warn" : "done"}"><span>Policy</span><small>${item.policy}</small></div><div class="done"><span>Payment</span><small>${item.payment === "—" ? "not required" : item.payment}</small></div><div class="${item.result === "failed" ? "failed" : "done"}"><span>Proxy</span><small>${item.result}</small></div><div class="done"><span>Record</span><small>captured</small></div></div><h3>Invocation metadata</h3>${detailRows([["Mode", item.mode], ["Operation", item.method], ["Latency", item.latency], ["Payload size", item.size], ["Policy", item.policy], ["Payment", item.payment]])}<div class="privacy-inline">Request and response bodies are not shown in this preview.</div>`);
+  const trace = deriveInvocationTrace(item);
+  const diagnosis = deriveFailureDiagnosis(item);
+  const diagnosisMarkup = diagnosis ? `<section class="failure-diagnosis" aria-labelledby="failure-title"><div><p class="kicker">Failure diagnosis</p><h3 id="failure-title">Failed at ${diagnosis.stage}</h3><p>${diagnosis.classification}</p></div><dl><div><dt>Upstream status</dt><dd>${diagnosis.upstreamStatus}</dd></div><div><dt>Retryability</dt><dd>${diagnosis.retryability}</dd></div></dl><small>No retry was attempted by this fixture.</small></section>` : "";
+  const traceMarkup = `<div class="trace" aria-label="Ordered invocation trace">${trace.map((stage, index) => `<div class="trace-stage ${stage.state}"><span class="trace-order">0${index + 1}</span><span><strong>${stage.label}</strong><small>${stage.detail}</small></span>${status(stage.state.replaceAll("_", " "), stage.state)}</div>`).join("")}</div>`;
+  const paymentEvidence = item.paymentState === "verified" ? `${invocationPaymentLabel(item)} authorization · settlement tracked separately` : invocationPaymentLabel(item);
+  openDrawer(item.id, `${item.agent} · ${invocationRelativeLabel(item.occurredAt, trafficSnapshot.evaluatedAt)}`, `${status(item.result, item.result)}${diagnosisMarkup}<h3>Request path</h3>${traceMarkup}<h3>Invocation metadata</h3>${detailRows([["Occurred", formatTimestamp(item.occurredAt)], ["Completed", formatTimestamp(item.completedAt)], ["Mode", invocationModeLabel(item.mode)], ["Operation", item.method], ["Latency", item.latency], ["Payload size", item.size], ["Policy result", item.policy], ["Payment", paymentEvidence]])}${captureBoundary(true)}`);
 }
 
 function detailRows(rows) { return `<dl class="detail-rows">${rows.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join("")}</dl>`; }

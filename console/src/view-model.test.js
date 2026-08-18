@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agents, attention, invocations, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, stack } from "./data.js";
-import { buildOverviewModel, capabilityCounts, deriveDataState, filterAgents, formatCount, formatCurrency, formatPercent, formatTimestamp, metricValueState, stateLabel, summarizeAgents, summarizeOverview } from "./view-model.js";
+import { agents, attention, invocations, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, stack, trafficSnapshot } from "./data.js";
+import { buildInvocationResults, buildOverviewModel, capabilityCounts, defaultInvocationFilters, deriveDataState, deriveFailureDiagnosis, deriveInvocationTrace, filterAgents, filterInvocations, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, metricValueState, stateLabel, summarizeAgents, summarizeOverview } from "./view-model.js";
 
 test("summarizeAgents keeps catalog states distinct", () => {
   assert.deepEqual(summarizeAgents(agents), { total: 6, active: 4, suspended: 1, needsAttention: 1, calls: 1256, failures: 16 });
@@ -122,4 +122,59 @@ test("stale overview retains values and marks every source and runtime as last-k
   assert.ok(stale.metrics.every((metric) => metric.evidence.freshness === "stale"));
   assert.equal(stale.runtime.label, "Last known healthy · stale");
   assert.match(stale.runtime.detail, /^Last refreshed /);
+});
+
+test("invocation labels keep mode, time, and payment semantics explicit", () => {
+  assert.equal(invocationModeLabel("transaction"), "Transactional");
+  assert.equal(invocationModeLabel("stream"), "Streaming");
+  assert.equal(invocationModeLabel("other"), "Unknown");
+  assert.equal(invocationPaymentLabel(invocations[0]), "Not required");
+  assert.equal(invocationPaymentLabel(invocations[2]), "Verified · $0.25");
+  assert.equal(invocationPaymentLabel({ paymentState: "unknown" }), "Unknown");
+  assert.equal(invocationTimestampLabel("2026-08-18T09:03:00Z"), "18 Aug · 09:03 UTC");
+  assert.equal(invocationRelativeLabel("2026-08-18T09:03:00Z", trafficSnapshot.evaluatedAt), "9m before fixture refresh");
+});
+
+test("invocation filters cover every dimension with AND semantics", () => {
+  const at = trafficSnapshot.evaluatedAt;
+  assert.deepEqual(filterInvocations(invocations, { query: "  code GENERATOR " }, at).map((item) => item.id), ["inv_7HE8"]);
+  assert.deepEqual(filterInvocations(invocations, { query: "check_release" }, at).map((item) => item.id), ["inv_7HF2"]);
+  assert.deepEqual(filterInvocations(invocations, { result: "failed" }, at).map((item) => item.id), ["inv_7HE8"]);
+  assert.deepEqual(filterInvocations(invocations, { mode: "stream" }, at).map((item) => item.id), ["inv_7HF3", "inv_7HF1"]);
+  assert.deepEqual(filterInvocations(invocations, { agent: "Docs search" }, at).map((item) => item.id), ["inv_7HE9"]);
+  assert.deepEqual(filterInvocations(invocations, { policy: "warn" }, at).map((item) => item.id), ["inv_7HE9"]);
+  assert.deepEqual(filterInvocations(invocations, { payment: "verified" }, at).map((item) => item.id), ["inv_7HF1", "inv_7HE9"]);
+  assert.deepEqual(filterInvocations(invocations, { result: "failed", mode: "transaction", agent: "Code generator", policy: "allow", payment: "not_required" }, at).map((item) => item.id), ["inv_7HE8"]);
+});
+
+test("invocation time filtering includes the boundary and never mutates fixtures", () => {
+  const sourceOrder = invocations.map((item) => item.id);
+  const boundary = { ...invocations[0], id: "inv_boundary", occurredAt: "2026-08-18T09:07:00Z" };
+  const reversed = [boundary, ...invocations].toReversed();
+  const filtered = filterInvocations(reversed, { timeRange: "5m" }, trafficSnapshot.evaluatedAt);
+  assert.deepEqual(filtered.map((item) => item.id), ["inv_7HF3", "inv_7HF2", "inv_7HF1", "inv_7HE9", "inv_boundary"]);
+  assert.deepEqual(invocations.map((item) => item.id), sourceOrder);
+  assert.deepEqual(reversed.map((item) => item.id), ["inv_7HE8", "inv_7HE9", "inv_7HF1", "inv_7HF2", "inv_7HF3", "inv_boundary"]);
+});
+
+test("invocation result model preserves a truthful zero-result state and active filters", () => {
+  const result = buildInvocationResults(invocations, { ...defaultInvocationFilters, query: "missing fixture row", result: "failed" }, trafficSnapshot.evaluatedAt);
+  assert.deepEqual(result.rows, []);
+  assert.equal(result.summary, "0 of 5 fixture invocations");
+  assert.deepEqual(result.activeFilters, ["query", "result"]);
+});
+
+test("failed invocation trace diagnoses the safe failure stage and still records metadata", () => {
+  const failed = invocations.find((item) => item.id === "inv_7HE8");
+  assert.deepEqual(deriveInvocationTrace(failed).map(({ id, state }) => ({ id, state })), [
+    { id: "identity", state: "completed" },
+    { id: "policy", state: "completed" },
+    { id: "payment", state: "skipped" },
+    { id: "proxy", state: "failed" },
+    { id: "record", state: "completed" },
+  ]);
+  assert.deepEqual(deriveFailureDiagnosis(failed), { stage: "Proxy", classification: "Upstream timeout", upstreamStatus: "No upstream response/status", retryability: "Unknown" });
+  const paidTrace = deriveInvocationTrace(invocations.find((item) => item.id === "inv_7HF1"));
+  assert.match(paidTrace.find((stage) => stage.id === "payment").detail, /^Verified · \$0\.25 authorization$/);
+  assert.doesNotMatch(paidTrace.find((stage) => stage.id === "payment").detail, /settled/i);
 });

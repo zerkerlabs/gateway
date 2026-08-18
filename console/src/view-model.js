@@ -163,6 +163,94 @@ export function summarizeOverview({ agents, invocations, attention, policies, sn
   };
 }
 
+export const defaultInvocationFilters = Object.freeze({ query: "", result: "all", mode: "all", agent: "all", policy: "all", payment: "all", timeRange: "24h" });
+
+export const invocationTimeRanges = Object.freeze({ "5m": 5 * 60 * 1000, "1h": 60 * 60 * 1000, "24h": 24 * 60 * 60 * 1000 });
+
+export function invocationModeLabel(mode) {
+  if (mode === "transaction") return "Transactional";
+  if (mode === "stream") return "Streaming";
+  return "Unknown";
+}
+
+export function invocationPaymentLabel(invocation) {
+  if (invocation.paymentState === "not_required") return "Not required";
+  if (invocation.paymentState === "verified") {
+    const amount = formatCurrency(invocation.paymentAmountCents, invocation.paymentCurrency);
+    return amount === "Unknown" ? "Verified · amount unknown" : `Verified · ${amount}`;
+  }
+  return "Unknown";
+}
+
+export function invocationTimestampLabel(value) {
+  const formatted = formatTimestamp(value);
+  return formatted === "Unknown" ? "Unknown" : formatted.replace(/^(\d{2} [A-Z][a-z]{2}) \d{4} · /, "$1 · ");
+}
+
+export function invocationRelativeLabel(occurredAt, evaluatedAt) {
+  const occurred = new Date(occurredAt).getTime();
+  const evaluated = new Date(evaluatedAt).getTime();
+  if (!Number.isFinite(occurred) || !Number.isFinite(evaluated)) return "Unknown fixture time";
+  const minutes = Math.max(0, Math.floor((evaluated - occurred) / 60000));
+  return minutes === 0 ? "At fixture refresh" : `${minutes}m before fixture refresh`;
+}
+
+export function filterInvocations(items, filters = defaultInvocationFilters, evaluatedAt) {
+  const normalized = { ...defaultInvocationFilters, ...filters, query: (filters.query ?? "").trim().toLocaleLowerCase() };
+  const rangeMs = invocationTimeRanges[normalized.timeRange] ?? invocationTimeRanges[defaultInvocationFilters.timeRange];
+  const evaluatedTime = new Date(evaluatedAt).getTime();
+  const earliest = evaluatedTime - rangeMs;
+  return items
+    .filter((item) => {
+      const haystack = `${item.id} ${item.agent} ${item.method}`.toLocaleLowerCase();
+      const occurredTime = new Date(item.occurredAt).getTime();
+      const matchesTime = Number.isFinite(occurredTime) && Number.isFinite(evaluatedTime) && occurredTime >= earliest && occurredTime <= evaluatedTime;
+      return (!normalized.query || haystack.includes(normalized.query))
+        && (normalized.result === "all" || item.result === normalized.result)
+        && (normalized.mode === "all" || item.mode === normalized.mode)
+        && (normalized.agent === "all" || item.agent === normalized.agent)
+        && (normalized.policy === "all" || item.policy === normalized.policy)
+        && (normalized.payment === "all" || item.paymentState === normalized.payment)
+        && matchesTime;
+    })
+    .toSorted((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime());
+}
+
+export function buildInvocationResults(items, filters, evaluatedAt) {
+  const normalized = { ...defaultInvocationFilters, ...filters, query: (filters?.query ?? "").trim() };
+  const rows = filterInvocations(items, normalized, evaluatedAt);
+  const activeFilters = Object.keys(defaultInvocationFilters).filter((key) => normalized[key] !== defaultInvocationFilters[key]);
+  return {
+    rows,
+    total: items.length,
+    activeFilters,
+    summary: `${rows.length} of ${items.length} fixture ${items.length === 1 ? "invocation" : "invocations"}`,
+  };
+}
+
+export function deriveInvocationTrace(invocation) {
+  const paymentVerified = invocation.paymentState === "verified";
+  const proxyFailed = invocation.failure?.stage === "proxy" || invocation.result === "failed";
+  return [
+    { id: "identity", label: "Identity", state: "completed", detail: "OIDC identity accepted" },
+    { id: "policy", label: "Policy", state: invocation.policy === "warn" ? "warning" : invocation.policy === "deny" ? "failed" : "completed", detail: invocation.policy === "warn" ? "Warning recorded · request forwarded" : invocation.policy === "deny" ? "Request denied" : "Request allowed" },
+    { id: "payment", label: "Payment", state: paymentVerified ? "completed" : invocation.paymentState === "not_required" ? "skipped" : "not_reached", detail: paymentVerified ? `${invocationPaymentLabel(invocation)} authorization` : invocation.paymentState === "not_required" ? "Not required" : "Payment state unknown" },
+    { id: "proxy", label: "Proxy", state: proxyFailed ? "failed" : invocation.policy === "deny" ? "not_reached" : "completed", detail: proxyFailed ? invocation.failure?.label ?? "Proxy failed" : invocation.policy === "deny" ? "Not reached" : `Completed in ${invocation.latency}` },
+    { id: "record", label: "Record", state: "completed", detail: "Invocation metadata captured" },
+  ];
+}
+
+export function deriveFailureDiagnosis(invocation) {
+  if (!invocation.failure) return null;
+  const stage = invocation.failure.stage === "proxy" ? "Proxy" : "Unknown";
+  return {
+    stage,
+    classification: invocation.failure.label ?? "Unknown",
+    upstreamStatus: invocation.failure.upstreamStatus === null || invocation.failure.upstreamStatus === undefined ? "No upstream response/status" : String(invocation.failure.upstreamStatus),
+    retryability: invocation.failure.retryability === null || invocation.failure.retryability === undefined ? "Unknown" : invocation.failure.retryability ? "Retryable" : "Not retryable",
+  };
+}
+
 export function filterAgents(agents, query = "", state = "all") {
   const normalized = query.trim().toLocaleLowerCase();
   return agents.filter((agent) => {

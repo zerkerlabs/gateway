@@ -16,7 +16,7 @@ The autonomous loop completes one safe vertical slice per cycle, in order. It ma
   - Show source and last-refresh evidence for operational metrics.
   - Add deterministic tests for state derivation.
 
-- [ ] **C03 — Strengthen the traffic explorer**
+- [x] **C03 — Strengthen the traffic explorer**
   - Make filters, status, mode, agent, policy, payment, and time range legible.
   - Improve invocation trace and failure diagnosis.
   - Keep request and response body capture clearly separate and off by default.
