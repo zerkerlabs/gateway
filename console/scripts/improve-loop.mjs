@@ -86,6 +86,11 @@ let state = {
 writeState();
 registerSignalHandlers();
 
+let stageResolve;
+let stageReject;
+let stageTimer;
+let stageRequestId;
+
 try {
   child = startPi();
   state.status = "running";
@@ -136,7 +141,7 @@ try {
   state.stage = "settled";
   state.finished_at = new Date().toISOString();
   writeState();
-  if (child && !child.killed) child.kill("SIGTERM");
+  await stopPiProcess();
   transcript.end();
   events.end();
   rmSync(lockPath, { force: true });
@@ -188,7 +193,9 @@ function acquireLock() {
 function startPi() {
   const piArgs = ["--mode", "rpc", "--approve", "--name", "Gateway console improvement loop", "--model", model, "--thinking", thinking];
   const processHandle = spawn("pi", piArgs, { cwd: repoRoot, env: process.env, stdio: ["pipe", "pipe", "pipe"] });
-  processHandle.stderr.on("data", (chunk) => transcript.write(`[pi stderr] ${chunk}`));
+  processHandle.stderr.on("data", (chunk) => {
+    if (!transcript.writableEnded && !transcript.destroyed) transcript.write(`[pi stderr] ${chunk}`);
+  });
   processHandle.on("exit", (code, signal) => {
     log(`pi exited code=${code} signal=${signal}`);
     if (!stopped && state.status === "running") {
@@ -201,13 +208,8 @@ function startPi() {
   return processHandle;
 }
 
-let stageResolve;
-let stageReject;
-let stageTimer;
-let stageRequestId;
-
 function onPiEvent(event) {
-  events.write(`${JSON.stringify({ at: new Date().toISOString(), cycle: currentCycle, stage: currentStage, event: safeEvent(event) })}\n`);
+  if (!events.writableEnded && !events.destroyed) events.write(`${JSON.stringify({ at: new Date().toISOString(), cycle: currentCycle, stage: currentStage, event: safeEvent(event) })}\n`);
   recordReportedCost(event);
   if (event.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(event.method)) {
     send({ type: "extension_ui_response", id: event.id, cancelled: true });
@@ -381,7 +383,7 @@ function writeState() {
 }
 function log(message) {
   const line = `${new Date().toISOString()} ${message}\n`;
-  transcript.write(line);
+  if (!transcript.writableEnded && !transcript.destroyed) transcript.write(line);
   process.stdout.write(line);
 }
 function tail(path, maxCharacters) {
@@ -402,7 +404,9 @@ function attachJsonLines(stream, callback) {
       if (line.endsWith("\r")) line = line.slice(0, -1);
       if (!line.trim()) continue;
       try { callback(JSON.parse(line)); }
-      catch (error) { transcript.write(`[invalid rpc json] bytes=${Buffer.byteLength(line)} error=${error instanceof Error ? error.message : String(error)}\n`); }
+      catch (error) {
+      if (!transcript.writableEnded && !transcript.destroyed) transcript.write(`[invalid rpc json] bytes=${Buffer.byteLength(line)} error=${error instanceof Error ? error.message : String(error)}\n`);
+    }
     }
   });
 }
@@ -467,6 +471,15 @@ function assertProtectedFilesForSelfTest() {
   for (const path of ["PRODUCT_GOAL.md", "UX_RUBRIC.md", "scripts/improve-loop.mjs"]) {
     if (!existsSync(resolve(consoleDir, path))) throw new Error(`self-test missing ${path}`);
   }
+}
+async function stopPiProcess() {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  await Promise.race([
+    new Promise((resolveStop) => child.once("exit", resolveStop)),
+    new Promise((resolveStop) => setTimeout(resolveStop, 5000)),
+  ]);
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }
 function processIsAlive(pid) {
   try { process.kill(pid, 0); return true; }
