@@ -2,11 +2,27 @@ export const overviewSnapshot = {
   workspace: "Zerker Labs",
   environment: "All environments",
   range: "Last 24 hours",
-  capturedAt: "18 Feb 2026 · 14:32 UTC",
-  source: "Bundled fixture v1",
+  capturedAt: "2026-08-18T09:10:00Z",
   paymentVolumeCents: 1240,
   paymentCurrency: "USD",
 };
+
+export const overviewMetricSources = {
+  attention: { label: "Attention fixture", refreshedAt: "2026-08-18T09:10:00Z" },
+  traffic: { label: "Catalog aggregate fixture", refreshedAt: "2026-08-18T09:09:00Z" },
+  policy: { label: "Policy decision fixture", refreshedAt: "2026-08-18T09:08:00Z" },
+  payment: { label: "Settlement fixture", refreshedAt: "2026-08-18T09:07:00Z" },
+};
+
+export const overviewScenarios = [
+  { id: "complete", label: "Complete fixture", phase: "ready", completeness: "complete", recordCount: 5, hasUsableData: true, evaluatedAt: "2026-08-18T09:12:00Z", staleAfterMs: 15 * 60 * 1000, availableSources: ["attention", "traffic", "policy", "payment"] },
+  { id: "loading", label: "Loading", phase: "loading", completeness: "unknown", recordCount: 0, hasUsableData: false, evaluatedAt: "2026-08-18T09:12:00Z", staleAfterMs: 15 * 60 * 1000, availableSources: [] },
+  { id: "empty", label: "Empty", phase: "ready", completeness: "complete", recordCount: 0, hasUsableData: false, evaluatedAt: "2026-08-18T09:12:00Z", staleAfterMs: 15 * 60 * 1000, availableSources: ["attention", "traffic", "policy", "payment"] },
+  { id: "stale", label: "Stale", phase: "ready", completeness: "complete", recordCount: 5, hasUsableData: true, evaluatedAt: "2026-08-18T09:12:00Z", staleAfterMs: 15 * 60 * 1000, refreshedAtOverride: "2026-08-18T08:10:00Z", availableSources: ["attention", "traffic", "policy", "payment"] },
+  { id: "unavailable", label: "Unavailable", phase: "unavailable", completeness: "unknown", recordCount: 0, hasUsableData: false, evaluatedAt: "2026-08-18T09:12:00Z", staleAfterMs: 15 * 60 * 1000, availableSources: [], publicMessage: "Operational fixture sources are unavailable in this preview scenario." },
+  { id: "partial", label: "Partial", phase: "ready", completeness: "partial", recordCount: 5, hasUsableData: true, evaluatedAt: "2026-08-18T09:12:00Z", staleAfterMs: 15 * 60 * 1000, availableSources: ["traffic"], unavailableSources: ["attention", "policy", "payment"] },
+  { id: "error", label: "Error", phase: "error", completeness: "unknown", recordCount: 0, hasUsableData: false, evaluatedAt: "2026-08-18T09:12:00Z", staleAfterMs: 15 * 60 * 1000, availableSources: [], publicMessage: "The fixture snapshot could not be prepared. No Gateway request was made." },
+];
 
 export const agents = [
   { id: "agt_support", name: "Support agent", runtime: "Claude Code", protocol: "http", state: "active", evidence: "Reporting 2m ago", environment: "Alex’s MacBook Pro", calls: 486, failures: 4, success: "99.2%", p95: "1.4s", credential: "support-production", price: "Free", rate: "120/min", receipt: "Off" },

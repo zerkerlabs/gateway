@@ -10,7 +10,7 @@ The autonomous loop completes one safe vertical slice per cycle, in order. It ma
   - Keep capability education outside the first operational viewport.
   - Preserve explicit preview-data labeling.
 
-- [ ] **C02 — Model trustworthy application states**
+- [x] **C02 — Model trustworthy application states**
   - Add reusable loading, empty, stale, unavailable, partial, and error states.
   - Distinguish unknown cost from zero cost.
   - Show source and last-refresh evidence for operational metrics.

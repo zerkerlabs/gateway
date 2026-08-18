@@ -1,12 +1,12 @@
 import "./styles.css";
-import { activity, agents, attention, credentials, environments, invocations, overviewSnapshot, policies, privacy, products, settlements, stack } from "./data.js";
-import { capabilityCounts, filterAgents, formatCount, stateLabel, summarizeOverview } from "./view-model.js";
+import { activity, agents, attention, credentials, environments, invocations, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, privacy, products, settlements, stack } from "./data.js";
+import { buildOverviewModel, capabilityCounts, filterAgents, formatCount, stateLabel } from "./view-model.js";
 
 const main = document.querySelector("#main-content");
 const modalRoot = document.querySelector("#modal-root");
 const toastRegion = document.querySelector("#toast-region");
-const overviewSummary = summarizeOverview({ agents, invocations, attention, policies, snapshot: overviewSnapshot });
 const stackSummary = capabilityCounts(stack);
+let activeOverviewScenario = "complete";
 let activeView = "overview";
 let previousFocus = null;
 
@@ -24,60 +24,106 @@ function pageHeader(kicker, title, description, actions = "") {
   return `<header class="page-heading"><div><p class="kicker">${kicker}</p><h1>${title}</h1><p class="page-description">${description}</p></div><div class="page-actions">${actions}</div></header>`;
 }
 
-function overviewView() {
-  return `<section class="page-enter overview-page">
-    <header class="page-heading operational-heading">
-      <div><p class="kicker">Operate</p><h1>Overview</h1><p class="page-description">Attention, traffic, policy, cost, and runtime evidence from a fixed sample window.</p></div>
-      <button class="button secondary" data-view="attention">Open attention queue →</button>
-    </header>
+function currentOverviewModel() {
+  const scenario = overviewScenarios.find((item) => item.id === activeOverviewScenario) ?? overviewScenarios[0];
+  return buildOverviewModel({ agents, invocations, attention, policies, snapshot: overviewSnapshot, sources: overviewMetricSources, scenario });
+}
 
+function renderDataState(kind, title, message, compact = false) {
+  const role = kind === "error" ? "alert" : "status";
+  const busy = kind === "loading" ? ' aria-busy="true"' : "";
+  const skeleton = kind === "loading" ? '<div class="state-skeleton" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>' : "";
+  return `<section class="data-state ${kind}${compact ? " compact" : ""}" role="${role}"${busy}>${status(kind, kind)}<div><h2>${title}</h2><p>${message}</p></div>${skeleton}</section>`;
+}
+
+function renderOverviewStateBanner(model) {
+  if (model.state.availability === "empty") {
+    return `<section class="state-banner empty" role="status">${status("Empty", "empty")}<div><strong>Complete fixture window · no activity</strong><small>Known zeroes are shown below. No agent connectivity claim is made.</small></div></section>`;
+  }
+  if (model.state.freshness === "stale") {
+    return `<section class="state-banner stale" role="status">${status("Stale", "warning")}<div><strong>Showing last-known fixture values</strong><small>${model.runtime.detail}. These values are not current.</small></div></section>`;
+  }
+  if (model.state.availability === "partial") {
+    return `<section class="state-banner partial" role="status">${status("Partial", "warning")}<div><strong>Some fixture sources are unavailable</strong><small>${model.unavailableSourceLabels.join(" · ")}. Affected values are Unknown, not zero.</small></div></section>`;
+  }
+  return "";
+}
+
+function renderOverviewMetrics(model) {
+  return `<section class="metric-strip operational-metrics" aria-label="Operational fixture summary">${model.metrics.map((metric) => {
+    const freshness = metric.evidence.lastRefresh === "Unavailable"
+      ? "Last refresh unavailable"
+      : metric.evidence.freshness === "stale" ? `Stale · ${metric.evidence.lastRefresh}` : `Refreshed ${metric.evidence.lastRefresh}`;
+    const classes = `${metric.id === "failures" ? "failure-metric " : ""}metric-${metric.valueState}`;
+    const content = `<span>${metric.display}</span><small>${metric.label}</small><em>${metric.detail}</em><div class="metric-evidence"><b>${metric.evidence.source}</b><i>${freshness}</i></div>`;
+    return metric.actionable ? `<button class="${classes}" data-view="${metric.target}">${content}</button>` : `<div class="${classes}" aria-label="${metric.label}: ${metric.display}">${content}</div>`;
+  }).join("")}</section>`;
+}
+
+function renderOverviewAttention(model) {
+  const attentionMetric = model.metrics.find((metric) => metric.id === "attention");
+  const title = model.attentionItems === null ? "Attention source unavailable" : model.attentionItems.length ? `${formatCount(model.attentionItems.length, "item")} require review` : "No items in this window";
+  const body = model.attentionItems === null
+    ? renderDataState("unavailable", "Attention is Unknown", "The attention fixture is unavailable in this partial scenario.", true)
+    : model.attentionItems.length
+      ? `<div class="attention-list">${model.attentionItems.map((item) => `<button class="attention-row" data-view="${item.target}"><span class="severity ${item.level}"></span><span><strong>${item.title}</strong><small>${item.detail}</small></span><span>→</span></button>`).join("")}</div>`
+      : renderDataState("empty", "No attention items", "The complete fixture window returned no items that need review.", true);
+  return `<section class="panel attention-panel"><div class="panel-heading"><div><p class="kicker">Needs attention</p><h2>${title}</h2></div>${model.attentionItems?.length ? '<button class="text-button" data-view="attention">View queue →</button>' : status(attentionMetric.valueState === "zero" ? "Known zero" : "Unknown", attentionMetric.valueState === "zero" ? "empty" : "unavailable")}</div>${body}</section>`;
+}
+
+function renderOverviewRuntime(model) {
+  return `<section class="panel system-card"><div class="panel-heading"><div><p class="kicker">Runtime evidence</p><h2>Production Gateway</h2></div>${status(model.runtime.label, model.runtime.tone)}</div><dl class="system-facts"><div><dt>Evidence</dt><dd>${model.runtime.detail}</dd></div><div><dt>Version</dt><dd>development</dd></div><div><dt>Storage</dt><dd>Postgres</dd></div><div><dt>Identity</dt><dd>OIDC configured</dd></div><div><dt>Tenancy</dt><dd>Isolated</dd></div></dl><button class="button secondary wide" data-view="stack">Open runtime evidence</button></section>`;
+}
+
+function renderOverviewTraffic(model) {
+  const body = model.invocationItems?.length
+    ? `${invocationTable(model.invocationItems)}<div class="sample-note"><strong>${formatCount(model.latestFailures, "failure")}</strong> in this metadata-only sample. Request and response bodies remain off.</div>`
+    : model.invocationItems === null
+      ? renderDataState("unavailable", "Invocation evidence is unavailable", "The traffic fixture did not return usable records in this scenario.", true)
+      : renderDataState("empty", "No invocations in this window", "The complete traffic fixture returned no invocation records. Request and response bodies remain off.", true);
+  const evidence = model.invocationItems?.length ? status(`${model.invocationItems.length} fixture rows`, "review") : status(model.invocationItems === null ? "Unavailable" : "Empty", model.invocationItems === null ? "unavailable" : "empty");
+  return `<section class="panel traffic-panel"><div class="panel-heading"><div><p class="kicker">Fixture evidence</p><h2>Latest invocation sample</h2></div><div class="panel-heading-actions">${evidence}${model.invocationItems?.length ? '<button class="text-button" data-view="invocations">Open traffic explorer →</button>' : ""}</div></div>${body}</section>`;
+}
+
+function renderOverviewOperations(model) {
+  if (model.state.availability === "loading") {
+    return renderDataState("loading", "Loading fixture snapshot", "This static preview is demonstrating a pending read. No Gateway request is in progress.");
+  }
+  if (model.state.availability === "unavailable") {
+    return renderDataState("unavailable", "Operational data unavailable", model.publicMessage);
+  }
+  if (model.state.availability === "error") {
+    return renderDataState("error", "Fixture snapshot error", model.publicMessage);
+  }
+  return `${renderOverviewStateBanner(model)}${renderOverviewMetrics(model)}<div class="overview-grid">${renderOverviewAttention(model)}${renderOverviewRuntime(model)}</div>${renderOverviewTraffic(model)}`;
+}
+
+function renderCapabilitySection() {
+  return `<section class="capability-section"><div class="section-heading"><div><p class="kicker">Capability map</p><h2>Capability delivery status</h2></div><p>Roadmap context follows operational evidence. Available products and future integrations remain labeled separately.</p></div><div class="capability-grid">
+    ${capabilityCard("Discover", "Inventory local agents and runtime environments.", ["Catalog", "Local discovery", "Enrollment evidence"], "agents", [["Available", "available"], ["In review", "review"]])}
+    ${capabilityCard("Control", "Apply identity, credentials, rates and policy before traffic moves.", ["OIDC tenancy", "Policy decisions", "Protected credentials"], "policies", [["Available", "available"]])}
+    ${capabilityCard("Observe", "Inspect request and agent metadata without guessing what happened.", ["Invocations", "Latency & errors", "Metadata-only activity"], "analytics", [["Available", "available"], ["In review", "review"]])}
+    ${capabilityCard("Monetize", "Gate paid routes and settle through a separate facilitator.", ["x402 gate", "USDC on Base", "Settlement records"], "payments", [["Available", "available"]])}
+    ${capabilityCard("Verify", "Bind high-risk actions to deterministic evidence and signed records.", ["Reason certificates", "Treeship evidence", "Guard enforcement"], "stack", [["Standalone", "standalone"], ["Integration path", "integration"], ["Planned", "planned"]])}
+    ${capabilityCard("Publish & work", "Turn agents into products and dispatch bounded missions.", ["Customer portals", "Plans & docs", "Remote missions"], "products", [["Planned", "planned"]])}
+  </div></section>`;
+}
+
+function overviewView() {
+  const model = currentOverviewModel();
+  const attentionAction = model.attentionItems?.length ? '<button class="button secondary" data-view="attention">Open attention queue →</button>' : "";
+  return `<section class="page-enter overview-page">
+    <header class="page-heading operational-heading"><div><p class="kicker">Operate</p><h1>Overview</h1><p class="page-description">Attention, traffic, policy, cost, and runtime evidence from a fixed sample window.</p></div>${attentionAction}</header>
     <section class="overview-snapshot" aria-label="Preview snapshot context">
       <div class="preview-state"><span class="fixture-dot"></span><span><strong>Preview data</strong><small>Not connected to Gateway</small></span></div>
       <div class="snapshot-fact"><span>Workspace</span><strong>${overviewSnapshot.workspace}</strong></div>
       <button class="snapshot-fact" data-view="environments"><span>Environment</span><strong>${overviewSnapshot.environment}</strong><small>View evidence →</small></button>
       <div class="snapshot-fact"><span>Window</span><strong>${overviewSnapshot.range}</strong></div>
-      <div class="snapshot-fact"><span>Fixture captured</span><strong>${overviewSnapshot.capturedAt}</strong></div>
-      <div class="snapshot-fact"><span>Source</span><strong>${overviewSnapshot.source}</strong></div>
+      <div class="snapshot-fact"><span>Fixture captured</span><strong>${model.capturedAt}</strong></div>
+      <label class="scenario-control" for="overview-scenario"><span>Preview scenario</span><select id="overview-scenario">${overviewScenarios.map((scenario) => `<option value="${scenario.id}"${scenario.id === model.scenario.id ? " selected" : ""}>${scenario.label}</option>`).join("")}</select><small>In-memory only</small></label>
     </section>
-
-    <section class="metric-strip operational-metrics" aria-label="Operational fixture summary">
-      <button data-view="attention"><span>${overviewSummary.attentionCount}</span><small>Needs attention</small><em>${formatCount(overviewSummary.attentionCount, "item")} in review queue</em></button>
-      <button data-view="invocations"><span>${overviewSummary.totalCalls.toLocaleString("en-US")}</span><small>Calls · ${overviewSnapshot.range}</small><em>Across ${agents.length} catalog agents</em></button>
-      <button class="failure-metric" data-view="invocations"><span>${overviewSummary.failedCalls}</span><small>Failed calls</small><em>${overviewSummary.failureRate} of fixture traffic</em></button>
-      <button data-view="policies"><span>${overviewSummary.reviewDecisions}</span><small>Policy decisions</small><em>${overviewSummary.deniedDecisions} denied · ${overviewSummary.warnedDecisions} warned</em></button>
-      <button data-view="payments"><span>${overviewSummary.paymentVolume}</span><small>Payment volume</small><em>Fixture value · USDC on Base</em></button>
-    </section>
-
-    <div class="overview-grid">
-      <section class="panel attention-panel">
-        <div class="panel-heading"><div><p class="kicker">Needs attention</p><h2>${formatCount(overviewSummary.attentionCount, "item")} require review</h2></div><button class="text-button" data-view="attention">View queue →</button></div>
-        <div class="attention-list">${attention.map((item) => `<button class="attention-row" data-view="${item.target}"><span class="severity ${item.level}"></span><span><strong>${item.title}</strong><small>${item.detail}</small></span><span>→</span></button>`).join("")}</div>
-      </section>
-
-      <section class="panel system-card">
-        <div class="panel-heading"><div><p class="kicker">Runtime evidence</p><h2>Production Gateway</h2></div>${status("Healthy · fixture", "available")}</div>
-        <dl class="system-facts"><div><dt>Captured</dt><dd>12s after probe</dd></div><div><dt>Version</dt><dd>development</dd></div><div><dt>Storage</dt><dd>Postgres</dd></div><div><dt>Identity</dt><dd>OIDC configured</dd></div><div><dt>Tenancy</dt><dd>Isolated</dd></div></dl>
-        <button class="button secondary wide" data-view="stack">Open runtime evidence</button>
-      </section>
-    </div>
-
-    <section class="panel traffic-panel">
-      <div class="panel-heading"><div><p class="kicker">Fixture evidence</p><h2>Latest invocation sample</h2></div><div class="panel-heading-actions">${status(`${invocations.length} fixture rows`, "review")}<button class="text-button" data-view="invocations">Open traffic explorer →</button></div></div>
-      ${invocationTable(invocations)}
-      <div class="sample-note"><strong>${formatCount(overviewSummary.latestFailures, "failure")}</strong> in this metadata-only sample. Request and response bodies remain off.</div>
-    </section>
-
-    <section class="capability-section">
-      <div class="section-heading"><div><p class="kicker">Capability map</p><h2>Capability delivery status</h2></div><p>Roadmap context follows operational evidence. Available products and future integrations remain labeled separately.</p></div>
-      <div class="capability-grid">
-        ${capabilityCard("Discover", "Inventory local agents and runtime environments.", ["Catalog", "Local discovery", "Enrollment evidence"], "agents", [["Available", "available"], ["In review", "review"]])}
-        ${capabilityCard("Control", "Apply identity, credentials, rates and policy before traffic moves.", ["OIDC tenancy", "Policy decisions", "Protected credentials"], "policies", [["Available", "available"]])}
-        ${capabilityCard("Observe", "Inspect request and agent metadata without guessing what happened.", ["Invocations", "Latency & errors", "Metadata-only activity"], "analytics", [["Available", "available"], ["In review", "review"]])}
-        ${capabilityCard("Monetize", "Gate paid routes and settle through a separate facilitator.", ["x402 gate", "USDC on Base", "Settlement records"], "payments", [["Available", "available"]])}
-        ${capabilityCard("Verify", "Bind high-risk actions to deterministic evidence and signed records.", ["Reason certificates", "Treeship evidence", "Guard enforcement"], "stack", [["Standalone", "standalone"], ["Integration path", "integration"], ["Planned", "planned"]])}
-        ${capabilityCard("Publish & work", "Turn agents into products and dispatch bounded missions.", ["Customer portals", "Plans & docs", "Remote missions"], "products", [["Planned", "planned"]])}
-      </div>
-    </section>
+    <div id="overview-state-region" aria-live="polite">${renderOverviewOperations(model)}</div>
+    ${renderCapabilitySection()}
   </section>`;
 }
 
@@ -196,10 +242,26 @@ function stackView() {
 
 const views = { overview: overviewView, attention: attentionView, activity: activityView, invocations: invocationsView, analytics: analyticsView, agents: agentsView, environments: environmentsView, policies: policiesView, credentials: credentialsView, products: productsView, payments: paymentsView, stack: stackView };
 
+function syncAttentionNavigation() {
+  const button = document.querySelector(".side-nav [data-view='attention']");
+  const badge = button?.querySelector(".nav-badge");
+  if (!button || !badge) return;
+  if (activeView !== "overview") {
+    badge.textContent = String(attention.length);
+    button.removeAttribute("aria-label");
+    return;
+  }
+  const metric = currentOverviewModel().metrics.find((item) => item.id === "attention");
+  const value = metric.valueState === "available" || metric.valueState === "zero" ? metric.display : "?";
+  badge.textContent = value;
+  button.setAttribute("aria-label", `Needs attention: ${value === "?" ? "Unknown" : value} in selected preview scenario`);
+}
+
 function render(view = activeView) {
   activeView = views[view] ? view : "overview";
   main.innerHTML = views[activeView]();
   document.title = `${labels[activeView]} — Zerker Gateway preview`;
+  syncAttentionNavigation();
   document.querySelectorAll("[data-view]").forEach((button) => {
     const selected = button.dataset.view === activeView;
     button.classList.toggle("active", selected);
@@ -216,6 +278,8 @@ function bindPageEvents() {
   main.querySelectorAll("[data-invocation]").forEach((button) => button.addEventListener("click", () => openInvocation(button.dataset.invocation)));
   main.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
   main.querySelectorAll("[data-stack]").forEach((button) => button.addEventListener("click", () => openStackInfo(button.dataset.stack)));
+  const scenario = main.querySelector("#overview-scenario");
+  if (scenario) scenario.addEventListener("change", () => { activeOverviewScenario = scenario.value; render("overview"); main.querySelector("#overview-scenario")?.focus(); });
   const query = main.querySelector("#agent-filter");
   const state = main.querySelector("#agent-state");
   if (query && state) {
