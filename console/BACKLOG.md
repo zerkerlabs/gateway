@@ -28,7 +28,7 @@ The autonomous loop completes one safe vertical slice per cycle, in order. It ma
   - Improve environment health and onboarding-state presentation.
   - Never imply persistent connectivity.
 
-- [ ] **C05 — Strengthen governance and revenue operations**
+- [x] **C05 — Strengthen governance and revenue operations**
   - Improve policy posture, ordered rules, decisions, credential metadata, payment gating, and settlement diagnosis.
   - Keep secrets masked and writes non-operational.
   - Keep x402 an adapter rather than the product identity.

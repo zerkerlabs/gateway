@@ -356,6 +356,238 @@ export function buildAgentResults(agents, filters = defaultAgentFilters) {
   };
 }
 
+export const defaultPolicyDecisionFilters = Object.freeze({ query: "", action: "all", rule: "all" });
+
+export function buildPolicyModel(policy) {
+  const rules = [...(policy?.rules ?? [])].toSorted((left, right) => left.order - right.order);
+  const actionCounts = { allow: 0, warn: 0, deny: 0 };
+  for (const rule of rules) {
+    if (rule.action in actionCounts && Number.isFinite(rule.decisions)) actionCounts[rule.action] += rule.decisions;
+  }
+  const safeAction = (value) => ["allow", "warn", "deny"].includes(value) ? value : "unknown";
+  return {
+    rules,
+    actionCounts,
+    defaultAction: safeAction(policy?.default),
+    onErrorAction: safeAction(policy?.onError),
+    outagePosture: policy?.outagePosture === "fail_closed" ? "fail_closed" : "unknown",
+  };
+}
+
+export function filterPolicyDecisions(decisions, rules, filters = defaultPolicyDecisionFilters) {
+  const normalized = { ...defaultPolicyDecisionFilters, ...filters, query: (filters?.query ?? "").trim().toLocaleLowerCase() };
+  const rulesByID = new Map(rules.map((rule) => [rule.id, rule]));
+  return decisions
+    .filter((decision) => {
+      const rule = rulesByID.get(decision.ruleID);
+      const haystack = `${decision.id} ${decision.agent} ${decision.protocol} ${decision.method} ${decision.tool ?? ""} ${decision.reason} ${rule?.name ?? "default"}`.toLocaleLowerCase();
+      return (!normalized.query || haystack.includes(normalized.query))
+        && (normalized.action === "all" || decision.action === normalized.action)
+        && (normalized.rule === "all" || (normalized.rule === "default" ? decision.ruleID === null : decision.ruleID === normalized.rule));
+    })
+    .toSorted((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime());
+}
+
+export function buildPolicyDecisionResults(decisions, rules, filters = defaultPolicyDecisionFilters) {
+  const normalized = { ...defaultPolicyDecisionFilters, ...filters, query: (filters?.query ?? "").trim() };
+  const rows = filterPolicyDecisions(decisions, rules, normalized);
+  const activeFilters = Object.keys(defaultPolicyDecisionFilters).filter((key) => normalized[key] !== defaultPolicyDecisionFilters[key]);
+  return {
+    rows,
+    total: decisions.length,
+    activeFilters,
+    summary: `${rows.length} of ${decisions.length} fixture policy ${decisions.length === 1 ? "decision" : "decisions"}`,
+  };
+}
+
+const credentialDisplayKeys = Object.freeze(["id", "name", "authType", "source", "maskedLastFour", "version", "references", "createdAt", "updatedAt"]);
+
+export function safeCredentialMetadata(credential) {
+  const safe = {};
+  for (const key of credentialDisplayKeys) {
+    if (Object.hasOwn(credential ?? {}, key)) safe[key] = key === "references" && Array.isArray(credential[key]) ? [...credential[key]] : credential[key];
+  }
+  return safe;
+}
+
+export function credentialSourceLabel(credential) {
+  if (credential?.source === "managed") return "Managed";
+  if (credential?.source === "external_vault") return "External vault";
+  return "Unknown";
+}
+
+export function credentialAuthLabel(credential) {
+  if (credential?.authType === "bearer") return "Bearer";
+  if (credential?.authType === "api_key") return "API key";
+  if (credential?.authType === "none") return "None";
+  return "Unknown";
+}
+
+export function credentialHintLabel(credential) {
+  if (credential?.source === "external_vault") return "External reference configured";
+  if (credential?.source !== "managed") return "Unknown";
+  if (credential.maskedLastFour === null) return "Not returned";
+  if (credential.maskedLastFour === undefined) return "Unknown";
+  return /^[A-Za-z0-9]{4}$/.test(credential.maskedLastFour) ? `•••• ${credential.maskedLastFour}` : "Unknown";
+}
+
+export function credentialReferenceState(credential) {
+  if (!Array.isArray(credential?.references)) return { id: "unknown", label: "Unknown", count: null };
+  if (credential.references.length === 0) return { id: "unreferenced", label: "Unreferenced", count: 0 };
+  return { id: "referenced", label: `Referenced · ${credential.references.length}`, count: credential.references.length };
+}
+
+export function credentialDeletePosture(credential) {
+  const reference = credentialReferenceState(credential);
+  if (reference.id === "referenced") return "Conflict while referenced";
+  if (reference.id === "unreferenced") return "API eligible · preview does not delete";
+  return "Unknown";
+}
+
+export const defaultCredentialFilters = Object.freeze({ query: "", source: "all", authType: "all", reference: "all" });
+
+export function filterCredentials(credentials, filters = defaultCredentialFilters) {
+  const normalized = { ...defaultCredentialFilters, ...filters, query: (filters?.query ?? "").trim().toLocaleLowerCase() };
+  return credentials
+    .map(safeCredentialMetadata)
+    .filter((credential) => {
+      const reference = credentialReferenceState(credential).id;
+      const haystack = `${credential.id ?? ""} ${credential.name ?? ""} ${credential.authType ?? ""} ${credential.source ?? ""} ${(credential.references ?? []).join(" ")}`.toLocaleLowerCase();
+      return (!normalized.query || haystack.includes(normalized.query))
+        && (normalized.source === "all" || credential.source === normalized.source)
+        && (normalized.authType === "all" || credential.authType === normalized.authType)
+        && (normalized.reference === "all" || reference === normalized.reference);
+    });
+}
+
+export function buildCredentialResults(credentials, filters = defaultCredentialFilters) {
+  const normalized = { ...defaultCredentialFilters, ...filters, query: (filters?.query ?? "").trim() };
+  const rows = filterCredentials(credentials, normalized);
+  const activeFilters = Object.keys(defaultCredentialFilters).filter((key) => normalized[key] !== defaultCredentialFilters[key]);
+  return {
+    rows,
+    total: credentials.length,
+    activeFilters,
+    summary: `${rows.length} of ${credentials.length} fixture credential metadata ${credentials.length === 1 ? "record" : "records"}`,
+  };
+}
+
+export const defaultPaymentFilters = Object.freeze({ query: "", gate: "all", settlement: "all", timeRange: "24h" });
+export const paymentTimeRanges = Object.freeze({ "5m": 5 * 60 * 1000, "15m": 15 * 60 * 1000, "24h": 24 * 60 * 60 * 1000 });
+
+export function paymentGateLabel(operation) {
+  if (operation?.gateState === "challenged") return "402 challenge · no invocation";
+  if (operation?.gateState === "verified") return "Verified";
+  return "Unknown";
+}
+
+export function paymentSettlementLabel(operation) {
+  if (operation?.settlementState === "not_reached") return "Not reached";
+  if (operation?.settlementState === "not_configured") return "Verified · not collected";
+  if (operation?.settlementState === "pending") return "Pending";
+  if (operation?.settlementState === "settled") return "Settled";
+  if (operation?.settlementState === "settlement_failed") return "Settlement failed · upstream not called";
+  if (operation?.settlementState === "settled_upstream_failed") return "Settled · upstream failed";
+  return "Unknown";
+}
+
+export function paymentUpstreamLabel(operation) {
+  if (operation?.upstreamState === "succeeded") return "Succeeded";
+  if (operation?.upstreamState === "failed") return "Failed after settlement";
+  if (operation?.upstreamState === "not_called") return "Not called";
+  if (operation?.upstreamState === "not_reached") return "Not reached";
+  return "Unknown";
+}
+
+export function facilitatorModeLabel(mode) {
+  if (mode === "self_hosted") return "Self-hosted";
+  if (mode === "gate_only") return "Gate-only";
+  if (mode === "managed") return "Managed";
+  return "Unknown";
+}
+
+export function summarizePayments(operations) {
+  const collected = operations.filter((operation) => ["settled", "settled_upstream_failed"].includes(operation.settlementState));
+  const gateOnly = operations.filter((operation) => operation.gateState === "verified" && operation.settlementState === "not_configured");
+  const sumKnown = (items) => items.every((item) => Number.isInteger(item.amountCents) && item.amountCents >= 0)
+    ? items.reduce((total, item) => total + item.amountCents, 0)
+    : null;
+  const collectedCents = sumKnown(collected);
+  const gateOnlyCents = sumKnown(gateOnly);
+  return {
+    total: operations.length,
+    challenges: operations.filter((operation) => operation.gateState === "challenged").length,
+    verified: operations.filter((operation) => operation.gateState === "verified").length,
+    settlementFailures: operations.filter((operation) => operation.settlementState === "settlement_failed").length,
+    settledUpstreamFailures: operations.filter((operation) => operation.settlementState === "settled_upstream_failed").length,
+    collectedCents,
+    collectedDisplay: collectedCents === null ? "Unknown" : formatCurrency(collectedCents),
+    gateOnlyCents,
+    gateOnlyDisplay: gateOnlyCents === null ? "Unknown" : formatCurrency(gateOnlyCents),
+  };
+}
+
+export function filterPaymentOperations(operations, filters = defaultPaymentFilters, evaluatedAt) {
+  const normalized = { ...defaultPaymentFilters, ...filters, query: (filters?.query ?? "").trim().toLocaleLowerCase() };
+  const evaluationTime = new Date(evaluatedAt).getTime();
+  const rangeMs = paymentTimeRanges[normalized.timeRange] ?? paymentTimeRanges[defaultPaymentFilters.timeRange];
+  const earliest = evaluationTime - rangeMs;
+  return operations
+    .filter((operation) => {
+      const occurred = new Date(operation.occurredAt).getTime();
+      const haystack = `${operation.id} ${operation.agent} ${operation.operation} ${operation.invocationID ?? ""}`.toLocaleLowerCase();
+      return (!normalized.query || haystack.includes(normalized.query))
+        && (normalized.gate === "all" || operation.gateState === normalized.gate)
+        && (normalized.settlement === "all" || operation.settlementState === normalized.settlement)
+        && Number.isFinite(occurred) && Number.isFinite(evaluationTime) && occurred >= earliest && occurred <= evaluationTime;
+    })
+    .toSorted((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime());
+}
+
+export function buildPaymentResults(operations, filters, evaluatedAt) {
+  const normalized = { ...defaultPaymentFilters, ...filters, query: (filters?.query ?? "").trim() };
+  const rows = filterPaymentOperations(operations, normalized, evaluatedAt);
+  const activeFilters = Object.keys(defaultPaymentFilters).filter((key) => normalized[key] !== defaultPaymentFilters[key]);
+  return {
+    rows,
+    total: operations.length,
+    activeFilters,
+    summary: `${rows.length} of ${operations.length} fixture payment ${operations.length === 1 ? "operation" : "operations"}`,
+  };
+}
+
+export function derivePaymentTrace(operation) {
+  const challenged = operation.gateState === "challenged";
+  const verified = operation.gateState === "verified";
+  const gateOnly = operation.settlementState === "not_configured";
+  const settlementFailed = operation.settlementState === "settlement_failed";
+  const settled = ["settled", "settled_upstream_failed"].includes(operation.settlementState);
+  return [
+    { id: "policy", label: "Policy", state: "completed", detail: "Allowed before payment evaluation" },
+    { id: "authorization", label: "Challenge / authorization", state: challenged || verified ? "completed" : "unknown", detail: challenged ? "402 challenge returned · no invocation created" : verified ? "Signed authorization presented" : "Unknown" },
+    { id: "gateway", label: "Gateway verification", state: challenged ? "not_reached" : verified ? "completed" : "unknown", detail: challenged ? "Not reached without authorization" : verified ? "Authorization verified · not collection" : "Unknown" },
+    { id: "facilitator", label: "Facilitator", state: challenged ? "not_reached" : gateOnly ? "skipped" : settlementFailed ? "failed" : settled ? "completed" : operation.settlementState === "pending" ? "pending" : "not_reached", detail: challenged ? "Not reached" : gateOnly ? "Not configured · gate-only" : settlementFailed ? "Independent re-verification / settlement failed" : settled ? "Independently re-verified and settled" : operation.settlementState === "pending" ? "Settlement pending" : "Not reached" },
+    { id: "upstream", label: "Upstream", state: operation.upstreamState === "succeeded" ? "completed" : operation.upstreamState === "failed" ? "failed" : "not_reached", detail: paymentUpstreamLabel(operation) },
+  ];
+}
+
+export function derivePaymentDiagnosis(operation) {
+  if (operation?.settlementState === "settlement_failed") {
+    return { stage: "Settlement", classification: operation.reason ?? "Payment could not be collected", money: "Not collected", upstream: "Not called", settlementAttempts: Number.isInteger(operation.settlementAttempts) ? String(operation.settlementAttempts) : "Unknown" };
+  }
+  if (operation?.settlementState === "settled_upstream_failed") {
+    return { stage: "Upstream after settlement", classification: operation.reason ?? "Upstream failed after settlement", money: "Collected before upstream failure", upstream: "Failed after settlement", settlementAttempts: Number.isInteger(operation.settlementAttempts) ? String(operation.settlementAttempts) : "Unknown" };
+  }
+  return null;
+}
+
+export function deliveryTruthLabel(delivery) {
+  if (delivery === "available") return "Available OSS";
+  if (delivery === "commercial") return "Commercial";
+  if (delivery === "planned") return "Planned";
+  return "Unknown";
+}
+
 export function formatCount(value, singular, plural = `${singular}s`) {
   return `${value.toLocaleString("en-US")} ${value === 1 ? singular : plural}`;
 }

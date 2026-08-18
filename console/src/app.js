@@ -1,6 +1,6 @@
 import "./styles.css";
-import { activity, agents, attention, catalogSnapshot, credentials, environmentSnapshot, environments, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, privacy, products, settlements, stack, trafficSnapshot } from "./data.js";
-import { buildAgentResults, buildInvocationResults, buildOverviewModel, capabilityCounts, catalogStatusReason, credentialReferenceLabel, defaultAgentFilters, defaultInvocationFilters, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, filterAgents, formatCount, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, stateLabel, summarizeAgents } from "./view-model.js";
+import { activity, agents, attention, catalogSnapshot, credentialSnapshot, credentials, environmentSnapshot, environments, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, policySnapshot, privacy, products, stack, trafficSnapshot } from "./data.js";
+import { buildAgentResults, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, formatCount, formatCurrency, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, stateLabel, summarizeAgents, summarizePayments } from "./view-model.js";
 
 const main = document.querySelector("#main-content");
 const modalRoot = document.querySelector("#modal-root");
@@ -9,6 +9,9 @@ const stackSummary = capabilityCounts(stack);
 let activeOverviewScenario = "complete";
 let invocationFilters = { ...defaultInvocationFilters };
 let agentFilters = { ...defaultAgentFilters };
+let policyDecisionFilters = { ...defaultPolicyDecisionFilters };
+let credentialFilters = { ...defaultCredentialFilters };
+let paymentFilters = { ...defaultPaymentFilters };
 let activeView = "overview";
 let previousFocus = null;
 
@@ -27,7 +30,8 @@ function pageHeader(kicker, title, description, actions = "") {
 }
 
 function fixtureContext(snapshot, label) {
-  return `<section class="control-evidence" aria-label="${label} fixture context"><div class="control-preview"><span class="fixture-dot"></span><span><strong>Preview data</strong><small>Not connected to Gateway</small></span></div><div><span>Workspace</span><strong>${snapshot.workspace}</strong></div><div><span>Environment scope</span><strong>${snapshot.environment}</strong></div><div><span>Source</span><strong>${snapshot.source}</strong></div><div><span>Refreshed</span><strong>${formatTimestamp(snapshot.refreshedAt)}</strong></div></section>`;
+  const range = snapshot.range ? `<div><span>Window</span><strong data-fixture-window>${snapshot.range}</strong></div>` : "";
+  return `<section class="control-evidence${snapshot.range ? " has-window" : ""}" aria-label="${label} fixture context"><div class="control-preview"><span class="fixture-dot"></span><span><strong>Preview data</strong><small>Not connected to Gateway</small></span></div><div><span>Workspace</span><strong>${snapshot.workspace}</strong></div><div><span>Environment scope</span><strong>${snapshot.environment}</strong></div><div><span>Source</span><strong>${snapshot.source}</strong></div><div><span>Refreshed</span><strong>${formatTimestamp(snapshot.refreshedAt)}</strong></div>${range}</section>`;
 }
 
 function currentOverviewModel() {
@@ -301,38 +305,103 @@ function environmentsView() {
   </section>`;
 }
 
+function policyRuleRows(rules) {
+  return rules.map((rule) => `<article class="policy-rule-row"><span class="rule-order">${String(rule.order).padStart(2, "0")}</span><span data-label="Rule"><strong>${rule.name}</strong><small>${rule.dimension} · ${rule.match}</small></span><span data-label="Scope"><strong>${rule.scope}</strong><small>First matching rule wins</small></span><span data-label="Action">${status(rule.action, rule.action)}</span><span data-label="Decisions"><strong>${rule.decisions.toLocaleString("en-US")}</strong><small>Fixed fixture aggregate</small></span><button class="inspect-button" data-policy-rule="${rule.id}" aria-label="Inspect policy rule ${rule.name}">Inspect →</button></article>`).join("");
+}
+
+function policyDecisionRows(items) {
+  if (!items.length) return `<div class="governance-empty"><p class="kicker">Filtered fixture</p><h2>No fixture policy decisions match</h2><p>Adjust the in-memory filters. This does not mean the tenant has no decisions or policy is unavailable.</p><button class="button secondary" id="empty-clear-policy-filters">Clear filters</button></div>`;
+  const rulesByID = new Map(policies.rules.map((rule) => [rule.id, rule]));
+  return items.map((decision) => {
+    const rule = rulesByID.get(decision.ruleID);
+    return `<article class="policy-decision-row"><span data-label="Time"><strong>${formatTimestamp(decision.occurredAt)}</strong><small class="mono">${decision.id}</small></span><span data-label="Action">${status(decision.action, decision.action)}<small>${decision.action === "warn" ? "Recorded · forwarded" : decision.action === "deny" ? "Stopped" : "Forwarded"}</small></span><span data-label="Agent / operation"><strong>${decision.agent}</strong><small>${decision.protocol.toUpperCase()} · ${decision.method}${decision.tool ? ` · ${decision.tool}` : ""}</small></span><span data-label="Rule"><strong>${rule ? `${String(rule.order).padStart(2, "0")} · ${rule.name}` : "Default action"}</strong><small>${decision.reason}</small></span><button class="inspect-button" data-policy-decision="${decision.id}" aria-label="Inspect policy decision ${decision.id}">Inspect →</button></article>`;
+  }).join("");
+}
+
 function policiesView() {
-  return `<section class="page-enter">
-    ${pageHeader("Control · available OSS", "Policies", "Evaluate identity, agent, MCP tool, body size and caller rate before payment or proxying.", '<button class="button secondary" data-action="simulate">Simulate request</button><button class="button primary" data-action="edit-policy">Edit policy</button>')}
-    <div class="policy-posture"><div><p class="kicker">No rule matched</p><strong>${policies.default}</strong><small>Default action</small></div><div><p class="kicker">Evaluation failed</p><strong>${policies.onError}</strong><small>Failure posture</small></div><div><p class="kicker">Order</p><strong>Policy first</strong><small>Before payment and proxy</small></div></div>
-    <div class="two-column policy-layout"><section class="panel"><div class="panel-heading"><div><p class="kicker">Rules</p><h2>Policy document</h2></div><span class="mono muted">PUT /v1/policy</span></div><div class="rule-list">${policies.rules.map((rule, index) => `<button data-rule="${index}"><span class="rule-order">${index + 1}</span><span><strong>${rule.name}</strong><small>${rule.match} · ${rule.scope}</small></span>${status(rule.action, rule.action)}<span><strong>${rule.decisions}</strong><small>Decisions</small></span><span>→</span></button>`).join("")}</div></section><section class="panel"><div class="panel-heading"><div><p class="kicker">Audit</p><h2>Recent decisions</h2></div></div><div class="decision-list">${policies.decisions.map((decision) => `<div><span>${status(decision.action, decision.action)}</span><span><strong>${decision.agent} · ${decision.tool}</strong><small>${decision.rule} · ${decision.reason}</small></span><em>${decision.time}</em></div>`).join("")}</div><button class="text-button panel-link">Open all decisions →</button></section></div>
+  const model = buildPolicyModel(policies);
+  const result = buildPolicyDecisionResults(policies.decisions, model.rules, policyDecisionFilters);
+  return `<section class="page-enter governance-page policy-page">
+    ${pageHeader("Control · available OSS", "Policies", "Effective posture, ordered rules, and caller-safe decision evidence from a fixed fixture.", '<button class="button secondary" data-action="simulate">Simulate concept</button><button class="button secondary" data-action="edit-policy">Edit policy concept</button>')}
+    ${fixtureContext(policySnapshot, "Policy")}
+    <section class="policy-posture"><div><p class="kicker">No rule matched</p><strong>${model.defaultAction === "unknown" ? "Unknown" : model.defaultAction}</strong><small>Configured default</small></div><div><p class="kicker">Evaluation error</p><strong>${model.onErrorAction === "unknown" ? "Unknown" : model.onErrorAction}</strong><small><code>on_error</code> posture</small></div><div><p class="kicker">Store outage</p><strong>${model.outagePosture === "fail_closed" ? "Fail closed" : "Unknown"}</strong><small>Current OSS behavior</small></div><div><p class="kicker">Evaluation order</p><strong>Policy first</strong><small>Before payment and proxy</small></div></section>
+    <section class="policy-semantics" aria-label="Policy action semantics"><span><b>Allow</b>Forward request</span><span><b>Warn</b>Record and forward</span><span><b>Deny</b>Stop request</span><span><b>Error</b>Use <code>on_error</code></span></section>
+    <section class="panel policy-rules-panel"><div class="panel-heading"><div><p class="kicker">Ordered policy document</p><h2>${formatCount(model.rules.length, "rule")}</h2></div><div class="policy-counts"><span>${model.actionCounts.allow} allow</span><span>${model.actionCounts.warn} warn</span><span>${model.actionCounts.deny} deny</span></div></div><div class="policy-rule-columns" aria-hidden="true"><span>Order</span><span>Rule</span><span>Scope</span><span>Action</span><span>Decisions</span><span>Action</span></div><div class="policy-rule-list">${policyRuleRows(model.rules)}</div></section>
+    <section class="policy-decision-section"><div class="section-heading compact-heading"><div><p class="kicker">Decision audit</p><h2>Fixture decisions</h2></div><p>Newest first · safe metadata only</p></div>
+      <section class="governance-filters" aria-label="Filter fixture policy decisions"><label class="governance-search"><span>Search</span><input id="policy-search" data-policy-filter="query" type="search" placeholder="ID, agent, operation, reason, or rule" autocomplete="off"></label><label><span>Action</span><select id="policy-action" data-policy-filter="action"><option value="all">All</option><option value="allow">Allow</option><option value="warn">Warn</option><option value="deny">Deny</option></select></label><label><span>Rule</span><select id="policy-rule" data-policy-filter="rule"><option value="all">All</option><option value="default">Default action</option>${model.rules.map((rule) => `<option value="${rule.id}">${String(rule.order).padStart(2, "0")} · ${rule.name}</option>`).join("")}</select></label><button class="button secondary" id="clear-policy-filters">Clear filters</button></section>
+      <div class="governance-results-heading"><p id="policy-result-count" aria-live="polite"><strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small></p><span>${policySnapshot.range} · fixed clock</span></div>
+      <section class="policy-decision-list" id="policy-decision-results">${policyDecisionRows(result.rows)}</section>
+    </section>
+    <section class="policy-limitations"><div><p class="kicker">Current OSS limitations</p><h2>Failure posture is part of the contract.</h2></div><div><span><b>Policy store outage</b>Fails closed today; this is not a normal deny-rule match.</span><span><b>Chunked streaming</b><code>max_body_bytes</code> cannot provide the same enforcement when body length is unavailable.</span></div></section>
   </section>`;
 }
 
+function credentialRows(items) {
+  if (!items.length) return `<div class="governance-empty"><p class="kicker">Filtered fixture</p><h2>No fixture credential metadata matches</h2><p>Adjust the in-memory filters. This does not mean the tenant has no credential metadata.</p><button class="button secondary" id="empty-clear-credential-filters">Clear filters</button></div>`;
+  return items.map((credential) => {
+    const reference = credentialReferenceState(credential);
+    return `<article class="credential-row"><span data-label="Credential"><strong>${credential.name ?? "Unknown"}</strong><small class="mono">${credential.id ?? "Unknown"}</small></span><span data-label="Source">${status(credentialSourceLabel(credential), credential.source === "managed" ? "managed" : credential.source === "external_vault" ? "vault" : "unavailable")}</span><span data-label="Auth type"><strong>${credentialAuthLabel(credential)}</strong><small>Metadata only</small></span><span data-label="Safe hint"><strong class="mono">${credentialHintLabel(credential)}</strong><small>No value is available</small></span><span data-label="Version"><strong>${Number.isInteger(credential.version) ? `v${credential.version}` : "Unknown"}</strong><small>${formatTimestamp(credential.updatedAt)}</small></span><span data-label="References">${status(reference.label, reference.id === "referenced" ? "review" : reference.id === "unreferenced" ? "empty" : "unavailable")}</span><button class="inspect-button" data-credential="${credential.id}" aria-label="Inspect credential metadata ${credential.name}">Inspect →</button></article>`;
+  }).join("");
+}
+
 function credentialsView() {
-  return `<section class="page-enter">
-    ${pageHeader("Control · available OSS", "Credentials", "Managed secrets and vault references are injected only after policy allows a call.", '<button class="button primary" data-action="add-credential">＋ Store credential</button>')}
-    <div class="security-rule"><span>⌑</span><div><strong>Secrets never leave Gateway.</strong><p>Reads return metadata and a masked hint only. Caller OAuth tokens are stripped before proxying.</p></div>${status("Tenant isolated", "available")}</div>
-    <section class="panel"><div class="credential-table"><div class="credential-row table-head"><span>Name</span><span>Source</span><span>Masked reference</span><span>Version</span><span>Used by</span><span>Last rotated</span><span></span></div>${credentials.map((credential) => `<button class="credential-row" data-credential="${credential.name}"><span><strong>${credential.name}</strong><small>${credential.type}</small></span><span>${status(credential.source, credential.source.toLowerCase())}</span><span class="mono">${credential.hint}</span><span>v${credential.version}</span><span>${credential.usedBy}</span><span>${credential.rotated}</span><span>→</span></button>`).join("")}</div></section>
-    <div class="footnote"><span>Delete is blocked while referenced.</span><span>Managed values are envelope-encrypted.</span><span>Vault references remain external.</span></div>
+  const safeCredentials = credentials.map(safeCredentialMetadata);
+  const result = buildCredentialResults(credentials, credentialFilters);
+  const managed = safeCredentials.filter((credential) => credential.source === "managed").length;
+  const external = safeCredentials.filter((credential) => credential.source === "external_vault").length;
+  const referenced = safeCredentials.filter((credential) => credentialReferenceState(credential).id === "referenced").length;
+  const unreferenced = safeCredentials.filter((credential) => credentialReferenceState(credential).id === "unreferenced").length;
+  return `<section class="page-enter governance-page credential-page">
+    ${pageHeader("Control · available OSS", "Credentials", "Safe metadata for write-only managed values and external references.", '<button class="button secondary" data-action="add-credential">Store credential concept</button>')}
+    ${fixtureContext(credentialSnapshot, "Credential metadata")}
+    <section class="credential-safety"><span class="credential-safety-icon">⌑</span><div><p class="kicker">Hard boundary</p><h2>Metadata visible. Credential values absent.</h2><p>No plaintext, token, vault path, reveal, copy, or input surface exists in this fixture.</p></div>${status("Tenant isolated", "available")}</section>
+    <section class="metric-strip governance-metrics"><div><span>${safeCredentials.length}</span><small>Metadata records</small><em>Fixture count</em></div><div><span>${managed}</span><small>Managed</small><em>Envelope-encrypted posture</em></div><div><span>${external}</span><small>External vault</small><em>Path never returned</em></div><div><span>${referenced}</span><small>Referenced</small><em>Delete would conflict</em></div><div><span>${unreferenced}</span><small>Unreferenced</small><em>Preview still read-only</em></div></section>
+    <section class="governance-filters credential-filters" aria-label="Filter fixture credential metadata"><label class="governance-search"><span>Search</span><input id="credential-search" data-credential-filter="query" type="search" placeholder="ID, name, auth type, or referencing agent" autocomplete="off"></label><label><span>Source</span><select id="credential-source" data-credential-filter="source"><option value="all">All</option><option value="managed">Managed</option><option value="external_vault">External vault</option></select></label><label><span>Auth type</span><select id="credential-auth" data-credential-filter="authType"><option value="all">All</option><option value="bearer">Bearer</option><option value="api_key">API key</option><option value="none">None</option></select></label><label><span>Reference state</span><select id="credential-reference" data-credential-filter="reference"><option value="all">All</option><option value="referenced">Referenced</option><option value="unreferenced">Unreferenced</option></select></label><button class="button secondary" id="clear-credential-filters">Clear filters</button></section>
+    <div class="governance-results-heading"><p id="credential-result-count" aria-live="polite"><strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small></p><span>Allowlisted metadata only</span></div>
+    <div class="credential-columns" aria-hidden="true"><span>Credential</span><span>Source</span><span>Auth type</span><span>Safe hint</span><span>Version / updated</span><span>References</span><span>Action</span></div>
+    <section class="credential-list" id="credential-results">${credentialRows(result.rows)}</section>
+    <section class="credential-protection"><div><p class="kicker">Protection posture</p><h2>Server-side boundaries</h2></div><div><span><b>Managed values</b>Envelope-encrypted under tenant KEKs.</span><span><b>External vault</b>Value and path remain external and are not in this fixture.</span><span><b>Tenant KEK rotation</b>Internal seam · no public REST operation.</span><span><b>Injection</b>After policy allow; caller authorization is stripped.</span></div></section>
   </section>`;
 }
 
 function productsView() {
-  return `<section class="page-enter">
-    ${pageHeader("Revenue · product direction", "Products & portals", "Package an agent with access, documentation, usage and payment under your own domain.", '<button class="button primary" data-action="new-product">＋ New product concept</button>')}
+  return `<section class="page-enter governance-page products-page">
+    ${pageHeader("Revenue · planned product direction", "Products & portals", "Planned packaging concepts for access, documentation, usage, and payment.", '<button class="button secondary" data-action="new-product">Review product concept</button>')}
     <div class="availability-banner planned"><div>${status("Planned", "planned")}<h2>Not part of the current Gateway release.</h2><p>This preview shows the intended admin model without claiming that customer portals, plans or hosted billing are operational.</p></div><button class="button secondary" data-view="stack">See delivery status</button></div>
-    <div class="product-grid">${products.map((product) => `<article class="product-card"><div class="product-preview"><span class="mini-brand">Z</span><span class="mini-url">${product.domain}</span><strong>${product.name}</strong><small>Powered by ${product.agent}</small></div><div class="product-copy"><span>${status(product.status, "planned")}</span><h2>${product.name}</h2><dl><div><dt>Agent</dt><dd>${product.agent}</dd></div><div><dt>Access</dt><dd>${product.access}</dd></div><div><dt>Price</dt><dd>${product.price}</dd></div></dl><button class="button secondary wide" data-action="product-preview">Open product concept</button></div></article>`).join("")}</div>
+    <div class="product-grid">${products.map((product) => `<article class="product-card"><div class="product-preview"><span class="mini-brand">Z</span><span class="mini-url">Concept URL · ${product.domain}</span><strong>${product.name}</strong><small>Powered by ${product.agent}</small></div><div class="product-copy"><span>${status(product.status, "planned")}</span><h2>${product.name}</h2><dl><div><dt>Agent concept</dt><dd>${product.agent}</dd></div><div><dt>Access concept</dt><dd>${product.access}</dd></div><div><dt>Price concept</dt><dd>${product.price}</dd></div></dl><button class="button secondary wide" data-action="product-preview">Open product concept</button></div></article>`).join("")}</div>
     <section class="capability-checklist"><div><strong>Product manifest</strong><small>Machine-readable capabilities and terms</small>${status("Direction", "planned")}</div><div><strong>Customer access</strong><small>OIDC, plans, quotas and documentation</small>${status("Planned", "planned")}</div><div><strong>Usage & billing</strong><small>Metering, invoices and spend limits</small>${status("Commercial concept", "planned")}</div></section>
   </section>`;
 }
 
+function paymentRangeLabel(value) {
+  return { "5m": "Last 5 minutes", "15m": "Last 15 minutes", "24h": "Last 24 hours" }[value] ?? "Last 24 hours";
+}
+
+function paymentRows(items) {
+  if (!items.length) return `<div class="governance-empty"><p class="kicker">Filtered fixture</p><h2>No fixture payment operations match</h2><p>Adjust the in-memory filters. This does not mean the tenant has no payment operations.</p><button class="button secondary" id="empty-clear-payment-filters">Clear filters</button></div>`;
+  return items.map((operation) => {
+    const settlementTone = operation.settlementState === "settlement_failed" || operation.settlementState === "settled_upstream_failed" ? "settlement_failed" : operation.settlementState === "settled" ? "settled" : operation.settlementState === "pending" ? "pending" : "empty";
+    const gateTone = operation.gateState === "verified" ? "available" : operation.gateState === "challenged" ? "pending" : "unavailable";
+    return `<article class="payment-row${operation.settlementState === "settlement_failed" || operation.settlementState === "settled_upstream_failed" ? " has-failure" : ""}"><span data-label="Time / ID"><strong>${formatTimestamp(operation.occurredAt)}</strong><small class="mono">${operation.id}</small></span><span data-label="Agent / operation"><strong>${operation.agent}</strong><small>${operation.operation}</small></span><span data-label="Amount"><strong>${formatCurrency(operation.amountCents, operation.currency)}</strong><small>${operation.asset} · ${operation.network}</small></span><span data-label="Gateway gate">${status(paymentGateLabel(operation), gateTone)}</span><span data-label="Collection / settlement">${status(paymentSettlementLabel(operation), settlementTone)}</span><span data-label="Upstream"><strong>${paymentUpstreamLabel(operation)}</strong><small>${operation.invocationID ? `Invocation ${operation.invocationID}` : "No invocation record"}</small></span><span data-label="Facilitator"><strong>${facilitatorModeLabel(operation.facilitatorMode)}</strong><small>${operation.facilitatorMode === "self_hosted" ? "Available OSS fixture" : "Not configured"}</small></span><button class="inspect-button" data-payment="${operation.id}" aria-label="Inspect payment operation ${operation.id}">Inspect →</button></article>`;
+  }).join("");
+}
+
 function paymentsView() {
-  return `<section class="page-enter">
-    ${pageHeader("Revenue", "Payments", "Verify payment before forwarding, then settle through an independently verifying facilitator.", '<button class="button secondary" data-action="settlement-config">Settlement config</button>')}
-    <section class="payment-flow"><div><p class="kicker">Optional gate</p><strong>Identity + policy</strong><small>Denied requests never receive a payment challenge.</small></div><i>→</i><div><p class="kicker">Available OSS</p><strong>x402 verification</strong><small>Signed USDC authorization on Base.</small></div><i>→</i><div><p class="kicker">Separate deployable</p><strong>Facilitator</strong><small>Re-verifies, submits and records settlement.</small></div></section>
-    <section class="metric-strip compact"><div><span>$12.40</span><small>Volume today</small><em>48 settlements</em></div><div><span>$0.25</span><small>Top route price</small><em>research.report</em></div><div><span>97.9%</span><small>Settlement success</small><em>1 failed</em></div><div><span>Base</span><small>Network</small><em>USDC · exact scheme</em></div></section>
-    <div class="two-column"><section class="panel"><div class="panel-heading"><div><p class="kicker">Ledger</p><h2>Recent settlements</h2></div>${status("Facilitator configured", "available")}</div><div class="settlement-list">${settlements.map((item) => `<div><span class="mono">${item.id}</span><span><strong>${item.product}</strong><small>${item.payer}</small></span><span><strong>${item.amount}</strong><small>${item.rail}</small></span>${status(item.status, item.status)}<em>${item.time}</em></div>`).join("")}</div></section><section class="panel rail-card"><p class="kicker">Payment rails</p><h2>x402 is an adapter.<br>Not the product identity.</h2><div class="rail-list"><div><strong>USDC · Base</strong>${status("Available", "available")}</div><div><strong>Prepaid credits</strong>${status("Planned", "planned")}</div><div><strong>Invoice balance</strong>${status("Planned", "planned")}</div><div><strong>Card-backed billing</strong>${status("Planned", "planned")}</div><div><strong>Custom rail</strong>${status("Direction", "planned")}</div></div></section></div>
+  const summary = summarizePayments(paymentOperations);
+  const result = buildPaymentResults(paymentOperations, paymentFilters, paymentSnapshot.evaluatedAt);
+  const settlementOptions = [...new Set(paymentOperations.map((operation) => operation.settlementState))];
+  return `<section class="page-enter governance-page payments-page">
+    ${pageHeader("Revenue · available OSS evidence", "Payments", "Payment-gate, collection, settlement, and upstream outcomes from a fixed fixture.", '<button class="button secondary" data-action="settlement-config">Settlement config concept</button>')}
+    ${fixtureContext({ ...paymentSnapshot, range: paymentRangeLabel(paymentFilters.timeRange) }, "Payment operation")}
+    <section class="metric-strip governance-metrics payment-metrics"><div><span>${summary.collectedDisplay}</span><small>Collected</small><em>${summary.settledUpstreamFailures} later upstream failure</em></div><div><span>${summary.verified}</span><small>Verified authorizations</small><em>Verification is not collection</em></div><div><span>${summary.gateOnlyDisplay}</span><small>Gate-only verified</small><em>Not collected</em></div><div><span>${summary.settlementFailures}</span><small>Settlement failures</small><em>Upstream not called</em></div><div><span>${summary.challenges}</span><small>402 challenges</small><em>No invocation created</em></div></section>
+    <section class="payment-order"><span><b>1 · Policy</b>Denied requests do not pay</span><i>→</i><span><b>2 · Gateway gate</b>x402 exact · USDC · Base</span><i>→</i><span><b>3 · Facilitator</b>Optional independent settlement</span><i>→</i><span><b>4 · Upstream</b>Only after required settlement</span></section>
+    <section class="governance-filters payment-filters" aria-label="Filter fixture payment operations"><label class="governance-search"><span>Search</span><input id="payment-search" data-payment-filter="query" type="search" placeholder="ID, invocation, agent, or operation" autocomplete="off"></label><label><span>Gateway gate</span><select id="payment-gate" data-payment-filter="gate"><option value="all">All</option><option value="challenged">Challenged</option><option value="verified">Verified</option></select></label><label><span>Settlement</span><select id="payment-settlement" data-payment-filter="settlement"><option value="all">All</option>${settlementOptions.map((value) => `<option value="${value}">${value.replaceAll("_", " ")}</option>`).join("")}</select></label><label><span>Time range</span><select id="payment-time-range" data-payment-filter="timeRange"><option value="5m">Last 5 minutes</option><option value="15m">Last 15 minutes</option><option value="24h">Last 24 hours</option></select></label><button class="button secondary" id="clear-payment-filters">Clear filters</button></section>
+    <div class="governance-results-heading"><p id="payment-result-count" aria-live="polite"><strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small></p><span>Newest first · fixed fixture clock</span></div>
+    <div class="payment-columns" aria-hidden="true"><span>Time / ID</span><span>Agent / operation</span><span>Amount</span><span>Gateway gate</span><span>Collection / settlement</span><span>Upstream</span><span>Facilitator</span><span>Action</span></div>
+    <section class="payment-list" id="payment-results">${paymentRows(result.rows)}</section>
+    <section class="gate-only-warning"><div><p class="kicker">Gate-only limitation</p><h2>Verified is not collected.</h2></div><p>Replay protection is best effort until settlement consumes the authorization on-chain. Do not treat gate-only verification as final revenue.</p></section>
+    <section class="facilitator-posture"><div><p class="kicker">Tenant facilitator posture · fixture</p><h2>${facilitatorPosture.configured ? "Configured · readiness not claimed" : "Not configured"}</h2><p>${facilitatorPosture.source} · captured ${formatTimestamp(facilitatorPosture.capturedAt)}</p></div><div class="facilitator-facts"><span><b>Self-hosted</b>${status(deliveryTruthLabel(facilitatorPosture.selfHostedDelivery), "available")}</span><span><b>Managed</b>${status(deliveryTruthLabel(facilitatorPosture.managedDelivery), "commercial")}</span><span><b>Guardrails</b>${formatCurrency(facilitatorPosture.perTransactionLimitCents)} / transaction · ${formatCurrency(facilitatorPosture.dailyLimitCents)} / day</span><span><b>Duplicate protection</b>Nonce dedupe · single-flight</span></div><button class="inspect-button" data-facilitator aria-label="Inspect facilitator posture">Inspect posture →</button></section>
+    <section class="revenue-delivery"><div><p class="kicker">Delivery truth</p><h2>x402 is an adapter, not the product identity.</h2></div><div><span><b>Raw payment / settlement evidence</b>${status("Available OSS", "available")}</span><span><b>Managed revenue metering</b>${status("Commercial", "commercial")}</span><span><b>Invoices, quotas, spend limits</b>${status("Planned / commercial", "planned")}</span><span><b>Prepaid, card, custom rails</b>${status("Planned", "planned")}</span><span><b>Customer portals</b>${status("Planned", "planned")}</span></div></section>
   </section>`;
 }
 
@@ -450,10 +519,111 @@ function bindAgentFilters() {
   main.querySelector("#clear-agent-filters")?.addEventListener("click", () => clearAgentFilterState());
 }
 
+function bindGovernanceInspectButtons(scope = main) {
+  scope.querySelectorAll("[data-policy-rule]").forEach((button) => button.addEventListener("click", () => openPolicyRule(button.dataset.policyRule)));
+  scope.querySelectorAll("[data-policy-decision]").forEach((button) => button.addEventListener("click", () => openPolicyDecision(button.dataset.policyDecision)));
+  scope.querySelectorAll("[data-credential]").forEach((button) => button.addEventListener("click", () => openCredential(button.dataset.credential)));
+  scope.querySelectorAll("[data-payment]").forEach((button) => button.addEventListener("click", () => openPaymentOperation(button.dataset.payment)));
+  scope.querySelectorAll("[data-facilitator]").forEach((button) => button.addEventListener("click", openFacilitatorPosture));
+}
+
+function refreshPolicyDecisionResults() {
+  const container = main.querySelector("#policy-decision-results");
+  const count = main.querySelector("#policy-result-count");
+  if (!container || !count) return;
+  const result = buildPolicyDecisionResults(policies.decisions, policies.rules, policyDecisionFilters);
+  container.innerHTML = policyDecisionRows(result.rows);
+  count.innerHTML = `<strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small>`;
+  bindGovernanceInspectButtons(container);
+  container.querySelector("#empty-clear-policy-filters")?.addEventListener("click", () => clearPolicyFilterState(true));
+}
+
+function clearPolicyFilterState(focusSearch = false) {
+  policyDecisionFilters = { ...defaultPolicyDecisionFilters };
+  main.querySelectorAll("[data-policy-filter]").forEach((control) => { control.value = policyDecisionFilters[control.dataset.policyFilter]; });
+  refreshPolicyDecisionResults();
+  (focusSearch ? main.querySelector("#policy-search") : main.querySelector("#clear-policy-filters"))?.focus();
+}
+
+function bindPolicyFilters() {
+  const controls = main.querySelectorAll("[data-policy-filter]");
+  controls.forEach((control) => {
+    control.value = policyDecisionFilters[control.dataset.policyFilter];
+    control.addEventListener(control.matches("input") ? "input" : "change", () => {
+      policyDecisionFilters = { ...policyDecisionFilters, [control.dataset.policyFilter]: control.value };
+      refreshPolicyDecisionResults();
+    });
+  });
+  main.querySelector("#clear-policy-filters")?.addEventListener("click", () => clearPolicyFilterState());
+}
+
+function refreshCredentialResults() {
+  const container = main.querySelector("#credential-results");
+  const count = main.querySelector("#credential-result-count");
+  if (!container || !count) return;
+  const result = buildCredentialResults(credentials, credentialFilters);
+  container.innerHTML = credentialRows(result.rows);
+  count.innerHTML = `<strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small>`;
+  bindGovernanceInspectButtons(container);
+  container.querySelector("#empty-clear-credential-filters")?.addEventListener("click", () => clearCredentialFilterState(true));
+}
+
+function clearCredentialFilterState(focusSearch = false) {
+  credentialFilters = { ...defaultCredentialFilters };
+  main.querySelectorAll("[data-credential-filter]").forEach((control) => { control.value = credentialFilters[control.dataset.credentialFilter]; });
+  refreshCredentialResults();
+  (focusSearch ? main.querySelector("#credential-search") : main.querySelector("#clear-credential-filters"))?.focus();
+}
+
+function bindCredentialFilters() {
+  const controls = main.querySelectorAll("[data-credential-filter]");
+  controls.forEach((control) => {
+    control.value = credentialFilters[control.dataset.credentialFilter];
+    control.addEventListener(control.matches("input") ? "input" : "change", () => {
+      credentialFilters = { ...credentialFilters, [control.dataset.credentialFilter]: control.value };
+      refreshCredentialResults();
+    });
+  });
+  main.querySelector("#clear-credential-filters")?.addEventListener("click", () => clearCredentialFilterState());
+}
+
+function refreshPaymentResults() {
+  const container = main.querySelector("#payment-results");
+  const count = main.querySelector("#payment-result-count");
+  if (!container || !count) return;
+  const result = buildPaymentResults(paymentOperations, paymentFilters, paymentSnapshot.evaluatedAt);
+  container.innerHTML = paymentRows(result.rows);
+  count.innerHTML = `<strong>${result.summary}</strong><small>${result.activeFilters.length ? formatCount(result.activeFilters.length, "active filter") : "Default fixture view"}</small>`;
+  const windowLabel = main.querySelector("[data-fixture-window]");
+  if (windowLabel) windowLabel.textContent = paymentRangeLabel(paymentFilters.timeRange);
+  bindGovernanceInspectButtons(container);
+  container.querySelector("#empty-clear-payment-filters")?.addEventListener("click", () => clearPaymentFilterState(true));
+}
+
+function clearPaymentFilterState(focusSearch = false) {
+  paymentFilters = { ...defaultPaymentFilters };
+  main.querySelectorAll("[data-payment-filter]").forEach((control) => { control.value = paymentFilters[control.dataset.paymentFilter]; });
+  refreshPaymentResults();
+  (focusSearch ? main.querySelector("#payment-search") : main.querySelector("#clear-payment-filters"))?.focus();
+}
+
+function bindPaymentFilters() {
+  const controls = main.querySelectorAll("[data-payment-filter]");
+  controls.forEach((control) => {
+    control.value = paymentFilters[control.dataset.paymentFilter];
+    control.addEventListener(control.matches("input") ? "input" : "change", () => {
+      paymentFilters = { ...paymentFilters, [control.dataset.paymentFilter]: control.value };
+      refreshPaymentResults();
+    });
+  });
+  main.querySelector("#clear-payment-filters")?.addEventListener("click", () => clearPaymentFilterState());
+}
+
 function bindPageEvents() {
   main.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => render(button.dataset.view)));
   bindAgentInspectButtons();
   bindInvocationButtons();
+  bindGovernanceInspectButtons();
   main.querySelectorAll("[data-environment]").forEach((button) => button.addEventListener("click", () => openEnvironment(button.dataset.environment)));
   main.querySelectorAll("[data-onboarding]").forEach((button) => button.addEventListener("click", () => openOnboardingEvidence(button.dataset.onboarding)));
   main.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
@@ -462,6 +632,9 @@ function bindPageEvents() {
   if (scenario) scenario.addEventListener("change", () => { activeOverviewScenario = scenario.value; render("overview"); main.querySelector("#overview-scenario")?.focus(); });
   bindInvocationFilters();
   bindAgentFilters();
+  bindPolicyFilters();
+  bindCredentialFilters();
+  bindPaymentFilters();
 }
 
 function handleAction(action) {
@@ -470,6 +643,44 @@ function handleAction(action) {
   if (concepts.has(action)) return openConcept(action);
   if (action === "export") return showToast("Preview only — no invocation data was exported.");
   if (action === "mark-reviewed") return showToast("Preview only — the attention queue was not changed.");
+}
+
+function openPolicyRule(id) {
+  const model = buildPolicyModel(policies);
+  const rule = model.rules.find((item) => item.id === id); if (!rule) return;
+  const limitation = rule.id === "rule_large_request" ? '<div class="drawer-copy"><strong>Chunked streaming limitation</strong><p><code>max_body_bytes</code> cannot provide the same enforcement when body length is unavailable.</p></div>' : "";
+  openDrawer(rule.name, `Order ${String(rule.order).padStart(2, "0")} · policy fixture`, `${status(rule.action, rule.action)}<div class="read-only-banner"><strong>Read-only rule evidence</strong><span>No reorder, edit, enable, disable, or policy write occurs here.</span></div><section class="drawer-section"><h3>Ordered rule</h3>${detailRows([["Rule ID", rule.id], ["Order", String(rule.order).padStart(2, "0")], ["Match dimension", rule.dimension], ["Safe match", rule.match], ["Scope", rule.scope], ["Action", rule.action], ["Decision aggregate", rule.decisions.toLocaleString("en-US")], ["Semantics", rule.action === "warn" ? "Record and forward" : rule.action === "deny" ? "Stop request" : "Forward request"]])}</section>${limitation}<div class="drawer-copy compact"><p>Rules evaluate in order; the first match wins. No fixture request was evaluated by opening this drawer.</p></div>`);
+}
+
+function openPolicyDecision(id) {
+  const decision = policies.decisions.find((item) => item.id === id); if (!decision) return;
+  const rule = policies.rules.find((item) => item.id === decision.ruleID);
+  openDrawer(decision.id, `${decision.agent} · policy decision fixture`, `${status(decision.action, decision.action)}<div class="read-only-banner"><strong>Captured decision metadata</strong><span>No request is replayed and no policy state changes.</span></div><section class="drawer-section"><h3>Decision</h3>${detailRows([["Occurred", formatTimestamp(decision.occurredAt)], ["Action", decision.action], ["Semantics", decision.action === "warn" ? "Recorded · request forwarded" : decision.action === "deny" ? "Request stopped" : "Request forwarded"], ["Agent", decision.agent], ["Protocol", decision.protocol.toUpperCase()], ["Method", decision.method], ["Tool", decision.tool ?? "None"], ["Rule", rule ? `${String(rule.order).padStart(2, "0")} · ${rule.name}` : "Configured default"], ["Caller-safe reason", decision.reason], ["Source", decision.source]])}</section><div class="drawer-copy compact"><p>Only decision metadata is present. No body, arguments, outputs, caller token, raw error, header, or internal address is available.</p></div>`);
+}
+
+function openCredential(id) {
+  const source = credentials.find((item) => item.id === id); if (!source) return;
+  const credential = safeCredentialMetadata(source);
+  const reference = credentialReferenceState(credential);
+  const references = reference.id === "referenced" ? credential.references.join(" · ") : reference.id === "unreferenced" ? "None" : "Unknown";
+  const protection = credential.source === "managed" ? "Envelope-encrypted under tenant KEK" : credential.source === "external_vault" ? "Value and path remain external" : "Unknown";
+  openDrawer(credential.name ?? "Unknown credential", `${credential.id ?? "Unknown"} · safe metadata fixture`, `${status(credentialSourceLabel(credential), credential.source === "managed" ? "managed" : credential.source === "external_vault" ? "vault" : "unavailable")}<div class="read-only-banner"><strong>Credential value absent</strong><span>No plaintext, token, vault path, reveal, copy, rotate, delete, or input control exists.</span></div><section class="drawer-section"><h3>Allowlisted metadata</h3>${detailRows([["Credential ID", credential.id ?? "Unknown"], ["Name", credential.name ?? "Unknown"], ["Auth type", credentialAuthLabel(credential)], ["Source", credentialSourceLabel(credential)], ["Safe hint", credentialHintLabel(credential)], ["Version", Number.isInteger(credential.version) ? `v${credential.version}` : "Unknown"], ["Created", formatTimestamp(credential.createdAt)], ["Updated", formatTimestamp(credential.updatedAt)], ["Reference state", reference.label], ["Referencing agents", references]])}</section><section class="drawer-section"><h3>Operation posture</h3>${detailRows([["Delete", credentialDeletePosture(credential)], ["Injection", "Resolve only after policy allow"], ["Caller authorization", "Stripped before upstream injection"], ["Protection", protection], ["Tenant KEK rotation", "Internal seam · no public REST operation"]])}</section><div class="drawer-copy compact"><p>The Gateway API supports credential metadata operations, but this preview accepts, issues, replaces, persists, transmits, rotates, or deletes nothing.</p></div>`);
+}
+
+function paymentTraceMarkup(operation) {
+  return `<div class="trace" aria-label="Ordered payment lifecycle">${derivePaymentTrace(operation).map((stage, index) => `<div class="trace-stage ${stage.state}"><span class="trace-order">0${index + 1}</span><span><strong>${stage.label}</strong><small>${stage.detail}</small></span>${status(stage.state.replaceAll("_", " "), stage.state)}</div>`).join("")}</div>`;
+}
+
+function openPaymentOperation(id) {
+  const operation = paymentOperations.find((item) => item.id === id); if (!operation) return;
+  const diagnosis = derivePaymentDiagnosis(operation);
+  const diagnosisMarkup = diagnosis ? `<section class="payment-diagnosis"><div><p class="kicker">Failure diagnosis</p><h3>${diagnosis.stage}</h3><p>${diagnosis.classification}</p></div>${detailRows([["Money", diagnosis.money], ["Upstream", diagnosis.upstream], ["Settlement attempts", diagnosis.settlementAttempts]])}</section>` : "";
+  const replay = operation.settlementState === "not_configured" ? '<div class="drawer-copy"><strong>Gate-only replay boundary</strong><p>Replay protection is best effort. Verification is not collection or on-chain nonce consumption.</p></div>' : "";
+  openDrawer(operation.id, `${operation.agent} · payment operation fixture`, `${status(paymentSettlementLabel(operation), operation.settlementState === "settlement_failed" || operation.settlementState === "settled_upstream_failed" ? "settlement_failed" : operation.settlementState === "settled" ? "settled" : operation.gateState === "challenged" ? "pending" : "empty")}<div class="read-only-banner"><strong>Captured payment metadata</strong><span>No authorization, payment, settlement, retry, or proxy request occurs here.</span></div>${diagnosisMarkup}<section class="drawer-section"><h3>Lifecycle</h3>${paymentTraceMarkup(operation)}</section><section class="drawer-section"><h3>Safe metadata</h3>${detailRows([["Occurred", formatTimestamp(operation.occurredAt)], ["Agent", operation.agent], ["Operation", operation.operation], ["Amount", `${formatCurrency(operation.amountCents, operation.currency)} · ${operation.asset} · ${operation.network}`], ["Gateway gate", paymentGateLabel(operation)], ["Settlement", paymentSettlementLabel(operation)], ["Upstream", paymentUpstreamLabel(operation)], ["Facilitator", facilitatorModeLabel(operation.facilitatorMode)], ["Invocation", operation.invocationID ?? "None · challenge created no invocation"], ["Masked payer", operation.maskedPayer ?? "Not returned"], ["Settlement attempts", Number.isInteger(operation.settlementAttempts) ? String(operation.settlementAttempts) : "Unknown"]])}</section>${replay}<div class="drawer-copy compact"><p>No signature, nonce, transaction payload, endpoint, credential reference, RPC detail, raw error, or stack trace is present.</p></div>`);
+}
+
+function openFacilitatorPosture() {
+  openDrawer("Facilitator posture", "Tenant configuration fixture · readiness not claimed", `${status("Self-hosted · Available OSS", "available")}<div class="read-only-banner"><strong>Configuration evidence only</strong><span>No endpoint, credential, account, key, readiness, gas balance, or settlement request is available here.</span></div><section class="drawer-section"><h3>Configuration posture</h3>${detailRows([["Mode", facilitatorModeLabel(facilitatorPosture.mode)], ["Configured", facilitatorPosture.configured ? "Yes · fixture" : "No"], ["Endpoint", facilitatorPosture.endpointConfigured ? "Configured · value not shown" : "Not configured"], ["Credential", facilitatorPosture.credentialConfigured ? "Configured · value not shown" : "Not configured"], ["Captured", formatTimestamp(facilitatorPosture.capturedAt)], ["Per transaction", formatCurrency(facilitatorPosture.perTransactionLimitCents)], ["Daily ceiling", formatCurrency(facilitatorPosture.dailyLimitCents)], ["Fixture daily use", formatCurrency(facilitatorPosture.dailyUsedCents)]])}</section><section class="drawer-section"><h3>Settlement contract</h3><div class="drawer-copy"><strong>Independent verification</strong><p>The facilitator independently re-verifies before settlement. Per-transaction and daily guardrails apply.</p></div><div class="drawer-copy"><strong>Duplicate protection</strong><p>Nonce dedupe and single-flight reduce duplicate settlement; they do not turn gate-only verification into collection.</p></div><div class="drawer-copy"><strong>No custody</strong><p>The facilitator relays gas and never custodies payer or operator funds.</p></div></section><section class="drawer-section"><h3>Delivery truth</h3>${detailRows([["Self-hosted facilitator", deliveryTruthLabel(facilitatorPosture.selfHostedDelivery)], ["Managed facilitator", deliveryTruthLabel(facilitatorPosture.managedDelivery)]])}</section>`);
 }
 
 function openAgent(id) {
@@ -563,12 +774,12 @@ function openConcept(action) {
     "add-agent": ["Agent catalog", "Register an agent", "The Gateway API supports tenant-scoped catalog registration. This fixture preview accepts no configuration or credential input and will not write to Gateway."],
     "edit-agent": ["Agent catalog", "Edit agent configuration", "The Gateway API supports catalog updates. This read-only fixture does not change routing, suspension, rates, credentials, pricing, or any other configuration."],
     connect: ["Environments", "Review environment concept", "Local discovery and observe-only enrollment are in review in PR #46. Remote pairing and missions are planned; this fixture performs neither."],
-    "add-credential": ["Credentials", "Store a credential", "The API accepts managed secrets or external vault references. This preview never accepts or stores secret material."],
+    "add-credential": ["Credentials", "Store credential concept", "The API accepts write-only managed values or external references. This preview contains no fields and accepted, issued, replaced, persisted, or transmitted no credential material."],
     "new-product": ["Product direction", "Create an agent product", "Customer portals, plan management and hosted billing are product direction, not shipped Gateway capabilities."],
     "product-preview": ["Product direction", "Customer portal concept", "A future portal will expose capabilities, documentation, access and optional payment under the operator’s domain."],
-    "settlement-config": ["Payments", "Settlement configuration", "Gateway can point to a self-hosted or managed facilitator. This preview does not alter the configured URL or credential reference."],
-    "edit-policy": ["Policies", "Edit policy document", "Gateway supports replacing the tenant policy today. This preview does not mutate a live policy."],
-    simulate: ["Policies", "Simulate a request", "A safe policy simulator is a useful admin capability, but it is not currently exposed by the Gateway API."],
+    "settlement-config": ["Payments", "Settlement config concept", "Gateway exposes tenant settlement configuration. This preview accepts no URL, credential reference, account, key, guardrail, or secret and changes no configuration."],
+    "edit-policy": ["Policies", "Edit policy concept", "Gateway supports replacing the tenant policy. This fixture accepts no policy input and changed no rule, decision, or request."],
+    simulate: ["Policies", "Simulate request concept", "A safe policy simulator is not currently exposed by the Gateway API. No request input is accepted, evaluated, or recorded."],
   }[action];
   if (!copy) return;
   openModal(copy[0], copy[1], `<p class="modal-lead">${copy[2]}</p><div class="availability-note"><strong>Preview only.</strong> No mutation, request, credential input, or browser storage write occurred.</div>`);

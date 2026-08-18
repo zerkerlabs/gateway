@@ -3,7 +3,7 @@ export const overviewSnapshot = {
   environment: "All environments",
   range: "Last 24 hours",
   capturedAt: "2026-08-18T09:10:00Z",
-  paymentVolumeCents: 1240,
+  paymentVolumeCents: 50,
   paymentCurrency: "USD",
 };
 
@@ -48,6 +48,32 @@ export const environmentSnapshot = {
   refreshedAt: "2026-08-18T09:12:00Z",
   evaluatedAt: "2026-08-18T09:12:00Z",
   observerRecentWithinMs: 5 * 60 * 1000,
+};
+
+export const policySnapshot = {
+  workspace: "Zerker Labs",
+  environment: "All environments",
+  source: "Policy and decision fixture v1",
+  refreshedAt: "2026-08-18T09:12:00Z",
+  evaluatedAt: "2026-08-18T09:12:00Z",
+  range: "Last 24 hours",
+};
+
+export const credentialSnapshot = {
+  workspace: "Zerker Labs",
+  environment: "All environments",
+  source: "Credential metadata fixture v1",
+  refreshedAt: "2026-08-18T09:12:00Z",
+  evaluatedAt: "2026-08-18T09:12:00Z",
+};
+
+export const paymentSnapshot = {
+  workspace: "Zerker Labs",
+  environment: "All environments",
+  source: "Payment operation fixture v1",
+  refreshedAt: "2026-08-18T09:12:00Z",
+  evaluatedAt: "2026-08-18T09:12:00Z",
+  range: "Last 24 hours",
 };
 
 export const agents = [
@@ -120,25 +146,29 @@ export const attention = [
 export const policies = {
   default: "allow",
   onError: "deny",
+  outagePosture: "fail_closed",
   rules: [
-    { name: "Block destructive tools", match: "delete_* · write_production", scope: "All agents", action: "deny", decisions: 2 },
-    { name: "Protect large requests", match: "Body ≥ 8 MB", scope: "Support agent", action: "warn", decisions: 7 },
-    { name: "Research rate boundary", match: "> 60 requests/min", scope: "Research agent", action: "deny", decisions: 0 },
-    { name: "Release tools only", match: "check_*", scope: "Release reviewer", action: "allow", decisions: 41 },
+    { id: "rule_destructive", order: 1, name: "Block destructive tools", dimension: "MCP tool", match: "delete_* · write_production", scope: "All agents", action: "deny", decisions: 2 },
+    { id: "rule_large_request", order: 2, name: "Protect large requests", dimension: "Body size", match: "Body ≥ 8 MB", scope: "Support agent", action: "warn", decisions: 7 },
+    { id: "rule_research_rate", order: 3, name: "Research rate boundary", dimension: "Caller rate", match: "> 60 requests/min", scope: "Research agent", action: "deny", decisions: 0 },
+    { id: "rule_release_tools", order: 4, name: "Release tools only", dimension: "MCP tool", match: "check_*", scope: "Release reviewer", action: "allow", decisions: 41 },
   ],
   decisions: [
-    { time: "4m", agent: "Docs search", tool: "search_docs", action: "warn", rule: "Protect large requests", reason: "Response budget approached" },
-    { time: "21m", agent: "Support agent", tool: "delete_customer", action: "deny", rule: "Block destructive tools", reason: "Tool matched deny rule" },
-    { time: "46m", agent: "Release reviewer", tool: "check_release", action: "allow", rule: "Release tools only", reason: "Explicit tool allow-list" },
+    { id: "dec_205", occurredAt: "2026-08-18T09:08:00Z", agent: "Docs search", protocol: "mcp", method: "tools/call", tool: "search_docs", action: "warn", ruleID: "rule_large_request", reason: "Body-size metadata matched warning rule", source: "Policy decision fixture" },
+    { id: "dec_204", occurredAt: "2026-08-18T08:51:00Z", agent: "Support agent", protocol: "mcp", method: "tools/call", tool: "delete_customer", action: "deny", ruleID: "rule_destructive", reason: "Tool metadata matched deny rule", source: "Policy decision fixture" },
+    { id: "dec_203", occurredAt: "2026-08-18T08:26:00Z", agent: "Release reviewer", protocol: "mcp", method: "tools/call", tool: "check_release", action: "allow", ruleID: "rule_release_tools", reason: "Explicit tool allow-list", source: "Policy decision fixture" },
+    { id: "dec_202", occurredAt: "2026-08-18T07:40:00Z", agent: "Research agent", protocol: "mcp", method: "resources/list", tool: null, action: "allow", ruleID: null, reason: "No rule matched; default applied", source: "Policy decision fixture" },
+    { id: "dec_201", occurredAt: "2026-08-18T06:20:00Z", agent: "Support agent", protocol: "http", method: "HTTP", tool: null, action: "warn", ruleID: "rule_large_request", reason: "Body-size metadata matched warning rule", source: "Policy decision fixture" },
   ],
 };
 
 export const credentials = [
-  { name: "support-production", type: "Bearer", source: "Managed", hint: "•••• 8F2A", version: 4, usedBy: "Support agent", rotated: "12 days ago" },
-  { name: "research-vault", type: "API key", source: "Vault", hint: "vault://research/prod", version: 2, usedBy: "Research agent", rotated: "5 days ago" },
-  { name: "github-app", type: "Bearer", source: "Managed", hint: "•••• C91D", version: 7, usedBy: "Release reviewer", rotated: "Yesterday" },
-  { name: "docs-api", type: "API key", source: "Managed", hint: "•••• 44E0", version: 3, usedBy: "Docs search", rotated: "28 days ago" },
-  { name: "openai-team", type: "Bearer", source: "Managed", hint: "•••• D117", version: 5, usedBy: "Code generator", rotated: "8 days ago" },
+  { id: "cred_support", name: "support-production", authType: "bearer", source: "managed", maskedLastFour: "8F2A", version: 4, references: ["Support agent"], createdAt: "2026-06-04T11:20:00Z", updatedAt: "2026-08-06T15:30:00Z" },
+  { id: "cred_research", name: "research-vault", authType: "api_key", source: "external_vault", maskedLastFour: null, version: 2, references: ["Research agent"], createdAt: "2026-06-18T08:40:00Z", updatedAt: "2026-08-13T10:05:00Z" },
+  { id: "cred_github", name: "github-app", authType: "bearer", source: "managed", maskedLastFour: "C91D", version: 7, references: ["Release reviewer"], createdAt: "2026-05-21T09:10:00Z", updatedAt: "2026-08-17T14:18:00Z" },
+  { id: "cred_docs", name: "docs-api", authType: "api_key", source: "managed", maskedLastFour: "44E0", version: 3, references: ["Docs search"], createdAt: "2026-07-02T13:25:00Z", updatedAt: "2026-07-21T08:45:00Z" },
+  { id: "cred_openai", name: "openai-team", authType: "bearer", source: "managed", maskedLastFour: "D117", version: 5, references: ["Code generator"], createdAt: "2026-06-29T16:00:00Z", updatedAt: "2026-08-10T17:40:00Z" },
+  { id: "cred_staging", name: "staging-unused", authType: "api_key", source: "managed", maskedLastFour: null, version: 1, references: [], createdAt: "2026-08-15T12:10:00Z", updatedAt: "2026-08-15T12:10:00Z" },
 ];
 
 export const products = [
@@ -146,11 +176,27 @@ export const products = [
   { name: "Docs API", agent: "Docs search", access: "Public with payment", price: "$0.05 / call", status: "Concept", domain: "docs.example.com" },
 ];
 
-export const settlements = [
-  { id: "set_91A", product: "Research reports", payer: "0x72…9ac", amount: "$0.25", rail: "x402 · USDC", status: "settled", time: "3m" },
-  { id: "set_919", product: "Docs API", payer: "0x18…2de", amount: "$0.05", rail: "x402 · USDC", status: "settled", time: "12m" },
-  { id: "set_918", product: "Research reports", payer: "0xb4…813", amount: "$0.25", rail: "x402 · USDC", status: "failed", time: "38m" },
+export const paymentOperations = [
+  { id: "pay_305", occurredAt: "2026-08-18T09:12:00Z", agent: "Research agent", operation: "research.report", amountCents: 25, currency: "USD", asset: "USDC", network: "Base", gateState: "challenged", settlementState: "not_reached", upstreamState: "not_reached", facilitatorMode: "self_hosted", invocationID: null, maskedPayer: null, settlementAttempts: 0, reason: "Payment authorization required" },
+  { id: "pay_304", occurredAt: "2026-08-18T09:10:00Z", agent: "Docs search", operation: "search_docs", amountCents: 5, currency: "USD", asset: "USDC", network: "Base", gateState: "verified", settlementState: "not_configured", upstreamState: "succeeded", facilitatorMode: "gate_only", invocationID: "inv_7HE9", maskedPayer: "0x18…2de", settlementAttempts: 0, reason: null },
+  { id: "pay_303", occurredAt: "2026-08-18T09:08:00Z", agent: "Research agent", operation: "research.report", amountCents: 25, currency: "USD", asset: "USDC", network: "Base", gateState: "verified", settlementState: "settled", upstreamState: "succeeded", facilitatorMode: "self_hosted", invocationID: "inv_7HF1", maskedPayer: "0x72…9ac", settlementAttempts: 1, reason: null },
+  { id: "pay_302", occurredAt: "2026-08-18T09:06:00Z", agent: "Docs search", operation: "search_docs", amountCents: 5, currency: "USD", asset: "USDC", network: "Base", gateState: "verified", settlementState: "settlement_failed", upstreamState: "not_called", facilitatorMode: "self_hosted", invocationID: "inv_7HE6", maskedPayer: "0xb4…813", settlementAttempts: 2, reason: "Payment could not be collected" },
+  { id: "pay_301", occurredAt: "2026-08-18T09:03:00Z", agent: "Research agent", operation: "research.report", amountCents: 25, currency: "USD", asset: "USDC", network: "Base", gateState: "verified", settlementState: "settled_upstream_failed", upstreamState: "failed", facilitatorMode: "self_hosted", invocationID: "inv_7HE7", maskedPayer: "0x91…7af", settlementAttempts: 1, reason: "Upstream failed after settlement" },
 ];
+
+export const facilitatorPosture = {
+  mode: "self_hosted",
+  configured: true,
+  endpointConfigured: true,
+  credentialConfigured: true,
+  perTransactionLimitCents: 1000,
+  dailyLimitCents: 10000,
+  dailyUsedCents: 50,
+  source: "Facilitator configuration fixture",
+  capturedAt: "2026-08-18T09:12:00Z",
+  selfHostedDelivery: "available",
+  managedDelivery: "commercial",
+};
 
 export const environments = [
   {

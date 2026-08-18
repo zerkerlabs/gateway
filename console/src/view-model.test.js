@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agents, attention, environmentSnapshot, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, policies, stack, trafficSnapshot } from "./data.js";
-import { buildAgentResults, buildInvocationResults, buildOverviewModel, capabilityCounts, catalogStatusReason, credentialReferenceLabel, defaultAgentFilters, defaultInvocationFilters, deriveCatalogStatus, deriveDataState, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, filterAgents, filterInvocations, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, metricValueState, observerEvidenceLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, stateLabel, summarizeAgents, summarizeOverview } from "./view-model.js";
+import { agents, attention, credentials, environmentSnapshot, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, stack, trafficSnapshot } from "./data.js";
+import { buildAgentResults, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveDataState, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, filterCredentials, filterInvocations, filterPaymentOperations, filterPolicyDecisions, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, metricValueState, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, stateLabel, summarizeAgents, summarizeOverview, summarizePayments } from "./view-model.js";
 
 test("catalog status derivation preserves pending, active, inactive, and suspension independence", () => {
   assert.equal(deriveCatalogStatus({ upstreamConfigured: false, inactiveAt: null }), "pending");
@@ -77,6 +77,122 @@ test("unknown states never become active", () => {
   assert.equal(stateLabel("unexpected"), "Unknown");
 });
 
+test("policy model preserves order, aggregate action counts, defaults, and fail-closed posture", () => {
+  const sourceOrder = policies.rules.map((rule) => rule.id);
+  const model = buildPolicyModel(policies);
+  assert.deepEqual(model.rules.map((rule) => rule.order), [1, 2, 3, 4]);
+  assert.deepEqual(model.actionCounts, { allow: 41, warn: 7, deny: 2 });
+  assert.equal(model.rules.find((rule) => rule.id === "rule_research_rate").decisions, 0);
+  assert.equal(model.defaultAction, "allow");
+  assert.equal(model.onErrorAction, "deny");
+  assert.equal(model.outagePosture, "fail_closed");
+  assert.deepEqual(policies.rules.map((rule) => rule.id), sourceOrder);
+  assert.deepEqual(buildPolicyModel({ default: "unexpected", onError: null, rules: [] }), { rules: [], actionCounts: { allow: 0, warn: 0, deny: 0 }, defaultAction: "unknown", onErrorAction: "unknown", outagePosture: "unknown" });
+});
+
+test("policy decision filters use AND semantics, fixed ordering, and truthful zero results", () => {
+  const sourceOrder = policies.decisions.map((decision) => decision.id);
+  assert.deepEqual(filterPolicyDecisions(policies.decisions, policies.rules, { query: "  SEARCH_docs " }).map((decision) => decision.id), ["dec_205"]);
+  assert.deepEqual(filterPolicyDecisions([...policies.decisions].reverse(), policies.rules).map((decision) => decision.id), ["dec_205", "dec_204", "dec_203", "dec_202", "dec_201"]);
+  assert.deepEqual(filterPolicyDecisions(policies.decisions, policies.rules, { action: "deny" }).map((decision) => decision.id), ["dec_204"]);
+  assert.deepEqual(filterPolicyDecisions(policies.decisions, policies.rules, { rule: "default" }).map((decision) => decision.id), ["dec_202"]);
+  assert.deepEqual(filterPolicyDecisions(policies.decisions, policies.rules, { query: "support", action: "warn", rule: "rule_large_request" }).map((decision) => decision.id), ["dec_201"]);
+  assert.deepEqual(policies.decisions.map((decision) => decision.id), sourceOrder);
+  const zero = buildPolicyDecisionResults(policies.decisions, policies.rules, { ...defaultPolicyDecisionFilters, query: "missing", action: "deny" });
+  assert.equal(zero.summary, "0 of 5 fixture policy decisions");
+  assert.deepEqual(zero.activeFilters, ["query", "action"]);
+});
+
+test("credential display metadata is allowlisted and never copies unsafe fields", () => {
+  const unsafe = { ...credentials[0], plaintext: "forbidden", token: "forbidden", vaultPath: "forbidden", environmentValue: "forbidden" };
+  const safe = safeCredentialMetadata(unsafe);
+  assert.deepEqual(Object.keys(safe), ["id", "name", "authType", "source", "maskedLastFour", "version", "references", "createdAt", "updatedAt"]);
+  assert.equal("plaintext" in safe, false);
+  assert.equal("token" in safe, false);
+  assert.equal("vaultPath" in safe, false);
+  assert.notEqual(safe.references, unsafe.references);
+});
+
+test("credential labels distinguish masked, external, not-returned, unknown, and reference conflict states", () => {
+  const managed = credentials.find((credential) => credential.id === "cred_support");
+  const external = credentials.find((credential) => credential.id === "cred_research");
+  const unreferenced = credentials.find((credential) => credential.id === "cred_staging");
+  assert.equal(credentialSourceLabel(managed), "Managed");
+  assert.equal(credentialSourceLabel(external), "External vault");
+  assert.equal(credentialAuthLabel(managed), "Bearer");
+  assert.equal(credentialHintLabel(managed), "•••• 8F2A");
+  assert.equal(credentialHintLabel(external), "External reference configured");
+  assert.equal(credentialHintLabel(unreferenced), "Not returned");
+  assert.equal(credentialHintLabel({ source: "managed" }), "Unknown");
+  assert.deepEqual(credentialReferenceState(unreferenced), { id: "unreferenced", label: "Unreferenced", count: 0 });
+  assert.equal(credentialDeletePosture(managed), "Conflict while referenced");
+  assert.equal(credentialDeletePosture(unreferenced), "API eligible · preview does not delete");
+});
+
+test("credential filters cover source, auth, references, combined filters, immutability, and zero results", () => {
+  const sourceJSON = JSON.stringify(credentials);
+  assert.deepEqual(filterCredentials(credentials, { query: "SUPPORT" }).map((credential) => credential.id), ["cred_support"]);
+  assert.deepEqual(filterCredentials(credentials, { source: "external_vault" }).map((credential) => credential.id), ["cred_research"]);
+  assert.deepEqual(filterCredentials(credentials, { authType: "api_key" }).map((credential) => credential.id), ["cred_research", "cred_docs", "cred_staging"]);
+  assert.deepEqual(filterCredentials(credentials, { reference: "unreferenced" }).map((credential) => credential.id), ["cred_staging"]);
+  assert.deepEqual(filterCredentials(credentials, { query: "staging", source: "managed", authType: "api_key", reference: "unreferenced" }).map((credential) => credential.id), ["cred_staging"]);
+  assert.equal(JSON.stringify(credentials), sourceJSON);
+  const zero = buildCredentialResults(credentials, { ...defaultCredentialFilters, query: "missing", source: "managed" });
+  assert.equal(zero.summary, "0 of 6 fixture credential metadata records");
+  assert.deepEqual(zero.activeFilters, ["query", "source"]);
+});
+
+test("payment summaries distinguish collected, gate-only, failures, known zero, and unknown", () => {
+  assert.deepEqual(summarizePayments(paymentOperations), { total: 5, challenges: 1, verified: 4, settlementFailures: 1, settledUpstreamFailures: 1, collectedCents: 50, collectedDisplay: "$0.50", gateOnlyCents: 5, gateOnlyDisplay: "$0.05" });
+  assert.deepEqual(summarizePayments([]), { total: 0, challenges: 0, verified: 0, settlementFailures: 0, settledUpstreamFailures: 0, collectedCents: 0, collectedDisplay: "$0.00", gateOnlyCents: 0, gateOnlyDisplay: "$0.00" });
+  assert.equal(summarizePayments([{ settlementState: "settled", gateState: "verified", amountCents: null }]).collectedDisplay, "Unknown");
+});
+
+test("payment labels keep challenge, verification, collection, and upstream outcomes separate", () => {
+  assert.equal(paymentGateLabel(paymentOperations[0]), "402 challenge · no invocation");
+  assert.equal(paymentSettlementLabel(paymentOperations[1]), "Verified · not collected");
+  assert.equal(paymentSettlementLabel(paymentOperations[2]), "Settled");
+  assert.equal(paymentSettlementLabel(paymentOperations[3]), "Settlement failed · upstream not called");
+  assert.equal(paymentSettlementLabel(paymentOperations[4]), "Settled · upstream failed");
+  assert.equal(paymentUpstreamLabel(paymentOperations[3]), "Not called");
+  assert.equal(facilitatorModeLabel("self_hosted"), "Self-hosted");
+});
+
+test("payment filters cover dimensions, fixed boundaries, newest-first ordering, and source immutability", () => {
+  const sourceOrder = paymentOperations.map((operation) => operation.id);
+  assert.deepEqual(filterPaymentOperations(paymentOperations, { query: "DOCS" }, paymentSnapshot.evaluatedAt).map((operation) => operation.id), ["pay_304", "pay_302"]);
+  assert.deepEqual(filterPaymentOperations([...paymentOperations].reverse(), {}, paymentSnapshot.evaluatedAt).map((operation) => operation.id), ["pay_305", "pay_304", "pay_303", "pay_302", "pay_301"]);
+  assert.deepEqual(filterPaymentOperations(paymentOperations, { gate: "challenged" }, paymentSnapshot.evaluatedAt).map((operation) => operation.id), ["pay_305"]);
+  assert.deepEqual(filterPaymentOperations(paymentOperations, { settlement: "settlement_failed" }, paymentSnapshot.evaluatedAt).map((operation) => operation.id), ["pay_302"]);
+  assert.deepEqual(filterPaymentOperations(paymentOperations, { gate: "verified", settlement: "settled", timeRange: "5m" }, paymentSnapshot.evaluatedAt).map((operation) => operation.id), ["pay_303"]);
+  const boundary = { ...paymentOperations[0], id: "pay_boundary", occurredAt: "2026-08-18T09:07:00Z" };
+  assert.ok(filterPaymentOperations([boundary], { timeRange: "5m" }, paymentSnapshot.evaluatedAt).some((operation) => operation.id === "pay_boundary"));
+  const afterClock = { ...boundary, id: "pay_after", occurredAt: "2026-08-18T09:12:01Z" };
+  assert.deepEqual(filterPaymentOperations([afterClock], { timeRange: "5m" }, paymentSnapshot.evaluatedAt), []);
+  assert.deepEqual(paymentOperations.map((operation) => operation.id), sourceOrder);
+  const zero = buildPaymentResults(paymentOperations, { ...defaultPaymentFilters, query: "missing", settlement: "settled" }, paymentSnapshot.evaluatedAt);
+  assert.equal(zero.summary, "0 of 5 fixture payment operations");
+  assert.deepEqual(zero.activeFilters, ["query", "settlement"]);
+});
+
+test("payment traces preserve every lifecycle outcome and safe failure diagnoses", () => {
+  assert.deepEqual(derivePaymentTrace(paymentOperations[0]).map((stage) => stage.state), ["completed", "completed", "not_reached", "not_reached", "not_reached"]);
+  assert.deepEqual(derivePaymentTrace(paymentOperations[1]).map((stage) => stage.state), ["completed", "completed", "completed", "skipped", "completed"]);
+  assert.deepEqual(derivePaymentTrace(paymentOperations[2]).map((stage) => stage.state), ["completed", "completed", "completed", "completed", "completed"]);
+  assert.deepEqual(derivePaymentTrace(paymentOperations[3]).map((stage) => stage.state), ["completed", "completed", "completed", "failed", "not_reached"]);
+  assert.deepEqual(derivePaymentTrace(paymentOperations[4]).map((stage) => stage.state), ["completed", "completed", "completed", "completed", "failed"]);
+  assert.deepEqual(derivePaymentDiagnosis(paymentOperations[3]), { stage: "Settlement", classification: "Payment could not be collected", money: "Not collected", upstream: "Not called", settlementAttempts: "2" });
+  assert.deepEqual(derivePaymentDiagnosis(paymentOperations[4]), { stage: "Upstream after settlement", classification: "Upstream failed after settlement", money: "Collected before upstream failure", upstream: "Failed after settlement", settlementAttempts: "1" });
+  assert.equal(derivePaymentDiagnosis(paymentOperations[2]), null);
+});
+
+test("facilitator and revenue delivery labels remain available, commercial, and planned", () => {
+  assert.equal(deliveryTruthLabel(facilitatorPosture.selfHostedDelivery), "Available OSS");
+  assert.equal(deliveryTruthLabel(facilitatorPosture.managedDelivery), "Commercial");
+  assert.equal(deliveryTruthLabel("planned"), "Planned");
+  assert.equal(deliveryTruthLabel("unexpected"), "Unknown");
+});
+
 test("capability counts preserve honest delivery states", () => {
   assert.deepEqual(capabilityCounts(stack), { total: 9, available: 2, review: 1, standalone: 1, integration: 2, planned: 3 });
 });
@@ -95,7 +211,7 @@ test("overview summary derives operator metrics from fixtures", () => {
     warnedDecisions: 7,
     deniedDecisions: 2,
     reviewDecisions: 9,
-    paymentVolume: "$12.40",
+    paymentVolume: "$0.50",
     latestFailures: 1,
   });
 });
@@ -149,7 +265,7 @@ test("complete overview metrics include source and refresh evidence", () => {
     { id: "traffic", display: "1,256", valueState: "available" },
     { id: "failures", display: "16", valueState: "available" },
     { id: "policy", display: "9", valueState: "available" },
-    { id: "payment", display: "$12.40", valueState: "available" },
+    { id: "payment", display: "$0.50", valueState: "available" },
   ]);
   assert.ok(model.metrics.every((metric) => metric.evidence.source.endsWith("fixture")));
   assert.ok(model.metrics.every((metric) => metric.evidence.lastRefresh.includes("UTC")));
@@ -176,7 +292,7 @@ test("empty is known zero while partial missing cost is unknown", () => {
 
 test("stale overview retains values and marks every source and runtime as last-known", () => {
   const stale = overviewModel("stale");
-  assert.equal(stale.metrics.find((metric) => metric.id === "payment").display, "$12.40");
+  assert.equal(stale.metrics.find((metric) => metric.id === "payment").display, "$0.50");
   assert.ok(stale.metrics.every((metric) => metric.evidence.freshness === "stale"));
   assert.equal(stale.runtime.label, "Last known healthy · stale");
   assert.match(stale.runtime.detail, /^Last refreshed /);
