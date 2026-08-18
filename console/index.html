@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow" />
+    <meta name="theme-color" content="#fafaf8" />
+    <meta name="description" content="A static product preview of the Zerker Gateway operator console." />
+    <title>Zerker Gateway — Console preview</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@300..600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="ambient" aria-hidden="true"></div>
+    <div id="app" class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand-row">
+          <a class="brand" href="#today" data-nav="today" aria-label="Zerker Gateway home">
+            <span class="brand-mark" aria-hidden="true">Z</span>
+            <span>ZERKER</span>
+          </a>
+          <span class="product-name">Gateway</span>
+        </div>
+
+        <nav class="side-nav">
+          <button class="nav-item active" data-view="today" aria-current="page">
+            <span class="nav-icon" aria-hidden="true">⌂</span><span>Today</span>
+          </button>
+          <button class="nav-item" data-view="agents">
+            <span class="nav-icon" aria-hidden="true">◎</span><span>Agents</span><span class="nav-count">6</span>
+          </button>
+          <button class="nav-item" data-view="attention">
+            <span class="nav-icon" aria-hidden="true">◇</span><span>Needs attention</span><span class="attention-dot" aria-label="1 item"></span>
+          </button>
+          <button class="nav-item" data-view="environments">
+            <span class="nav-icon" aria-hidden="true">⌘</span><span>Environments</span>
+          </button>
+          <button class="nav-item" data-view="privacy">
+            <span class="nav-icon" aria-hidden="true">◒</span><span>Privacy</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <button class="workspace-switcher" aria-label="Switch workspace">
+            <span class="workspace-avatar">Z</span>
+            <span class="workspace-copy"><strong>Zerker Labs</strong><small>Dogfood workspace</small></span>
+            <span aria-hidden="true">⌄</span>
+          </button>
+          <div class="preview-notice"><span></span> Preview data</div>
+        </div>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div class="mobile-brand"><span class="brand-mark">Z</span><strong>ZERKER</strong><span>Gateway</span></div>
+          <button class="search-button" id="open-search" aria-label="Search agents and environments">
+            <span aria-hidden="true">⌕</span><span>Find anything</span><kbd>⌘ K</kbd>
+          </button>
+          <div class="top-actions">
+            <button class="icon-button" aria-label="Notifications"><span aria-hidden="true">◌</span><span class="notification-dot"></span></button>
+            <button class="avatar-button" aria-label="Open account menu">AZ</button>
+          </div>
+        </header>
+
+        <main id="main-content" tabindex="-1"></main>
+      </div>
+
+      <nav class="mobile-nav" aria-label="Mobile navigation">
+        <button class="active" data-view="today"><span>⌂</span>Today</button>
+        <button data-view="agents"><span>◎</span>Agents</button>
+        <button data-view="attention"><span>◇</span>Attention</button>
+        <button data-view="environments"><span>⌘</span>Places</button>
+      </nav>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>

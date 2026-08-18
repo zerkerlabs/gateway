@@ -26,8 +26,12 @@ A Go workspace monorepo (`go.work`):
 | `x402types/` | The shared x402 wire contract |
 | `sdk/go/` | Go client SDK |
 
-Plus `www/` — the product website and developer docs (Astro + Starlight). It is
-not a Go module, so it sits outside `go.work` and carries its own gate.
+Plus two separately gated web surfaces outside `go.work`:
+
+- `www/` — the product website and developer docs (Astro + Starlight).
+- `console/` — a fixture-backed, `noindex` preview of the future Gateway operator
+  console. It is not connected to a live Gateway and does not execute missions or
+  issue pairing credentials.
 
 ## Quickstart
 
@@ -80,6 +84,7 @@ make tools              # once per checkout: install pinned gofumpt + golangci-l
 make check              # the full gate: tidy, format, vet, lint, race-tested tests
 make -C gateway check   # gate a single module
 make -C www check       # gate the website (not covered by the root `make check`)
+make console-check      # gate the static operator-console preview
 make run                # run the gateway locally (:8080)
 make help               # list targets
 ```

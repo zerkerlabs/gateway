@@ -1,0 +1,20 @@
+{
+  "name": "@zerkerlabs/gateway-console",
+  "version": "0.0.0",
+  "description": "Static product preview of the Zerker Gateway operator console.",
+  "scripts": {
+    "test": "node --test",
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "check": "npm run test && npm run build"
+  },
+  "devDependencies": {
+    "vite": "^8.2.1"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  }
+}
