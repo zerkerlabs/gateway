@@ -39,14 +39,15 @@ type Var struct {
 
 // Group names, in the order they render in the reference.
 const (
-	groupServer  = "Server"
-	groupStorage = "Storage"
-	groupAuth    = "Authentication (OIDC)"
-	groupSecrets = "Secrets & KMS" //nolint:gosec // G101 false positive: a UI section label, not a credential value
+	groupServer     = "Server"
+	groupStorage    = "Storage"
+	groupAuth       = "Authentication (OIDC)"
+	groupSecrets    = "Secrets & KMS" //nolint:gosec // G101 false positive: a UI section label, not a credential value
+	groupOnboarding = "Local onboarding"
 )
 
 // Groups is the render order for the reference's sections.
-var Groups = []string{groupServer, groupStorage, groupAuth, groupSecrets}
+var Groups = []string{groupServer, groupStorage, groupAuth, groupSecrets, groupOnboarding}
 
 // Reference is the canonical list of environment variables the gateway honors.
 // It reflects existing behavior only; no setting is invented here.
@@ -109,5 +110,12 @@ var Reference = []Var{
 			"provider, which envelope-encrypts stored credentials. When unset, a random " +
 			"ephemeral key is generated that does not survive a restart — never run " +
 			"production without setting it.",
+	},
+	{
+		Name:  "ZERKER_TOKEN",
+		Group: groupOnboarding,
+		Description: "Bearer token used by `zerker-onboard --observe-all`. When unset, " +
+			"the command reads the file selected by `--token-file`, which defaults to " +
+			"`/tmp/zerker-dev-token`. The token is never printed.",
 	},
 }
