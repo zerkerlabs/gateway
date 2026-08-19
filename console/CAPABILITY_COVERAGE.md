@@ -10,7 +10,7 @@ Reviewed on 2026-08-18:
 - every authored page under `www/src/content/docs/`;
 - `gateway/openapi.yaml`, containing 23 operations across 17 paths;
 - `x402types/openapi.yaml` and the facilitator documentation;
-- PR #46's agent onboarding and privacy-safe activity contract;
+- the agent onboarding and privacy-safe activity contract now merged into Gateway `main`;
 - the current Gateway console fixtures and delivery-state model.
 
 When documentation, OpenAPI, and implementation disagree, the console must not silently choose the strongest claim. It must label the discrepancy and prefer implemented evidence.
@@ -19,7 +19,7 @@ When documentation, OpenAPI, and implementation disagree, the console must not s
 
 - **Operator surface** means an authenticated admin can understand or investigate the capability. It does not imply the fixture performs a write.
 - **Available** means shipped OSS Gateway or facilitator behavior evidenced by the repository contract.
-- **In review** means PR #46 behavior that is not on `main` yet.
+- **Available** includes local discovery, observe-only enrollment, agent events, and evidence-based status now on Gateway `main`.
 - **Commercial** means the managed-tier capability described by the docs.
 - **Planned / integration path / standalone** never renders as available Gateway functionality.
 - Developer-only wire types and SDKs belong in system inventory, not primary operator navigation.
@@ -119,7 +119,7 @@ When documentation, OpenAPI, and implementation disagree, the console must not s
 | Remote pairing and missions | Environments/mission concept | Planned; observe and operate credentials remain separate | C04 |
 | Reason | Stack | Standalone | C01, C07 system inventory |
 | ZMem, Rooms, Treeship, Guard | Stack | Integration paths with their own delivery labels | C01, C07 system inventory |
-| Agent activity onboarding | Agent activity and environments | In review in PR #46 | C04, C06 |
+| Agent activity onboarding | Agent activity and environments | Available OSS on Gateway main | C04, C06 |
 
 ## SDK and contract discrepancies
 
@@ -149,7 +149,7 @@ The Safe campaign audit leaves no unmapped ledger row:
 - **Operate and Traffic:** C01–C04 cover attention, state truth, invocation evidence, activity boundaries, catalog, and environments. C07 completes aggregate analytics, safe error taxonomy, MCP method/tool evidence, streaming TTFT, fixed-window limits, and dedicated-limiter posture.
 - **Control and Revenue:** C03–C05 cover policy, credential metadata, x402 gating, settlement evidence, and concept-only products. No credential value or mutation enters the fixture.
 - **System:** C06 keeps browser authentication human-gated in `AUTH_ARCHITECTURE.md`. C07 covers captured health/build evidence, production storage and KMS requirements, security invariants, deployment limitations, facilitator readiness/signers, SDK discrepancies, wider-product delivery states, and all 23 REST destinations.
-- **Non-console rationale:** shared x402 wire types and SDKs are developer-only system inventory; managed billing and fleet governance remain Commercial; portals and remote missions remain Planned; Reason remains Standalone; ZMem, Rooms, Treeship, and Guard remain Integration paths; agent activity remains In review.
+- **Non-console rationale:** shared x402 wire types and SDKs are developer-only system inventory; managed billing and fleet governance remain Commercial; portals and remote missions remain Planned; Reason remains Standalone; ZMem, Rooms, Treeship, and Guard remain Integration paths; agent activity is Available OSS on Gateway main.
 - **Auth rationale:** OIDC is Available for the Gateway API, but console login, sessions, callbacks, cookies, CSRF, and token custody remain blocked on the human approval checklist. `/healthz` and `/version` are the only unauthenticated operation exemptions.
 
 C07 renders 23 unique operation IDs as 2 probes, 10 authenticated reads, 3 authenticated proxy operations, and 8 authenticated writes. Contract availability never enables an operation in this preview.

@@ -48,7 +48,7 @@ caffeinate -dimsu npm run improve -- --cycles 6 --minutes 240 --max-cost 25
 The console has `noindex,nofollow` metadata. Delivery states are part of the product contract:
 
 - **Available** for current OSS Gateway and facilitator capabilities;
-- **In review** for local agent onboarding and activity in PR #46;
+- **Available** for local discovery, observe-only enrollment, agent events, and evidence-based status now on Gateway main;
 - **Commercial** for managed-tier capabilities;
 - **Standalone** for Reason;
 - **Integration path** for ZMem, Rooms, Treeship, and Guard work;

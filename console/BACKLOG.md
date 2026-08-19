@@ -55,6 +55,6 @@ These items are intentionally outside the autonomous campaign:
 - [ ] Approve the authentication architecture.
 - [ ] Implement OIDC login, logout, callback, sessions, and CSRF posture.
 - [ ] Connect a read-only console to real tenant-scoped Gateway data.
-- [ ] Land PR #46 and connect agent activity summaries.
+- [ ] Connect the now-landed agent activity summaries to live authenticated data.
 - [ ] Add safe mutations with authorization, confirmation, and audit evidence.
 - [ ] Deploy and verify an authenticated environment.

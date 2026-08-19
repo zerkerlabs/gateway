@@ -371,6 +371,7 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 .catalog-evidence { display: grid !important; gap: 6px; }
 .agent-evidence { min-width: 0; padding-left: 7px; border-left: 2px solid var(--line-dark); }
 .agent-evidence.review-evidence { border-left-color: var(--violet); }
+.agent-evidence.available-evidence { border-left-color: var(--green); }
 .agent-evidence b { color: var(--muted); font-size: 8px; line-height: 1.35; }
 .catalog-inspect .inspect-button { width: 100%; }
 .catalog-empty { min-height: 260px; padding: 32px; display: grid; align-content: center; justify-items: start; border: 1px dashed var(--line-dark); border-radius: 10px; background: var(--white); }
@@ -596,6 +597,7 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 .drawer-copy + .drawer-copy { margin-top: 8px; }
 .drawer-evidence { margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); padding: 12px; }
 .drawer-evidence.review-evidence { border-left: 3px solid var(--violet); }
+.drawer-evidence.available-evidence { border-left: 3px solid var(--green); }
 .drawer-evidence strong, .drawer-evidence small { display: block; }
 .drawer-evidence strong { margin-top: 8px; font-size: 10px; line-height: 1.4; }
 .drawer-evidence small { margin-top: 4px; color: var(--muted); font-size: 8px; line-height: 1.45; }

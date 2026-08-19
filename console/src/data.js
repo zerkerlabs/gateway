@@ -139,7 +139,7 @@ export const activity = [
 
 export const attention = [
   { level: "high", title: "Code generator is suspended", detail: "Its catalog status remains active, but the independent suspension blocks invocations. Review the timeout evidence before any human-approved resume.", action: "Inspect failures", target: "invocations" },
-  { level: "medium", title: "Cursor is ready for enrollment", detail: "Discovered on Stefan’s Mac mini. Observe-only enrollment is available in PR #46.", action: "Review setup", target: "environments" },
+  { level: "medium", title: "Cursor is ready for enrollment", detail: "Discovered on Stefan’s Mac mini. Observe-only enrollment is available in Gateway main.", action: "Review setup", target: "environments" },
   { level: "low", title: "Seven policy warnings today", detail: "All requests continued. The large-response rule accounts for six warnings.", action: "Review decisions", target: "policies" },
 ];
 
@@ -354,31 +354,31 @@ export const sdkInventory = [
 
 export const environments = [
   {
-    id: "env_gateway", name: "Production Gateway", kind: "Self-hosted Gateway", delivery: "available", source: "Gateway health fixture",
+    id: "env_gateway", name: "Production Gateway", kind: "Self-hosted Gateway", surface: "gateway", delivery: "available", source: "Gateway health fixture",
     probeAt: "2026-08-18T09:11:48Z", healthState: "healthy", catalogAgents: 7, pendingAgents: 1, suspendedAgents: 1,
     storage: "Postgres", version: "gateway development",
   },
   {
-    id: "env_alex", name: "Alex’s MacBook Pro", kind: "Local observer", delivery: "review", source: "Agent activity fixture · PR #46",
+    id: "env_alex", name: "Alex’s MacBook Pro", kind: "Local observer", surface: "observer", delivery: "available", source: "Agent activity fixture · Gateway main",
     lastEvidenceAt: "2026-08-18T09:12:00Z", enrollmentState: "enrolled", observed: 3, enrolled: 3, discovered: 0,
   },
   {
-    id: "env_stefan", name: "Stefan’s Mac mini", kind: "Local observer", delivery: "review", source: "Agent activity fixture · PR #46",
+    id: "env_stefan", name: "Stefan’s Mac mini", kind: "Local observer", surface: "observer", delivery: "available", source: "Agent activity fixture · Gateway main",
     lastEvidenceAt: "2026-08-18T09:02:00Z", enrollmentState: "enrolled", observed: 2, enrolled: 3, discovered: 1,
   },
 ];
 
 export const onboardingEvidence = [
-  { id: "obs_support", agentID: "agt_support", name: "Support agent", runtime: "Claude Code", environmentID: "env_alex", environment: "Alex’s MacBook Pro", enrollmentState: "enrolled", lastEventAt: "2026-08-18T09:10:00Z", source: "Native observer fixture · PR #46" },
-  { id: "obs_research", agentID: "agt_research", name: "Research agent", runtime: "Hermes", environmentID: "env_stefan", environment: "Stefan’s Mac mini", enrollmentState: "enrolled", lastEventAt: "2026-08-18T08:54:00Z", source: "Native observer fixture · PR #46" },
-  { id: "obs_triage", agentID: "agt_triage", name: "Customer triage", runtime: "HTTP service", environmentID: "env_stefan", environment: "Stefan’s Mac mini", enrollmentState: "enrolled", lastEventAt: null, source: "Native observer fixture · PR #46" },
-  { id: "obs_cursor", agentID: null, name: "Cursor", runtime: "Cursor", environmentID: "env_stefan", environment: "Stefan’s Mac mini", enrollmentState: "discovered", lastEventAt: null, discoveredAt: "2026-08-18T09:06:00Z", source: "Local discovery fixture · PR #46" },
+  { id: "obs_support", agentID: "agt_support", name: "Support agent", runtime: "Claude Code", environmentID: "env_alex", environment: "Alex’s MacBook Pro", enrollmentState: "enrolled", lastEventAt: "2026-08-18T09:10:00Z", source: "Native observer fixture · Gateway main" },
+  { id: "obs_research", agentID: "agt_research", name: "Research agent", runtime: "Hermes", environmentID: "env_stefan", environment: "Stefan’s Mac mini", enrollmentState: "enrolled", lastEventAt: "2026-08-18T08:54:00Z", source: "Native observer fixture · Gateway main" },
+  { id: "obs_triage", agentID: "agt_triage", name: "Customer triage", runtime: "HTTP service", environmentID: "env_stefan", environment: "Stefan’s Mac mini", enrollmentState: "enrolled", lastEventAt: null, source: "Native observer fixture · Gateway main" },
+  { id: "obs_cursor", agentID: null, name: "Cursor", runtime: "Cursor", environmentID: "env_stefan", environment: "Stefan’s Mac mini", enrollmentState: "discovered", lastEventAt: null, discoveredAt: "2026-08-18T09:06:00Z", source: "Local discovery fixture · Gateway main" },
 ];
 
 export const stack = [
   { name: "Gateway", job: "Catalog, proxy, policy, credentials, analytics and payment gate", status: "Available", tone: "available" },
   { name: "Facilitator", job: "Independent x402 verification and on-chain settlement", status: "Available OSS", tone: "available" },
-  { name: "Agent activity", job: "Local discovery, observe-only enrollment and metadata summaries", status: "In review · PR #46", tone: "review" },
+  { name: "Agent activity", job: "Local discovery, observe-only enrollment and metadata summaries", status: "Available OSS", tone: "available" },
   { name: "Reason", job: "Deterministic exact-action authorization certificates", status: "Standalone", tone: "standalone" },
   { name: "ZMem + Rooms", job: "Governed context, quarantined memory and long-running work", status: "Integration path", tone: "integration" },
   { name: "Treeship", job: "Signed evidence and portable trust receipts", status: "Integration in progress", tone: "integration" },

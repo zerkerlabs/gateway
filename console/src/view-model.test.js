@@ -311,7 +311,7 @@ test("facilitator and revenue delivery labels remain available, commercial, and 
 });
 
 test("capability counts preserve honest delivery states", () => {
-  assert.deepEqual(capabilityCounts(stack), { total: 9, available: 2, review: 1, standalone: 1, integration: 2, planned: 3 });
+  assert.deepEqual(capabilityCounts(stack), { total: 9, available: 3, standalone: 1, integration: 2, planned: 3 });
 });
 
 test("formatCount uses human singular and plural labels", () => {

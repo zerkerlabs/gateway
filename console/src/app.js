@@ -119,9 +119,9 @@ function renderOverviewOperations(model) {
 
 function renderCapabilitySection() {
   return `<section class="capability-section"><div class="section-heading"><div><p class="kicker">Capability map</p><h2>Capability delivery status</h2></div><p>Roadmap context follows operational evidence. Available products and future integrations remain labeled separately.</p></div><div class="capability-grid">
-    ${capabilityCard("Discover", "Inventory local agents and runtime environments.", ["Catalog", "Local discovery", "Enrollment evidence"], "agents", [["Available", "available"], ["In review", "review"]])}
+    ${capabilityCard("Discover", "Inventory local agents and runtime environments.", ["Catalog", "Local discovery", "Enrollment evidence"], "agents", [["Available OSS", "available"]])}
     ${capabilityCard("Control", "Apply identity, credentials, rates and policy before traffic moves.", ["OIDC tenancy", "Policy decisions", "Protected credentials"], "policies", [["Available", "available"]])}
-    ${capabilityCard("Observe", "Inspect request and agent metadata without guessing what happened.", ["Invocations", "Latency & errors", "Metadata-only activity"], "analytics", [["Available", "available"], ["In review", "review"]])}
+    ${capabilityCard("Observe", "Inspect request and agent metadata without guessing what happened.", ["Invocations", "Latency & errors", "Metadata-only activity"], "analytics", [["Available OSS", "available"]])}
     ${capabilityCard("Monetize", "Gate paid routes and settle through a separate facilitator.", ["x402 gate", "USDC on Base", "Settlement records"], "payments", [["Available", "available"]])}
     ${capabilityCard("Verify", "Bind high-risk actions to deterministic evidence and signed records.", ["Reason certificates", "Treeship evidence", "Guard enforcement"], "stack", [["Standalone", "standalone"], ["Integration path", "integration"], ["Planned", "planned"]])}
     ${capabilityCard("Publish & work", "Turn agents into products and dispatch bounded missions.", ["Customer portals", "Plans & docs", "Remote missions"], "products", [["Planned", "planned"]])}
@@ -160,8 +160,8 @@ function attentionView() {
 
 function activityView() {
   return `<section class="page-enter">
-    ${pageHeader("Operate · in review", "Agent activity", "Privacy-bounded lifecycle and usage signals from native agent hooks.", '<button class="button secondary" data-action="privacy">Privacy boundary</button><button class="button secondary" data-action="connect">Review observer concept</button>')}
-    <div class="availability-banner review"><div>${status("In review · PR #46", "review")}<h2>Discover → enroll → observe</h2><p>This surface maps the local onboarding branch. It is not on Gateway main yet and does not claim a persistent connection.</p></div><a href="https://github.com/zerkerlabs/gateway/pull/46" target="_blank" rel="noreferrer" aria-label="Open pull request 46 in a new tab">Open PR #46 <span aria-hidden="true">↗</span></a></div>
+    ${pageHeader("Operate · available OSS", "Agent activity", "Privacy-bounded lifecycle and usage signals from native agent hooks.", '<button class="button secondary" data-action="privacy">Privacy boundary</button><button class="button secondary" data-action="connect">Review observer setup</button>')}
+    <div class="availability-banner available"><div>${status("Available OSS · fixture", "available")}<h2>Discover → enroll → observe</h2><p>The agent-event and status contracts are on Gateway main. This fixture does not contact an observer or claim a persistent connection.</p></div><a href="https://docs.zerker.ai/gateway/agent-activity/" target="_blank" rel="noreferrer" aria-label="Open agent activity documentation in a new tab">Open docs <span aria-hidden="true">↗</span></a></div>
     <section class="metric-strip compact"><div><span>5</span><small>Measured agents</small><em>1 awaiting setup</em></div><div><span>18</span><small>Sessions today</small><em>Across native hooks</em></div><div><span>97</span><small>Tool calls</small><em>92 succeeded</em></div><div><span>592k</span><small>Tokens reported</small><em>Content excluded</em></div></section>
     <div class="two-column">
       <section class="panel"><div class="panel-heading"><div><p class="kicker">Event stream</p><h2>Metadata only</h2></div>${status("Observe · no blocking", "available")}</div><div class="event-list">${activity.map((item) => `<div class="event-row"><span class="event-mark"></span><span><strong>${item.agent} · ${item.event}</strong><small>${item.detail}</small></span><em>${item.time}</em></div>`).join("")}</div></section>
@@ -271,7 +271,7 @@ function agentRows(items) {
     const catalogStatus = deriveCatalogStatus(agent);
     const observer = onboardingForAgent(agent.id);
     const observerMarkup = observer
-      ? `<span class="agent-evidence review-evidence"><b>In review · PR #46</b><small>${observerEvidenceLabel(observer, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)}</small></span>`
+      ? `<span class="agent-evidence available-evidence"><b>Available OSS · fixture</b><small>${observerEvidenceLabel(observer, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)}</small></span>`
       : '<span class="agent-evidence"><b>Native observer</b><small>Unavailable in this fixture</small></span>';
     return `<article class="catalog-row${agent.suspended ? " is-suspended" : ""}">
       <span class="agent-identity" data-label="Catalog agent"><span class="agent-symbol" aria-hidden="true">${agent.runtime === "Pi" ? "π" : agent.runtime.slice(0, 2).toUpperCase()}</span><span><strong>${agent.name}</strong><small class="mono">${agent.id}</small></span></span>
@@ -308,20 +308,20 @@ function agentsView() {
 }
 
 function environmentEvidenceState(environment) {
-  if (environment.delivery === "available") return environment.healthState ?? "unknown";
+  if (environment.surface === "gateway") return environment.healthState ?? "unknown";
   return deriveObserverEvidenceState({ enrollmentState: environment.enrollmentState, lastEventAt: environment.lastEvidenceAt }, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs);
 }
 
 function environmentCard(environment) {
   const evidenceState = environmentEvidenceState(environment);
-  const gateway = environment.delivery === "available";
+  const gateway = environment.surface === "gateway";
   const evidenceCopy = gateway
     ? `Probe captured ${formatTimestamp(environment.probeAt)} · evidence only`
     : observerEvidenceLabel({ enrollmentState: environment.enrollmentState, lastEventAt: environment.lastEvidenceAt }, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs);
   const facts = gateway
     ? [["Catalog", environment.catalogAgents], ["Pending", environment.pendingAgents], ["Suspended", environment.suspendedAgents]]
     : [["Observed", environment.observed], ["Enrolled", environment.enrolled], ["Discovered", environment.discovered]];
-  return `<article class="environment-card"><div class="environment-top"><span class="environment-icon" aria-hidden="true">${gateway ? "G" : "⌘"}</span><span class="environment-badges">${status(gateway ? "Available OSS · fixture" : "In review · PR #46", gateway ? "available" : "review")}${status(stateLabel(evidenceState), evidenceState)}</span></div><p class="kicker">${environment.kind}</p><h2>${environment.name}</h2><p>${evidenceCopy}. This is not persistent connectivity.</p><dl>${facts.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join("")}</dl><button class="inspect-button" data-environment="${environment.id}" aria-label="Inspect environment evidence for ${environment.name}">Inspect evidence →</button></article>`;
+  return `<article class="environment-card"><div class="environment-top"><span class="environment-icon" aria-hidden="true">${gateway ? "G" : "⌘"}</span><span class="environment-badges">${status("Available OSS · fixture", "available")}${status(stateLabel(evidenceState), evidenceState)}</span></div><p class="kicker">${environment.kind}</p><h2>${environment.name}</h2><p>${evidenceCopy}. This is not persistent connectivity.</p><dl>${facts.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join("")}</dl><button class="inspect-button" data-environment="${environment.id}" aria-label="Inspect environment evidence for ${environment.name}">Inspect evidence →</button></article>`;
 }
 
 function onboardingRows() {
@@ -332,14 +332,14 @@ function onboardingRows() {
 }
 
 function environmentsView() {
-  const gatewayEnvironments = environments.filter((environment) => environment.delivery === "available");
-  const observerEnvironments = environments.filter((environment) => environment.delivery === "review");
+  const gatewayEnvironments = environments.filter((environment) => environment.surface === "gateway");
+  const observerEnvironments = environments.filter((environment) => environment.surface === "observer");
   return `<section class="page-enter environments-page">
-    ${pageHeader("Control", "Environments", "Captured Gateway probes and in-review observer evidence, separated by delivery truth.", '<button class="button secondary" data-action="connect">Review environment concept</button>')}
+    ${pageHeader("Control · available OSS", "Environments", "Captured Gateway probes and privacy-safe observer evidence, separated by evidence type.", '<button class="button secondary" data-action="connect">Review environment setup</button>')}
     ${fixtureContext(environmentSnapshot, "Environment")}
     <section class="environment-group"><div class="environment-group-heading"><div><p class="kicker">Available OSS · fixture</p><h2>Gateway runtime evidence</h2></div><p>A captured health probe describes only that fixed point in time.</p></div><div class="environment-list gateway-environments">${gatewayEnvironments.map(environmentCard).join("")}</div></section>
-    <section class="environment-group"><div class="environment-group-heading"><div><p class="kicker">In review · PR #46</p><h2>Local observer evidence</h2></div><p>Discovery, enrollment, reporting, and quiet are evidence states—not connection states.</p></div><div class="environment-list">${observerEnvironments.map(environmentCard).join("")}</div></section>
-    <section class="panel onboarding-panel"><div class="panel-heading"><div><p class="kicker">In review · PR #46</p><h2>Onboarding evidence</h2></div>${status("Metadata only", "review")}</div><div class="onboarding-list">${onboardingRows()}</div></section>
+    <section class="environment-group"><div class="environment-group-heading"><div><p class="kicker">Available OSS · fixture</p><h2>Local observer evidence</h2></div><p>Discovery, enrollment, reporting, and quiet are evidence states—not connection states.</p></div><div class="environment-list">${observerEnvironments.map(environmentCard).join("")}</div></section>
+    <section class="panel onboarding-panel"><div class="panel-heading"><div><p class="kicker">Available OSS · fixture</p><h2>Onboarding evidence</h2></div>${status("Metadata only", "available")}</div><div class="onboarding-list">${onboardingRows()}</div></section>
     <section class="planned-environment"><div><p class="kicker">Planned</p><h2>Remote pairing and missions</h2><p>Remote operation remains separate from observe-only evidence and is not available in this fixture.</p></div>${status("Planned", "planned")}</section>
     <section class="environment-privacy"><div><p class="kicker">Native activity privacy</p><h2>Evidence without conversation content</h2></div><p>Observer summaries never include prompts, messages, arguments, outputs, commands, paths, files, environment values, or credentials. No pairing token or credential is accepted here.</p></section>
   </section>`;
@@ -770,7 +770,7 @@ function openAgent(id) {
   const catalogStatus = deriveCatalogStatus(agent);
   const observer = onboardingForAgent(agent.id);
   const observerMarkup = observer
-    ? `<div class="drawer-evidence review-evidence">${status("In review · PR #46", "review")}<strong>${observerEvidenceLabel(observer, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)}</strong><small>Native observer metadata · evidence only, not persistent connectivity</small></div>`
+    ? `<div class="drawer-evidence available-evidence">${status("Available OSS · fixture", "available")}<strong>${observerEvidenceLabel(observer, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)}</strong><small>Native observer metadata · evidence only, not persistent connectivity</small></div>`
     : `<div class="drawer-evidence">${status("Unavailable", "unavailable")}<strong>Native observer evidence unavailable</strong><small>Unavailable is not zero and does not imply disconnection.</small></div>`;
   const mcpReliability = agent.protocol === "mcp"
     ? "Known-idempotent MCP methods may be retried. tools/call is never automatically retried."
@@ -796,7 +796,7 @@ function openAgent(id) {
 
 function openEnvironment(id) {
   const environment = environments.find((item) => item.id === id); if (!environment) return;
-  const gateway = environment.delivery === "available";
+  const gateway = environment.surface === "gateway";
   const evidenceState = environmentEvidenceState(environment);
   const evidenceAt = gateway ? environment.probeAt : environment.lastEvidenceAt;
   const countRows = gateway
@@ -806,9 +806,9 @@ function openEnvironment(id) {
   openDrawer(
     environment.name,
     `${environment.kind} · environment fixture`,
-    `<div class="drawer-statuses">${status(gateway ? "Available OSS · fixture" : "In review · PR #46", gateway ? "available" : "review")}${status(stateLabel(evidenceState), evidenceState)}</div>
+    `<div class="drawer-statuses">${status("Available OSS · fixture", "available")}${status(stateLabel(evidenceState), evidenceState)}</div>
     <div class="read-only-banner"><strong>Captured evidence</strong><span>This record does not represent a persistent connection.</span></div>
-    <section class="drawer-section"><h3>Provenance</h3>${detailRows([["Source", environment.source], ["Delivery", gateway ? "Available OSS · fixture" : "In review · PR #46"], ["Evidence state", stateLabel(evidenceState)], ["Evidence captured", formatTimestamp(evidenceAt)], ["Fixture refreshed", formatTimestamp(environmentSnapshot.refreshedAt)]])}</section>
+    <section class="drawer-section"><h3>Provenance</h3>${detailRows([["Source", environment.source], ["Delivery", "Available OSS · fixture"], ["Evidence state", stateLabel(evidenceState)], ["Evidence captured", formatTimestamp(evidenceAt)], ["Fixture refreshed", formatTimestamp(environmentSnapshot.refreshedAt)]])}</section>
     <section class="drawer-section"><h3>${gateway ? "Gateway inventory" : "Observer inventory"}</h3>${detailRows([...countRows, ...runtimeRows])}</section>
     ${gateway ? '<div class="drawer-copy"><strong>Probe boundary</strong><p>Healthy describes only the captured fixture probe. It is not a current or continuous health claim.</p></div>' : '<div class="drawer-copy"><strong>Observer boundary</strong><p>Reporting means a recent event; Quiet means older evidence; Enrolled means inventory without recent event evidence. None is a connection state.</p></div>'}
     <section class="drawer-section"><h3>Privacy boundary</h3><div class="drawer-copy compact"><p>Native observer summaries never contain prompts, messages, arguments, outputs, commands, paths, files, environment values, or credentials.</p></div></section>`,
@@ -822,7 +822,7 @@ function openOnboardingEvidence(id) {
   openDrawer(
     evidence.name,
     `${evidence.runtime} · onboarding evidence fixture`,
-    `<div class="drawer-statuses">${status("In review · PR #46", "review")}${status(stateLabel(evidenceState), evidenceState)}</div>
+    `<div class="drawer-statuses">${status("Available OSS · fixture", "available")}${status(stateLabel(evidenceState), evidenceState)}</div>
     <div class="read-only-banner"><strong>Evidence, not connectivity</strong><span>No enrollment, pairing, or observer mutation occurs here.</span></div>
     <section class="drawer-section"><h3>Onboarding evidence</h3>${detailRows([["State", stateLabel(evidenceState)], ["Meaning", observerEvidenceLabel(evidence, environmentSnapshot.evaluatedAt, environmentSnapshot.observerRecentWithinMs)], ["Environment", evidence.environment], ["Source", evidence.source], ["Evidence timestamp", evidenceAt ? formatTimestamp(evidenceAt) : "No recent event evidence"], ["Fixture refreshed", formatTimestamp(environmentSnapshot.refreshedAt)]])}</section>
     <div class="drawer-copy"><strong>State contract</strong><p>Reporting is an event within five minutes of the fixed fixture clock. Quiet is older event evidence. Enrolled is inventory without a recent event. Discovered is a candidate not enrolled.</p><small>These states never prove a persistent connection or disconnection.</small></div>
@@ -899,7 +899,7 @@ function openConcept(action) {
   const copy = {
     "add-agent": ["Agent catalog", "Register an agent", "The Gateway API supports tenant-scoped catalog registration. This fixture preview accepts no configuration or credential input and will not write to Gateway."],
     "edit-agent": ["Agent catalog", "Edit agent configuration", "The Gateway API supports catalog updates. This read-only fixture does not change routing, suspension, rates, credentials, pricing, or any other configuration."],
-    connect: ["Environments", "Review environment concept", "Local discovery and observe-only enrollment are in review in PR #46. Remote pairing and missions are planned; this fixture performs neither."],
+    connect: ["Environments", "Review environment setup", "Local discovery and observe-only enrollment are available in Gateway main. Remote pairing and missions are planned; this fixture performs neither."],
     "add-credential": ["Credentials", "Store credential concept", "The API accepts write-only managed values or external references. This preview contains no fields and accepted, issued, replaced, persisted, or transmitted no credential material."],
     "new-product": ["Product direction", "Create an agent product", "Customer portals, plan management and hosted billing are product direction, not shipped Gateway capabilities."],
     "product-preview": ["Product direction", "Customer portal concept", "A future portal will expose capabilities, documentation, access and optional payment under the operator’s domain."],
