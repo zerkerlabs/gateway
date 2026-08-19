@@ -447,12 +447,18 @@ paths:
         `ZERKER_REASON_BINARY` is configured, MCP `tools/call` requests must use
         `zerker.gateway.reason-mcp-call.v1`: Gateway sends the exact bundled
         authorization bytes to Reason, requires verified+authorized output,
-        compares the inner call's tool and normalized arguments, and forwards
-        only the inner JSON-RPC call. Verification, comparison, and a replay
-        preflight happen before policy webhooks, x402, invocation
+        compares the inner call's tool and normalized arguments, and requires
+        the verified request to bind `mission.principal` to the authenticated
+        OAuth subject plus `gateway.tenant_id` and `gateway.agent_id` mission
+        constraints to the authenticated tenant and route agent. Gateway
+        forwards only the inner JSON-RPC call. Verification, comparison, and a
+        replay preflight happen before policy webhooks, x402, invocation
         creation, settlement, or forwarding. Invocation creation persists the
         verified request digest under a tenant-unique index before settlement
-        or forwarding, closing concurrent replay races.
+        or forwarding, closing concurrent replay races. This reservation is
+        one-shot and is not refunded after an observed upstream timeout or
+        error, because Gateway cannot prove that the upstream performed no side
+        effect. Failures before invocation creation do not consume it.
 
 
         For a priced agent (`pricing` set on the agent, spec 0005): a request
@@ -1528,7 +1534,12 @@ components:
           description: A single JSON-RPC 2.0 MCP tools/call request. This exact object is forwarded after verification.
         authorization:
           type: object
-          description: A complete `zerker.reason.authorization-bundle.v1`, passed to Reason over bounded stdin without reopening another source.
+          description: >-
+            A complete `zerker.reason.authorization-bundle.v1`, passed to Reason
+            over bounded stdin without reopening another source. Its request
+            must set `mission.principal` to the authenticated OAuth subject and
+            string mission constraints `gateway.tenant_id` and
+            `gateway.agent_id` to the authenticated tenant and route agent.
 
     InvocationAcceptedResponse:
       type: object

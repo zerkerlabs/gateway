@@ -108,10 +108,11 @@ var Reference = []Var{
 		Name:  "ZERKER_REASON_BINARY",
 		Group: groupAuthorization,
 		Description: "Path or executable name for the Reason CLI. When set, MCP tools/call requests " +
-			"must use the transactional exact-call authorization envelope, and MCP streaming is rejected; " +
-			"startup fails if the executable cannot be resolved. Each verification is capped at 1 MiB input, " +
-			"64 KiB output, and two seconds. " +
-			"When unset, Reason enforcement is disabled.",
+			"must use the transactional exact-call authorization envelope, bind the verified mission " +
+			"principal/tenant/agent to the authenticated request, and MCP streaming is rejected; startup " +
+			"fails if the executable cannot be resolved. Each verification is capped at 1 MiB input, 64 KiB " +
+			"output, and two seconds. A request digest is consumed once durable invocation creation succeeds, " +
+			"even if the upstream later times out or fails. When unset, Reason enforcement is disabled.",
 	},
 	{
 		Name:  "ZERKER_KMS_KEY",

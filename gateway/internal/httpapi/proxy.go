@@ -262,7 +262,11 @@ func (h *Handler) handleTransact(w http.ResponseWriter, r *http.Request) {
 	var mcpMethod, mcpTool *string
 	var reasonAuthorization *reasonMCPAuthorization
 	if a.Protocol == "mcp" && h.reasonVerifier != nil {
-		call, authorization, enforceErr := enforceReasonMCP(r.Context(), h.reasonVerifier, body)
+		call, authorization, enforceErr := enforceReasonMCP(r.Context(), h.reasonVerifier, body, reasonRequestBinding{
+			principal: auth.UserFromContext(r.Context()),
+			tenantID:  tenant,
+			agentID:   agentID,
+		})
 		if enforceErr != nil {
 			switch {
 			case errors.Is(enforceErr, errReasonMalformed):
