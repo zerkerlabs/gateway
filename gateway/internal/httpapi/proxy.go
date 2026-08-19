@@ -16,6 +16,7 @@ import (
 	"github.com/zerkerlabs/gateway/gateway/internal/invocation"
 	"github.com/zerkerlabs/gateway/gateway/internal/policy"
 	"github.com/zerkerlabs/gateway/gateway/internal/proxy"
+	reasonauth "github.com/zerkerlabs/gateway/gateway/internal/reason"
 	"github.com/zerkerlabs/gateway/gateway/internal/receipt"
 	"github.com/zerkerlabs/gateway/x402types"
 )
@@ -250,16 +251,56 @@ func (h *Handler) handleTransact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = r.Body.Close()
+
+	// When Reason enforcement is enabled, a transactional MCP tools/call must
+	// use the versioned Gateway envelope. Reason independently verifies the
+	// bundle from its exact captured bytes; Gateway then compares the concrete
+	// call's tool and normalized arguments and forwards only the inner call.
+	// Every failure returns before policy webhooks, x402, invocation creation,
+	// settlement, or forwarding. Non-tools/call MCP messages and deployments
+	// without a Reason verifier preserve the existing wire contract.
+	var mcpMethod, mcpTool *string
+	var reasonAuthorization *reasonMCPAuthorization
+	if a.Protocol == "mcp" && h.reasonVerifier != nil {
+		call, authorization, enforceErr := enforceReasonMCP(r.Context(), h.reasonVerifier, body)
+		if enforceErr != nil {
+			switch {
+			case errors.Is(enforceErr, errReasonMalformed):
+				writeError(w, http.StatusBadRequest, "malformed Reason MCP request")
+			case errors.Is(enforceErr, reasonauth.ErrInputTooLarge):
+				writeError(w, http.StatusRequestEntityTooLarge, "Reason authorization bundle too large")
+			default:
+				writeError(w, http.StatusForbidden, "Reason authorization failed")
+			}
+			return
+		}
+		body = call.body
+		mcpMethod = &call.method
+		if call.tool != "" {
+			mcpTool = &call.tool
+		}
+		reasonAuthorization = authorization
+	} else if a.Protocol == "mcp" {
+		// Without Reason enforcement, MCP parsing remains best-effort
+		// observability metadata and never changes forwarding.
+		mcpMethod, mcpTool = parseMCPRequest(body)
+	}
 	bodySize := int64(len(body))
 
-	// For MCP agents, parse the buffered JSON-RPC body to capture the method and
-	// (for tools/call) the tool name (spec 0004, Decision 7). Best-effort: a
-	// non-MCP body or a parse failure leaves both fields nil and never blocks
-	// forwarding. The body is already fully buffered above, so the parse is
-	// exact. The tool is also what per-tool x402 pricing keys on below.
-	var mcpMethod, mcpTool *string
-	if a.Protocol == "mcp" {
-		mcpMethod, mcpTool = parseMCPRequest(body)
+	// Reject a known replay before policy webhooks or x402. Create's
+	// tenant-unique index performs the authoritative reservation later, after a
+	// priced caller has supplied valid payment, and closes the concurrent race.
+	if reasonAuthorization != nil {
+		used, replayErr := h.invocations.ReasonAuthorizationUsed(r.Context(), tenant, reasonAuthorization.RequestDigest)
+		if replayErr != nil {
+			h.logger.Error("proxy transact: check Reason replay", "err", replayErr)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if used {
+			writeError(w, http.StatusConflict, "Reason authorization already used")
+			return
+		}
 	}
 
 	// Policy enforcement point (PEP, spec 0009 ticket T4): evaluated once the
@@ -332,6 +373,10 @@ func (h *Handler) handleTransact(w http.ResponseWriter, r *http.Request) {
 		PaymentPayer:   paymentPayer,
 		PaymentNonce:   paymentNonce,
 	}
+	if reasonAuthorization != nil {
+		inv.ReasonRequestDigest = &reasonAuthorization.RequestDigest
+		inv.ReasoningResultDigest = &reasonAuthorization.ReasoningResultDigest
+	}
 	if model != "" {
 		inv.Model = &model
 	}
@@ -340,6 +385,10 @@ func (h *Handler) handleTransact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.invocations.Create(r.Context(), tenant, inv); err != nil {
+		if errors.Is(err, invocation.ErrReasonAuthorizationReplay) {
+			writeError(w, http.StatusConflict, "Reason authorization already used")
+			return
+		}
 		h.logger.Error("proxy transact: create invocation", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -571,6 +620,15 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 	model := r.Header.Get("X-Zerker-Model")
 	if len(model) > maxModelNameBytes {
 		writeError(w, http.StatusBadRequest, "X-Zerker-Model too long")
+		return
+	}
+
+	// Exact action comparison requires the complete tools/call body. When Reason
+	// enforcement is enabled, reject the unbuffered MCP endpoint entirely so it
+	// cannot bypass transactional verification, payment ordering, or replay
+	// reservation. HTTP agents and deployments without Reason are unchanged.
+	if a.Protocol == "mcp" && h.reasonVerifier != nil {
+		writeError(w, http.StatusConflict, "Reason-enforced MCP calls require the transactional endpoint")
 		return
 	}
 

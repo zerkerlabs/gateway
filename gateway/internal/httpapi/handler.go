@@ -16,6 +16,7 @@ import (
 	"github.com/zerkerlabs/gateway/gateway/internal/agentevent"
 	"github.com/zerkerlabs/gateway/gateway/internal/invocation"
 	"github.com/zerkerlabs/gateway/gateway/internal/policy"
+	reasonauth "github.com/zerkerlabs/gateway/gateway/internal/reason"
 	"github.com/zerkerlabs/gateway/gateway/internal/receipt"
 	"github.com/zerkerlabs/gateway/gateway/internal/settlement"
 )
@@ -77,7 +78,12 @@ type Handler struct {
 	// a tenant with no such rule makes zero external calls regardless of this
 	// default. Never nil; tests override via WithClassifierClient.
 	classifierClient policy.ClassifierClient
-	agentLimiter     AgentRateLimiter
+	// reasonVerifier enables exact tools/call authorization for MCP agents.
+	// nil preserves the ordinary transparent proxy contract. When non-nil,
+	// tools/call is accepted only through the transactional Reason envelope and
+	// the MCP streaming endpoint is disabled to prevent an unbuffered bypass.
+	reasonVerifier reasonauth.Verifier
+	agentLimiter   AgentRateLimiter
 	// rateObserver supplies policy.RequestContext.RatePerMin at the PEP (spec
 	// 0009 fast-follow, #212). nil leaves RatePerMin at zero, matching the
 	// pre-fast-follow behavior (a rate_per_min rule never matches).
@@ -268,6 +274,15 @@ func (h *Handler) WithReceipts(e receipt.Emitter) *Handler {
 // method chaining.
 func (h *Handler) WithPaymentVerifier(v PaymentVerifier) *Handler {
 	h.paymentVerifier = v
+	return h
+}
+
+// WithReasonVerifier enables fail-closed Reason authorization for MCP
+// tools/call requests. The verifier owns Reason semantics; Gateway only checks
+// the concrete call envelope against the verified action. Returns h for method
+// chaining.
+func (h *Handler) WithReasonVerifier(v reasonauth.Verifier) *Handler {
+	h.reasonVerifier = v
 	return h
 }
 

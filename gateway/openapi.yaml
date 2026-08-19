@@ -443,7 +443,16 @@ paths:
         immediately with `invocation_id`; the upstream call runs server-side
         and the caller polls `GET /v1/proxy/{id}/invocations/{inv_id}` for the
         result (spec 0002). The request body is forwarded verbatim to the
-        agent's `upstream_url`, capped at 32 MiB.
+        agent's `upstream_url`, capped at 32 MiB. When
+        `ZERKER_REASON_BINARY` is configured, MCP `tools/call` requests must use
+        `zerker.gateway.reason-mcp-call.v1`: Gateway sends the exact bundled
+        authorization bytes to Reason, requires verified+authorized output,
+        compares the inner call's tool and normalized arguments, and forwards
+        only the inner JSON-RPC call. Verification, comparison, and a replay
+        preflight happen before policy webhooks, x402, invocation
+        creation, settlement, or forwarding. Invocation creation persists the
+        verified request digest under a tenant-unique index before settlement
+        or forwarding, closing concurrent replay races.
 
 
         For a priced agent (`pricing` set on the agent, spec 0005): a request
@@ -466,10 +475,15 @@ paths:
           schema: { type: string, maxLength: 256 }
       requestBody:
         required: false
-        description: Forwarded verbatim to the agent's upstream URL. For `protocol=mcp` agents this is a single JSON-RPC 2.0 request.
+        description: Forwarded verbatim to the agent's upstream URL. For `protocol=mcp` agents this is a single JSON-RPC 2.0 request; a Reason-enabled MCP `tools/call` uses the envelope below and only its `call` value is forwarded.
         content:
           "*/*":
             schema: {}
+          application/json:
+            schema:
+              oneOf:
+                - {}
+                - $ref: "#/components/schemas/ReasonMCPCallEnvelope"
       responses:
         "202":
           description: Invocation accepted; the upstream call is running asynchronously.
@@ -482,7 +496,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvocationAcceptedResponse"
         "400":
-          description: "`X-Zerker-Model` exceeds 256 bytes."
+          description: "`X-Zerker-Model` exceeds 256 bytes, or a Reason-enabled MCP request/envelope is malformed."
           content:
             application/json:
               schema:
@@ -500,10 +514,22 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/X402Challenge"
                   - $ref: "#/components/schemas/Error"
+        "403":
+          description: A Reason-enabled MCP tools/call is missing authorization, fails independent verification, or does not exactly match the verified action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: The independently verified Reason request digest has already been used by this tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "413":
-          description: Request body exceeds the 32 MiB cap.
+          description: Request body exceeds the 32 MiB cap, or the embedded Reason authorization bundle exceeds 1 MiB.
           content:
             application/json:
               schema:
@@ -540,7 +566,10 @@ paths:
         byte is written, regardless of outcome. On a settlement-enabled priced
         route (spec 0006), settlement completes before the upstream stream
         opens, and a successful settle's receipt rides the
-        `X-PAYMENT-RESPONSE` response header.
+        `X-PAYMENT-RESPONSE` response header. When `ZERKER_REASON_BINARY` is
+        configured, this endpoint rejects MCP agents before payment or
+        invocation creation; exact Reason action comparison is available only
+        on the fully buffered transactional endpoint.
       parameters:
         - name: X-PAYMENT
           in: header
@@ -592,6 +621,12 @@ paths:
                   - $ref: "#/components/schemas/Error"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: Reason enforcement is enabled for this MCP agent; use the transactional endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: The agent is inactive, suspended, or has no `upstream_url` configured.
           content:
@@ -1479,6 +1514,21 @@ components:
           description: "Base64-encoded, capped at 1 MiB. Present only when body_captured and the caller holds the invocations:read_body scope."
         created_at: { type: string, format: date-time }
         completed_at: { type: string, format: date-time, nullable: true }
+
+    ReasonMCPCallEnvelope:
+      type: object
+      additionalProperties: false
+      required: [schema, call, authorization]
+      properties:
+        schema:
+          type: string
+          enum: [zerker.gateway.reason-mcp-call.v1]
+        call:
+          type: object
+          description: A single JSON-RPC 2.0 MCP tools/call request. This exact object is forwarded after verification.
+        authorization:
+          type: object
+          description: A complete `zerker.reason.authorization-bundle.v1`, passed to Reason over bounded stdin without reopening another source.
 
     InvocationAcceptedResponse:
       type: object

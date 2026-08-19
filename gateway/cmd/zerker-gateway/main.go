@@ -30,6 +30,7 @@ import (
 	"github.com/zerkerlabs/gateway/gateway/internal/policy"
 	"github.com/zerkerlabs/gateway/gateway/internal/proxy"
 	"github.com/zerkerlabs/gateway/gateway/internal/ratelimit"
+	reasonauth "github.com/zerkerlabs/gateway/gateway/internal/reason"
 	"github.com/zerkerlabs/gateway/gateway/internal/server"
 	"github.com/zerkerlabs/gateway/gateway/internal/settlement"
 	"github.com/zerkerlabs/gateway/gateway/internal/version"
@@ -89,12 +90,25 @@ func run(logger *slog.Logger, addr string) error {
 
 	fwd := proxy.New(store, credSvc, proxy.Config{}, logger)
 
+	// Reason enforcement is an explicit deployment boundary. When configured,
+	// startup resolves the binary or fails; MCP tools/call requests then require
+	// independently verified exact-call envelopes before payment or forwarding.
+	var reasonVerifier reasonauth.Verifier
+	if binary := os.Getenv("ZERKER_REASON_BINARY"); binary != "" {
+		verifier, err := reasonauth.NewSubprocessVerifier(reasonauth.SubprocessConfig{Binary: binary})
+		if err != nil {
+			return fmt.Errorf("init Reason verifier: %w", err)
+		}
+		reasonVerifier = verifier
+	}
+
 	// Build the API handler explicitly so we can hold a reference for draining
 	// in-flight transactional goroutines on graceful shutdown (issue #53).
 	apiHandler := httpapi.NewHandler(store, logger).
 		WithAgentEvents(agentEventStore).
 		WithCredentials(credSvc).
 		WithProxy(fwd, invStore).
+		WithReasonVerifier(reasonVerifier).
 		WithAgentLimiter(agentLimiter).
 		WithRateObserver(rateObserver).
 		WithAnalyticsLimiter(analyticsLimiter).
