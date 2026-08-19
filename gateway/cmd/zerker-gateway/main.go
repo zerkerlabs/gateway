@@ -21,6 +21,7 @@ import (
 
 	"github.com/zerkerlabs/gateway/gateway/db"
 	"github.com/zerkerlabs/gateway/gateway/internal/agent"
+	"github.com/zerkerlabs/gateway/gateway/internal/agentevent"
 	"github.com/zerkerlabs/gateway/gateway/internal/auth"
 	"github.com/zerkerlabs/gateway/gateway/internal/credential"
 	"github.com/zerkerlabs/gateway/gateway/internal/httpapi"
@@ -52,7 +53,7 @@ func main() {
 func run(logger *slog.Logger, addr string) error {
 	// Store selection: use Postgres when ZERKER_DATABASE_URL or DATABASE_URL is
 	// set; fall back to the in-memory store for local dev only (non-durable).
-	store, credSvc, invStore, settlementStore, policyStore, decisionStore, closeStore, err := openStore(logger)
+	store, agentEventStore, credSvc, invStore, settlementStore, policyStore, decisionStore, closeStore, err := openStore(logger)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -104,6 +105,7 @@ func run(logger *slog.Logger, addr string) error {
 	// Build the API handler explicitly so we can hold a reference for draining
 	// in-flight transactional goroutines on graceful shutdown (issue #53).
 	apiHandler := httpapi.NewHandler(store, logger).
+		WithAgentEvents(agentEventStore).
 		WithCredentials(credSvc).
 		WithProxy(fwd, invStore).
 		WithReasonVerifier(reasonVerifier).
@@ -161,10 +163,10 @@ func run(logger *slog.Logger, addr string) error {
 }
 
 // openStore selects store and service implementations from environment variables.
-// Returns the agent store, credential service, invocation store, settlement
-// config store, policy store, policy decision store, and a cleanup function.
-// The caller must call the cleanup function when done.
-func openStore(logger *slog.Logger) (agent.AgentStore, *credential.Service, invocation.Store, settlement.Store, policy.PolicyStore, policy.DecisionStore, func(), error) {
+// Returns the agent store, event store, credential service, invocation store,
+// settlement config store, policy stores, and a cleanup function. The caller
+// must call the cleanup function when done.
+func openStore(logger *slog.Logger) (agent.AgentStore, agentevent.Store, *credential.Service, invocation.Store, settlement.Store, policy.PolicyStore, policy.DecisionStore, func(), error) {
 	dbURL := os.Getenv("ZERKER_DATABASE_URL")
 	if dbURL == "" {
 		dbURL = os.Getenv("DATABASE_URL")
@@ -173,16 +175,16 @@ func openStore(logger *slog.Logger) (agent.AgentStore, *credential.Service, invo
 	if dbURL != "" {
 		pool, err := pgxpool.New(context.Background(), dbURL)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, func() {}, fmt.Errorf("open database pool: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, func() {}, fmt.Errorf("open database pool: %w", err)
 		}
 		if err := db.Migrate(context.Background(), pool); err != nil {
 			pool.Close()
-			return nil, nil, nil, nil, nil, nil, func() {}, fmt.Errorf("run migrations: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, func() {}, fmt.Errorf("run migrations: %w", err)
 		}
 		kmsProvider, err := kms.NewLocalProvider()
 		if err != nil {
 			pool.Close()
-			return nil, nil, nil, nil, nil, nil, func() {}, fmt.Errorf("init kms provider: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, func() {}, fmt.Errorf("init kms provider: %w", err)
 		}
 		credSvc := credential.NewService(
 			credential.NewPostgresStore(pool),
@@ -190,14 +192,14 @@ func openStore(logger *slog.Logger) (agent.AgentStore, *credential.Service, invo
 			kmsProvider,
 			credential.StubVaultResolver{},
 		)
-		return agent.NewPostgresStore(pool), credSvc, invocation.NewPostgresStore(pool), settlement.NewPostgresStore(pool), policy.NewPostgresStore(pool), policy.NewPostgresDecisionStore(pool), pool.Close, nil
+		return agent.NewPostgresStore(pool), agentevent.NewPostgresStore(pool), credSvc, invocation.NewPostgresStore(pool), settlement.NewPostgresStore(pool), policy.NewPostgresStore(pool), policy.NewPostgresDecisionStore(pool), pool.Close, nil
 	}
 
 	logger.Warn("WARNING: DATABASE_URL is not set — using in-memory store; " +
 		"all registered agents will be lost on restart (dev only, not for production)")
 	kmsProvider, err := kms.NewLocalProvider()
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, func() {}, fmt.Errorf("init kms provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, func() {}, fmt.Errorf("init kms provider: %w", err)
 	}
 	credSvc := credential.NewService(
 		credential.NewMemoryStore(),
@@ -205,5 +207,5 @@ func openStore(logger *slog.Logger) (agent.AgentStore, *credential.Service, invo
 		kmsProvider,
 		credential.StubVaultResolver{},
 	)
-	return agent.NewMemoryStore(), credSvc, invocation.NewMemoryStore(), settlement.NewMemoryStore(), policy.NewMemoryStore(), policy.NewMemoryDecisionStore(), func() {}, nil
+	return agent.NewMemoryStore(), agentevent.NewMemoryStore(), credSvc, invocation.NewMemoryStore(), settlement.NewMemoryStore(), policy.NewMemoryStore(), policy.NewMemoryDecisionStore(), func() {}, nil
 }

@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -32,8 +33,13 @@ func main() {
 	audience := flag.String("audience", "zerker-gateway", "aud claim (must match ZERKER_OIDC_AUDIENCE)")
 	tenant := flag.String("tenant", "acme", "tenant claim value")
 	subject := flag.String("subject", "user-alice", "sub claim value")
-	tokenFile := flag.String("token-file", "", "if set, write the minted token to this path")
+	tokenFile := flag.String("token-file", "", "if set, atomically write the current token to this path")
+	tokenTTL := flag.Duration("token-ttl", time.Hour, "lifetime of each development token")
+	refreshEvery := flag.Duration("refresh-every", 30*time.Minute, "refresh interval for the token file")
 	flag.Parse()
+	if *tokenTTL <= 0 || *refreshEvery <= 0 || *refreshEvery >= *tokenTTL {
+		log.Fatal("token-ttl and refresh-every must be positive, with refresh-every shorter than token-ttl")
+	}
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -41,22 +47,37 @@ func main() {
 	}
 	const keyID = "mock-key-1"
 
-	now := time.Now()
-	token, err := signJWT(key, keyID, map[string]any{
-		"iss":    *issuer,
-		"aud":    *audience,
-		"sub":    *subject,
-		"tenant": *tenant,
-		"iat":    now.Unix(),
-		"exp":    now.Add(time.Hour).Unix(),
-	})
-	if err != nil {
-		log.Fatalf("sign token: %v", err)
+	mint := func() (string, error) {
+		now := time.Now()
+		return signJWT(key, keyID, map[string]any{
+			"iss":    *issuer,
+			"aud":    *audience,
+			"sub":    *subject,
+			"tenant": *tenant,
+			"iat":    now.Unix(),
+			"exp":    now.Add(*tokenTTL).Unix(),
+		})
 	}
 	if *tokenFile != "" {
-		if err := os.WriteFile(*tokenFile, []byte(token), 0o600); err != nil {
-			log.Fatalf("write token: %v", err)
+		refresh := func() error {
+			token, err := mint()
+			if err != nil {
+				return fmt.Errorf("sign token: %w", err)
+			}
+			return writeTokenAtomically(*tokenFile, token)
 		}
+		if err := refresh(); err != nil {
+			log.Fatal(err)
+		}
+		go func() {
+			ticker := time.NewTicker(*refreshEvery)
+			defer ticker.Stop()
+			for range ticker.C {
+				if err := refresh(); err != nil {
+					log.Printf("refresh token file: %v", err)
+				}
+			}
+		}()
 	}
 
 	mux := http.NewServeMux()
@@ -68,8 +89,35 @@ func main() {
 	})
 
 	fmt.Printf("mock-oidc: issuer %s (aud=%s tenant=%s sub=%s)\n", *issuer, *audience, *tenant, *subject)
-	fmt.Printf("mock-oidc: token\n%s\n", token)
+	if *tokenFile != "" {
+		fmt.Printf("mock-oidc: rotating token file %s every %s\n", *tokenFile, *refreshEvery)
+	}
 	log.Fatal(http.ListenAndServe(*addr, mux))
+}
+
+func writeTokenAtomically(path, token string) error {
+	dir := filepath.Dir(path)
+	file, err := os.CreateTemp(dir, ".zerker-token-*")
+	if err != nil {
+		return fmt.Errorf("create token file: %w", err)
+	}
+	temporary := file.Name()
+	defer func() { _ = os.Remove(temporary) }()
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("chmod token file: %w", err)
+	}
+	if _, err := file.WriteString(token); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write token file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close token file: %w", err)
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		return fmt.Errorf("replace token file: %w", err)
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

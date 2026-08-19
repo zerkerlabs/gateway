@@ -15,7 +15,7 @@ LDFLAGS    := -X github.com/zerkerlabs/gateway/gateway/internal/version.Version=
 .DEFAULT_GOAL := check
 
 .PHONY: check
-check: tidy-check fmt-check vet lint test docs-check ## Run the full quality gate (build is implied by vet/test)
+check: tidy-check fmt-check vet lint test adapter-test docs-check ## Run the full quality gate (build is implied by vet/test)
 
 .PHONY: docs
 docs: ## Emit the config/env reference the website includes (from internal/config)
@@ -28,6 +28,30 @@ docs-check: ## Fail if the committed config/env reference is stale (run 'make do
 .PHONY: build
 build: ## Build the gateway binary into ./bin
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
+
+.PHONY: build-onboard
+build-onboard: ## Build the read-only local agent onboarding scanner into ./bin
+	$(GO) build -o bin/zerker-onboard ./cmd/zerker-onboard
+
+.PHONY: build-cli
+build-cli: ## Build the calm local Zerker operator CLI into ./bin
+	$(GO) build -o bin/zerker ./cmd/zerker
+
+.PHONY: onboard
+onboard: ## Find supported local agents without changing their configuration
+	$(GO) run ./cmd/zerker-onboard
+
+.PHONY: observe-agents
+observe-agents: ## Register all discovered agents with internal observe-only defaults
+	$(GO) run ./cmd/zerker-onboard --observe-all
+
+.PHONY: today
+today: ## Show the calm internal agent summary for the last 24 hours
+	$(GO) run ./cmd/zerker-onboard --today
+
+.PHONY: status
+status: ## Show evidence-based local agent connection status and privacy boundaries
+	$(GO) run ./cmd/zerker status
 
 .PHONY: run
 run: ## Run the gateway locally
@@ -46,6 +70,13 @@ integration-test: ## Run integration tests (needs TEST_DATABASE_URL + a Postgres
 .PHONY: test
 test: ## Run tests with the race detector
 	$(GO) test -race -count=1 ./...
+
+.PHONY: adapter-test
+adapter-test: ## Run privacy-boundary tests for local agent adapters
+	python3 ../integrations/hermes/zerker-observer/test_plugin.py
+	python3 ../integrations/claude-code/test_observer.py
+	python3 ../integrations/codex/test_observer.py
+	python3 ../integrations/gemini-cli/test_observer.py
 
 .PHONY: vet
 vet: ## Run go vet
