@@ -11,7 +11,11 @@ import (
 	reasonauth "github.com/zerkerlabs/gateway/gateway/internal/reason"
 )
 
-const reasonMCPEnvelopeSchema = "zerker.gateway.reason-mcp-call.v1"
+const (
+	reasonMCPEnvelopeSchema   = "zerker.gateway.reason-mcp-call.v1"
+	reasonTenantConstraintKey = "gateway.tenant_id"
+	reasonAgentConstraintKey  = "gateway.agent_id"
+)
 
 var (
 	errReasonMalformed = errors.New("malformed Reason MCP request")
@@ -31,12 +35,18 @@ type parsedMCPCall struct {
 	arguments json.RawMessage
 }
 
+type reasonRequestBinding struct {
+	principal string
+	tenantID  string
+	agentID   string
+}
+
 // enforceReasonMCP consumes one fully buffered transactional request. Ordinary
 // non-tools/call MCP messages pass through unchanged. A tools/call must instead
 // arrive in the v1 envelope; the exact captured authorization bytes are sent to
 // Reason, and only verified+authorized output whose tool/arguments match the
 // concrete call is accepted.
-func enforceReasonMCP(ctx context.Context, verifier reasonauth.Verifier, body []byte) (parsedMCPCall, *reasonMCPAuthorization, error) {
+func enforceReasonMCP(ctx context.Context, verifier reasonauth.Verifier, body []byte, expected reasonRequestBinding) (parsedMCPCall, *reasonMCPAuthorization, error) {
 	if err := validateUniqueJSON(body); err != nil {
 		return parsedMCPCall{}, nil, fmt.Errorf("%w: %w", errReasonMalformed, err)
 	}
@@ -84,7 +94,11 @@ func enforceReasonMCP(ctx context.Context, verifier reasonauth.Verifier, body []
 	var bundle struct {
 		Schema  string `json:"schema"`
 		Request struct {
-			Schema string `json:"schema"`
+			Schema  string `json:"schema"`
+			Mission struct {
+				Principal   string                     `json:"principal"`
+				Constraints map[string]json.RawMessage `json:"constraints"`
+			} `json:"mission"`
 			Action struct {
 				Tool      string          `json:"tool"`
 				Arguments json.RawMessage `json:"arguments"`
@@ -95,6 +109,11 @@ func enforceReasonMCP(ctx context.Context, verifier reasonauth.Verifier, body []
 		bundle.Schema != "zerker.reason.authorization-bundle.v1" ||
 		bundle.Request.Schema != "zerker.reason.action.v1" || bundle.Request.Action.Tool == "" {
 		return parsedMCPCall{}, nil, errReasonMalformed
+	}
+	if bundle.Request.Mission.Principal != expected.principal ||
+		!jsonStringEquals(bundle.Request.Mission.Constraints[reasonTenantConstraintKey], expected.tenantID) ||
+		!jsonStringEquals(bundle.Request.Mission.Constraints[reasonAgentConstraintKey], expected.agentID) {
+		return parsedMCPCall{}, nil, errReasonMismatch
 	}
 
 	actionArgs := bundle.Request.Action.Arguments
@@ -121,6 +140,11 @@ func enforceReasonMCP(ctx context.Context, verifier reasonauth.Verifier, body []
 		RequestDigest:         verification.RequestDigest,
 		ReasoningResultDigest: verification.ReasoningResultDigest,
 	}, nil
+}
+
+func jsonStringEquals(raw json.RawMessage, expected string) bool {
+	var value string
+	return len(raw) > 0 && json.Unmarshal(raw, &value) == nil && value == expected
 }
 
 func parseMCPCall(body []byte) (parsedMCPCall, error) {
