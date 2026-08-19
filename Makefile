@@ -5,10 +5,9 @@
 # own required status context (check-gateway, check-facilitator, ...). The dev-only
 # mock-oidc module is intentionally excluded from the gate.
 #
-# www/ (the Astro/Starlight site) is intentionally excluded too: it isn't a Go
-# module, so it can't fan out via `make -C $m check` like the rest of
-# GO_MODULES. Its own gate lives at www/Makefile and runs as the separate
-# check-www CI context — `make check` at the repo root does not cover it.
+# www/ and console/ are intentionally excluded too: they are not Go modules,
+# so they cannot fan out via `make -C $m check`. Each has a separate CI context;
+# `make check` at the repo root does not cover either web surface.
 
 GO_MODULES := gateway rooms x402types facilitator sdk/go
 
@@ -38,6 +37,11 @@ dev-auth: ## Run the gateway locally against a dev mock OIDC issuer
 	$(MAKE) -C gateway dev-auth
 integration-test: ## Run the gateway integration tests
 	$(MAKE) -C gateway integration-test
+
+.PHONY: console-check
+console-check: ## Test and build the static operator-console preview
+	npm --prefix console ci
+	npm --prefix console run check
 
 .PHONY: tools
 tools: ## Install pinned dev tools shared across modules

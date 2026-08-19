@@ -30,3 +30,4 @@ coverage.html
 .idea/
 *.swp
 /gateway/scripts/mock-oidc/mock-oidc
+.gstack/
