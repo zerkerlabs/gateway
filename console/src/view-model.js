@@ -606,3 +606,150 @@ export function capabilityCounts(stack) {
     { total: 0 },
   );
 }
+
+export function validateAnalyticsWindow(window, maxWindowDays = 31) {
+  const since = new Date(window?.since).getTime();
+  const until = new Date(window?.until).getTime();
+  if (!window?.since || !window?.until || !Number.isFinite(since) || !Number.isFinite(until)) return { valid: false, reason: "A valid since and until are required" };
+  if (since > until) return { valid: false, reason: "Since cannot be after the evaluation time" };
+  if (!Number.isFinite(maxWindowDays) || maxWindowDays <= 0) return { valid: false, reason: "Window limit is unavailable" };
+  const durationMs = until - since;
+  if (durationMs > maxWindowDays * 24 * 60 * 60 * 1000) return { valid: false, reason: `Window exceeds ${maxWindowDays} days` };
+  return { valid: true, durationMs };
+}
+
+export function validatePercentiles(series) {
+  if (!series || [series.p50, series.p95, series.p99].some((value) => !Number.isFinite(value) || value < 0)) return { valid: false, state: "unknown" };
+  if (series.p50 > series.p95 || series.p95 > series.p99) return { valid: false, state: "unknown" };
+  return { valid: true, state: "available" };
+}
+
+export function formatAnalyticsDuration(value, state = "available") {
+  if (state === "no_samples") return "No samples";
+  if (state === "not_applicable") return "Not applicable";
+  if (state === "unavailable") return "Unavailable";
+  if (!Number.isFinite(value) || value < 0) return "Unknown";
+  if (value >= 1000) return `${(value / 1000).toFixed(2).replace(/\.?0+$/, "")}s`;
+  return `${Math.round(value)}ms`;
+}
+
+export function analyticsTTFTLabel(row, sourceAvailable = true) {
+  if (!sourceAvailable) return "Unavailable";
+  if (row?.streaming === false) return "Not applicable";
+  if (row?.streamingSamples === 0) return "No streaming samples";
+  if (!Number.isFinite(row?.ttftP95Ms)) return "Unknown";
+  return formatAnalyticsDuration(row.ttftP95Ms);
+}
+
+function sumRows(rows, key) {
+  return (rows ?? []).reduce((total, row) => total + (Number.isFinite(row[key]) ? row[key] : 0), 0);
+}
+
+function analyticsIntegrity(window) {
+  const aggregate = window?.aggregate;
+  const latencyValid = validatePercentiles(aggregate?.latencyMs).valid;
+  const ttftValid = validatePercentiles(aggregate?.ttftMs).valid;
+  const agentsMatch = sumRows(window?.agents, "count") === aggregate?.count && sumRows(window?.agents, "errors") === aggregate?.errors;
+  const operationsMatch = sumRows(window?.operations, "count") === aggregate?.count && sumRows(window?.operations, "errors") === aggregate?.errors;
+  const taxonomyMatches = sumRows(window?.errorTaxonomy, "count") === aggregate?.errors;
+  return { valid: Boolean(latencyValid && ttftValid && agentsMatch && operationsMatch && taxonomyMatches), latencyValid, ttftValid, agentsMatch, operationsMatch, taxonomyMatches };
+}
+
+function analyticsMetricSeries(series, state) {
+  if (state === "empty") return { p50: "No samples", p95: "No samples", p99: "No samples", state: "no_samples" };
+  if (state === "partial") return { p50: "Unavailable", p95: "Unavailable", p99: "Unavailable", state: "unavailable" };
+  if (!validatePercentiles(series).valid) return { p50: "Unknown", p95: "Unknown", p99: "Unknown", state: "unknown" };
+  return { p50: formatAnalyticsDuration(series.p50), p95: formatAnalyticsDuration(series.p95), p99: formatAnalyticsDuration(series.p99), state: "available" };
+}
+
+export function buildAnalyticsModel({ snapshot, windows, scenario, windowID }) {
+  const window = windows?.[windowID] ?? null;
+  const validation = validateAnalyticsWindow(window, snapshot?.maxWindowDays);
+  const scenarioState = scenario?.state ?? "error";
+  const integrity = window ? analyticsIntegrity(window) : { valid: false };
+  const invalidFixture = scenarioState === "complete" && (!validation.valid || !integrity.valid);
+  const availability = invalidFixture ? "error" : scenarioState;
+  const empty = availability === "empty";
+  const partial = availability === "partial";
+  const aggregate = availability === "complete" ? window.aggregate
+    : partial ? { count: window.aggregate.count, errors: window.aggregate.errors, latencyMs: null, ttftMs: null, streamingSamples: null }
+      : empty ? { count: 0, errors: 0, latencyMs: null, ttftMs: null, streamingSamples: 0 } : null;
+  const errorRate = !aggregate ? "Unknown" : aggregate.count === 0 ? "No calls" : formatPercent(aggregate.errors, aggregate.count);
+  const latency = analyticsMetricSeries(aggregate?.latencyMs, empty ? "empty" : partial ? "partial" : availability === "complete" ? "complete" : "partial");
+  const ttft = analyticsMetricSeries(aggregate?.ttftMs, empty ? "empty" : partial ? "partial" : availability === "complete" ? "complete" : "partial");
+  const stateSummary = availability === "complete"
+    ? `${aggregate.count.toLocaleString("en-US")} fixture calls in ${window.label}`
+    : availability === "empty" ? `Known zero fixture calls in ${window?.label ?? "selected window"}`
+      : availability === "partial" ? `Partial fixture metrics in ${window?.label ?? "selected window"}`
+        : availability === "unavailable" ? "Analytics fixture unavailable"
+          : "Analytics fixture error";
+  return {
+    scenario,
+    availability,
+    publicMessage: invalidFixture ? "Analytics fixture consistency checks failed. No Gateway request was made." : scenario?.publicMessage ?? "",
+    window,
+    validation,
+    integrity,
+    aggregate,
+    countDisplay: aggregate ? aggregate.count.toLocaleString("en-US") : "Unknown",
+    errorDisplay: aggregate ? aggregate.errors.toLocaleString("en-US") : "Unknown",
+    errorRate,
+    latency,
+    ttft,
+    taxonomy: availability === "complete" ? window.errorTaxonomy : empty ? [] : null,
+    agents: availability === "complete" ? window.agents : empty ? [] : null,
+    operations: availability === "complete" ? window.operations : empty ? [] : null,
+    stateSummary,
+  };
+}
+
+export function buildSystemModel(snapshot, limitations = []) {
+  const replicaSamples = snapshot?.build?.replicaSamples;
+  const rollout = Number.isInteger(replicaSamples) && replicaSamples > 1
+    ? { id: "evidenced", label: "Comparison evidence available" }
+    : { id: "unconfirmed", label: "Unconfirmed · one fixture build sample" };
+  const configured = typeof snapshot?.facilitator?.configurationEvidence === "string" && snapshot.facilitator.configurationEvidence.startsWith("Configured");
+  const ready = snapshot?.facilitator?.supported === "Supported" && snapshot?.facilitator?.readiness === "Ready" && snapshot?.facilitator?.gas === "Sufficient";
+  const facilitator = ready
+    ? { id: "ready", label: "Ready · fixture evidence" }
+    : configured ? { id: "not_proved", label: "Configured · readiness not proved" } : { id: "unknown", label: "Configuration Unknown" };
+  const kms = snapshot?.kms?.configurationEvidence?.startsWith("Configured")
+    ? { id: "configured_fixture", label: "Configured · fixture metadata only" }
+    : { id: "unknown", label: "Configuration Unknown" };
+  return {
+    health: snapshot?.health?.state === "healthy" ? { id: "captured_healthy", label: "Healthy · captured fixture" } : { id: "unknown", label: "Unknown" },
+    rollout,
+    facilitator,
+    kms,
+    limitations: limitations.map((item) => ({ ...item })),
+  };
+}
+
+export function buildRestInventory(operations) {
+  const groups = {};
+  const counts = { probe: 0, read: 0, proxy: 0, write: 0 };
+  const ids = new Set();
+  let duplicate = false;
+  let destinationsComplete = true;
+  let unauthenticated = 0;
+  for (const operation of operations ?? []) {
+    if (ids.has(operation.id)) duplicate = true;
+    ids.add(operation.id);
+    if (operation.kind in counts) counts[operation.kind] += 1;
+    if (operation.auth === "unauthenticated") unauthenticated += 1;
+    if (!operation.destination) destinationsComplete = false;
+    (groups[operation.destination ?? "Unmapped"] ??= []).push({ ...operation });
+  }
+  const valid = operations?.length === 23 && ids.size === 23 && !duplicate && unauthenticated === 2
+    && counts.probe === 2 && counts.read === 10 && counts.proxy === 3 && counts.write === 8 && destinationsComplete;
+  return { total: operations?.length ?? 0, unique: ids.size, duplicate, unauthenticated, counts, destinationsComplete, groups, valid };
+}
+
+export function buildSDKInventory(items) {
+  return (items ?? []).map((item) => {
+    if (item.delivery === "available") return { ...item, label: "Available · repository-evidenced", tone: "available" };
+    if (item.delivery === "discrepancy") return { ...item, label: "Docs/repository discrepancy · not evidenced", tone: "warning" };
+    if (item.delivery === "developer") return { ...item, label: "Developer-only inventory", tone: "empty" };
+    return { ...item, label: "Unknown", tone: "unavailable" };
+  });
+}

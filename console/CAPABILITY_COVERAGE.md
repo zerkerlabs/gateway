@@ -110,16 +110,16 @@ When documentation, OpenAPI, and implementation disagree, the console must not s
 
 ## Managed and wider Zerker product
 
-| Documented or discussed capability | Required console treatment | Delivery truth |
-|---|---|---|
-| Usage and revenue metering dashboard | Revenue analytics | Commercial; raw OSS data remains available |
-| Usage-based billing, quotas, invoicing, spend limits | Products and revenue | Commercial/planned, not OSS Gateway |
-| Fleet-wide multi-tenant governance | Workspace/control-plane framing | Commercial; this fixture must not imply it is connected |
-| Products and custom portals | Products & portals | Planned |
-| Remote pairing and missions | Environments/mission concept | Planned; observe and operate credentials remain separate |
-| Reason | Stack | Standalone |
-| ZMem, Rooms, Treeship, Guard | Stack | Integration paths with their own delivery labels |
-| Agent activity onboarding | Agent activity and environments | In review in PR #46 |
+| Documented or discussed capability | Required console treatment | Delivery truth | Campaign coverage |
+|---|---|---|---|
+| Usage and revenue metering dashboard | Revenue analytics | Commercial; raw OSS data remains available | C05, C07 delivery inventory |
+| Usage-based billing, quotas, invoicing, spend limits | Products and revenue | Commercial/planned, not OSS Gateway | C05 |
+| Fleet-wide multi-tenant governance | Workspace/control-plane framing | Commercial; this fixture must not imply it is connected | C01, C06 fixture context |
+| Products and custom portals | Products & portals | Planned | C05 |
+| Remote pairing and missions | Environments/mission concept | Planned; observe and operate credentials remain separate | C04 |
+| Reason | Stack | Standalone | C01, C07 system inventory |
+| ZMem, Rooms, Treeship, Guard | Stack | Integration paths with their own delivery labels | C01, C07 system inventory |
+| Agent activity onboarding | Agent activity and environments | In review in PR #46 | C04, C06 |
 
 ## SDK and contract discrepancies
 
@@ -141,3 +141,15 @@ Every current operation has an operator destination even when writes remain disa
 | `getPolicy`, `putPolicy`, `listPolicyDecisions` | Policies |
 
 The fixture may preview the shape of a write workflow, but must say that no mutation, credential issuance, payment, settlement, proxy call, or production request occurred.
+
+## Final C01–C07 reconciliation
+
+The Safe campaign audit leaves no unmapped ledger row:
+
+- **Operate and Traffic:** C01–C04 cover attention, state truth, invocation evidence, activity boundaries, catalog, and environments. C07 completes aggregate analytics, safe error taxonomy, MCP method/tool evidence, streaming TTFT, fixed-window limits, and dedicated-limiter posture.
+- **Control and Revenue:** C03–C05 cover policy, credential metadata, x402 gating, settlement evidence, and concept-only products. No credential value or mutation enters the fixture.
+- **System:** C06 keeps browser authentication human-gated in `AUTH_ARCHITECTURE.md`. C07 covers captured health/build evidence, production storage and KMS requirements, security invariants, deployment limitations, facilitator readiness/signers, SDK discrepancies, wider-product delivery states, and all 23 REST destinations.
+- **Non-console rationale:** shared x402 wire types and SDKs are developer-only system inventory; managed billing and fleet governance remain Commercial; portals and remote missions remain Planned; Reason remains Standalone; ZMem, Rooms, Treeship, and Guard remain Integration paths; agent activity remains In review.
+- **Auth rationale:** OIDC is Available for the Gateway API, but console login, sessions, callbacks, cookies, CSRF, and token custody remain blocked on the human approval checklist. `/healthz` and `/version` are the only unauthenticated operation exemptions.
+
+C07 renders 23 unique operation IDs as 2 probes, 10 authenticated reads, 3 authenticated proxy operations, and 8 authenticated writes. Contract availability never enables an operation in this preview.

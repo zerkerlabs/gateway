@@ -1,7 +1,118 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agents, attention, credentials, environmentSnapshot, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, stack, trafficSnapshot } from "./data.js";
-import { buildAgentResults, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveDataState, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, filterCredentials, filterInvocations, filterPaymentOperations, filterPolicyDecisions, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, metricValueState, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizeOverview, summarizePayments } from "./view-model.js";
+import { agents, analyticsScenarios, analyticsSnapshot, analyticsWindows, attention, credentials, environmentSnapshot, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, restOperations, sdkInventory, stack, systemLimitations, systemSnapshot, trafficSnapshot } from "./data.js";
+import { analyticsTTFTLabel, buildAgentResults, buildAnalyticsModel, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, buildRestInventory, buildSDKInventory, buildSystemModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveDataState, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, filterCredentials, filterInvocations, filterPaymentOperations, filterPolicyDecisions, formatAnalyticsDuration, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, metricValueState, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizeOverview, summarizePayments, validateAnalyticsWindow, validatePercentiles } from "./view-model.js";
+
+test("analytics windows require fixed valid since values and enforce the inclusive 31-day boundary", () => {
+  assert.deepEqual(validateAnalyticsWindow({ since: "2026-07-18T09:12:00Z", until: "2026-08-18T09:12:00Z" }), { valid: true, durationMs: 31 * 24 * 60 * 60 * 1000 });
+  assert.equal(validateAnalyticsWindow({ since: "2026-07-18T09:11:59.999Z", until: "2026-08-18T09:12:00Z" }).valid, false);
+  assert.equal(validateAnalyticsWindow({ since: "", until: analyticsSnapshot.evaluatedAt }).valid, false);
+  assert.equal(validateAnalyticsWindow({ since: "2026-08-18T09:12:00.001Z", until: analyticsSnapshot.evaluatedAt }).valid, false);
+  assert.ok(Object.values(analyticsWindows).every((window) => validateAnalyticsWindow(window, analyticsSnapshot.maxWindowDays).valid));
+});
+
+test("analytics percentile and duration formatting never invents invalid or empty samples", () => {
+  assert.deepEqual(validatePercentiles({ p50: 620, p95: 1800, p99: 8600 }), { valid: true, state: "available" });
+  assert.deepEqual(validatePercentiles({ p50: 900, p95: 800, p99: 1000 }), { valid: false, state: "unknown" });
+  assert.deepEqual(validatePercentiles({ p50: 1, p95: null, p99: 3 }), { valid: false, state: "unknown" });
+  assert.equal(formatAnalyticsDuration(1800), "1.8s");
+  assert.equal(formatAnalyticsDuration(720), "720ms");
+  assert.equal(formatAnalyticsDuration(null), "Unknown");
+  assert.equal(formatAnalyticsDuration(0, "no_samples"), "No samples");
+  assert.equal(formatAnalyticsDuration(0, "not_applicable"), "Not applicable");
+});
+
+function analyticsModel(scenarioID, windowID = "24h") {
+  return buildAnalyticsModel({ snapshot: analyticsSnapshot, windows: analyticsWindows, scenario: analyticsScenarios.find((item) => item.id === scenarioID), windowID });
+}
+
+test("complete analytics fixtures reconcile aggregate, agent, operation, and safe taxonomy totals", () => {
+  for (const windowID of Object.keys(analyticsWindows)) {
+    const model = analyticsModel("complete", windowID);
+    assert.equal(model.availability, "complete");
+    assert.deepEqual(model.integrity, { valid: true, latencyValid: true, ttftValid: true, agentsMatch: true, operationsMatch: true, taxonomyMatches: true });
+    assert.equal(model.taxonomy.reduce((sum, item) => sum + item.count, 0), model.aggregate.errors);
+    assert.equal(model.agents.reduce((sum, item) => sum + item.count, 0), model.aggregate.count);
+    assert.equal(model.operations.reduce((sum, item) => sum + item.count, 0), model.aggregate.count);
+  }
+  assert.equal(analyticsModel("complete").countDisplay, "1,256");
+  assert.equal(analyticsModel("complete").errorRate, "1.3%");
+  assert.deepEqual(analyticsModel("complete").latency, { p50: "620ms", p95: "1.8s", p99: "8.6s", state: "available" });
+});
+
+test("analytics states preserve known zero, partial, unavailable, and safe error semantics", () => {
+  const empty = analyticsModel("empty");
+  assert.equal(empty.countDisplay, "0");
+  assert.equal(empty.errorDisplay, "0");
+  assert.equal(empty.errorRate, "No calls");
+  assert.deepEqual(empty.latency, { p50: "No samples", p95: "No samples", p99: "No samples", state: "no_samples" });
+  assert.deepEqual(empty.ttft, { p50: "No samples", p95: "No samples", p99: "No samples", state: "no_samples" });
+  assert.deepEqual(empty.agents, []);
+  const partial = analyticsModel("partial");
+  assert.equal(partial.countDisplay, "1,256");
+  assert.equal(partial.errorDisplay, "16");
+  assert.equal(partial.aggregate.streamingSamples, null);
+  assert.equal(partial.latency.p95, "Unavailable");
+  assert.equal(partial.agents, null);
+  assert.equal(analyticsModel("unavailable").countDisplay, "Unknown");
+  assert.match(analyticsModel("error").publicMessage, /No Gateway request/);
+});
+
+test("analytics TTFT applicability distinguishes streaming evidence from non-streaming operations", () => {
+  const streaming = analyticsWindows["24h"].operations.find((item) => item.streaming);
+  const transactional = analyticsWindows["24h"].operations.find((item) => item.streaming === false);
+  assert.equal(analyticsTTFTLabel(streaming), "480ms");
+  assert.equal(analyticsTTFTLabel(transactional), "Not applicable");
+  assert.equal(analyticsTTFTLabel({ streamingSamples: 0 }), "No streaming samples");
+  assert.equal(analyticsTTFTLabel(streaming, false), "Unavailable");
+});
+
+test("analytics model reads fixed fixtures without mutating their source order or values", () => {
+  const before = JSON.stringify({ analyticsSnapshot, analyticsWindows, analyticsScenarios });
+  analyticsModel("complete", "31d");
+  analyticsModel("partial", "1h");
+  assert.equal(JSON.stringify({ analyticsSnapshot, analyticsWindows, analyticsScenarios }), before);
+});
+
+test("system posture never promotes one probe, configuration, or one build sample to readiness", () => {
+  const model = buildSystemModel(systemSnapshot, systemLimitations);
+  assert.deepEqual(model.health, { id: "captured_healthy", label: "Healthy · captured fixture" });
+  assert.deepEqual(model.rollout, { id: "unconfirmed", label: "Unconfirmed · one fixture build sample" });
+  assert.deepEqual(model.facilitator, { id: "not_proved", label: "Configured · readiness not proved" });
+  assert.deepEqual(model.kms, { id: "configured_fixture", label: "Configured · fixture metadata only" });
+  assert.equal(model.limitations.length, 7);
+  assert.match(systemSnapshot.kms.masterRotation, /Unsupported/);
+  assert.match(systemSnapshot.kms.fallback, /development only/);
+});
+
+test("REST inventory contains the exact unique contract classes, auth exemptions, and destinations", () => {
+  const model = buildRestInventory(restOperations);
+  assert.equal(model.valid, true);
+  assert.equal(model.total, 23);
+  assert.equal(model.unique, 23);
+  assert.equal(model.unauthenticated, 2);
+  assert.deepEqual(model.counts, { probe: 2, read: 10, proxy: 3, write: 8 });
+  assert.deepEqual(restOperations.map((item) => item.id), ["getHealthz", "getVersion", "createAgent", "listAgents", "getAgent", "updateAgent", "deleteAgent", "createCredential", "listCredentials", "getCredential", "putCredential", "deleteCredential", "transactInvocation", "streamInvocation", "pollInvocation", "listInvocations", "getInvocation", "getAnalytics", "getSettlementConfig", "patchSettlementConfig", "getPolicy", "putPolicy", "listPolicyDecisions"]);
+  assert.deepEqual(restOperations.filter((item) => item.auth === "unauthenticated").map((item) => item.id), ["getHealthz", "getVersion"]);
+  assert.ok(restOperations.every((item) => item.destination));
+  assert.equal(buildRestInventory([...restOperations, restOperations[0]]).valid, false);
+});
+
+test("SDK inventory preserves repository evidence, discrepancy, and developer-only states", () => {
+  const model = buildSDKInventory(sdkInventory);
+  assert.equal(model.find((item) => item.id === "go").label, "Available · repository-evidenced");
+  assert.equal(model.find((item) => item.id === "typescript").label, "Docs/repository discrepancy · not evidenced");
+  assert.equal(model.find((item) => item.id === "wire").label, "Developer-only inventory");
+  assert.notEqual(model.find((item) => item.id === "typescript").tone, "available");
+});
+
+test("system and operation models do not mutate source fixtures", () => {
+  const before = JSON.stringify({ systemSnapshot, systemLimitations, restOperations, sdkInventory });
+  buildSystemModel(systemSnapshot, systemLimitations);
+  buildRestInventory(restOperations);
+  buildSDKInventory(sdkInventory);
+  assert.equal(JSON.stringify({ systemSnapshot, systemLimitations, restOperations, sdkInventory }), before);
+});
 
 test("catalog status derivation preserves pending, active, inactive, and suspension independence", () => {
   assert.equal(deriveCatalogStatus({ upstreamConfigured: false, inactiveAt: null }), "pending");

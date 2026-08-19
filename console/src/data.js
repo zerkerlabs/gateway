@@ -198,6 +198,160 @@ export const facilitatorPosture = {
   managedDelivery: "commercial",
 };
 
+export const analyticsSnapshot = {
+  workspace: "Zerker Labs",
+  environment: "All environments",
+  source: "Gateway analytics fixture v1",
+  refreshedAt: "2026-08-18T09:12:00Z",
+  evaluatedAt: "2026-08-18T09:12:00Z",
+  defaultWindow: "24h",
+  maxWindowDays: 31,
+  limiter: "Dedicated analytics limiter · contract posture",
+};
+
+export const analyticsScenarios = [
+  { id: "complete", label: "Complete fixture", state: "complete" },
+  { id: "empty", label: "Empty", state: "empty" },
+  { id: "partial", label: "Partial", state: "partial" },
+  { id: "unavailable", label: "Unavailable", state: "unavailable", publicMessage: "Analytics fixture evidence is unavailable. No Gateway request was made." },
+  { id: "error", label: "Error", state: "error", publicMessage: "The analytics fixture could not be prepared. No Gateway request was made." },
+];
+
+export const analyticsWindows = {
+  "1h": {
+    label: "Last hour", since: "2026-08-18T08:12:00Z", until: "2026-08-18T09:12:00Z",
+    aggregate: { count: 62, errors: 1, latencyMs: { p50: 590, p95: 1720, p99: 8300 }, ttftMs: { p50: 210, p95: 450, p99: 820 }, streamingSamples: 20 },
+    errorTaxonomy: [{ id: "upstream_timeout", label: "Upstream timeout", count: 1 }, { id: "policy_denied", label: "Policy denied", count: 0 }, { id: "rate_limited", label: "Rate limited", count: 0 }, { id: "payment_required", label: "Payment required", count: 0 }],
+    agents: [
+      { name: "Support agent", count: 24, errors: 0, latencyP95Ms: 1320, streamingSamples: 10, ttftP95Ms: 410 },
+      { name: "Docs search", count: 15, errors: 0, latencyP95Ms: 700, streamingSamples: 0, ttftP95Ms: null },
+      { name: "Research agent", count: 10, errors: 0, latencyP95Ms: 2600, streamingSamples: 10, ttftP95Ms: 690 },
+      { name: "Release reviewer", count: 9, errors: 0, latencyP95Ms: 3000, streamingSamples: 0, ttftP95Ms: null },
+      { name: "Code generator", count: 4, errors: 1, latencyP95Ms: 8300, streamingSamples: 0, ttftP95Ms: null },
+    ],
+    operations: [
+      { protocol: "HTTP", method: "Streaming proxy", tool: null, count: 10, errors: 0, latencyP95Ms: 1320, streaming: true, ttftP95Ms: 410 },
+      { protocol: "HTTP", method: "Transactional proxy", tool: null, count: 18, errors: 1, latencyP95Ms: 8300, streaming: false, ttftP95Ms: null },
+      { protocol: "MCP", method: "tools/call", tool: "research.report", count: 10, errors: 0, latencyP95Ms: 2600, streaming: true, ttftP95Ms: 690 },
+      { protocol: "MCP", method: "tools/call", tool: "search_docs", count: 15, errors: 0, latencyP95Ms: 700, streaming: false, ttftP95Ms: null },
+      { protocol: "MCP", method: "tools/call", tool: "check_release", count: 9, errors: 0, latencyP95Ms: 3000, streaming: false, ttftP95Ms: null },
+    ],
+  },
+  "24h": {
+    label: "Last 24 hours", since: "2026-08-17T09:12:00Z", until: "2026-08-18T09:12:00Z",
+    aggregate: { count: 1256, errors: 16, latencyMs: { p50: 620, p95: 1800, p99: 8600 }, ttftMs: { p50: 230, p95: 720, p99: 1600 }, streamingSamples: 350 },
+    errorTaxonomy: [{ id: "upstream_timeout", label: "Upstream timeout", count: 7 }, { id: "policy_denied", label: "Policy denied", count: 4 }, { id: "rate_limited", label: "Rate limited", count: 3 }, { id: "payment_required", label: "Payment required", count: 2 }],
+    agents: [
+      { name: "Support agent", count: 486, errors: 4, latencyP95Ms: 1400, streamingSamples: 200, ttftP95Ms: 480 },
+      { name: "Docs search", count: 301, errors: 1, latencyP95Ms: 720, streamingSamples: 0, ttftP95Ms: null },
+      { name: "Research agent", count: 214, errors: 4, latencyP95Ms: 2800, streamingSamples: 150, ttftP95Ms: 820 },
+      { name: "Release reviewer", count: 173, errors: 0, latencyP95Ms: 3100, streamingSamples: 0, ttftP95Ms: null },
+      { name: "Code generator", count: 82, errors: 7, latencyP95Ms: 8600, streamingSamples: 0, ttftP95Ms: null },
+    ],
+    operations: [
+      { protocol: "HTTP", method: "Streaming proxy", tool: null, count: 200, errors: 1, latencyP95Ms: 1400, streaming: true, ttftP95Ms: 480 },
+      { protocol: "HTTP", method: "Transactional proxy", tool: null, count: 368, errors: 10, latencyP95Ms: 8600, streaming: false, ttftP95Ms: null },
+      { protocol: "MCP", method: "tools/call", tool: "research.report", count: 214, errors: 4, latencyP95Ms: 2800, streaming: true, ttftP95Ms: 820 },
+      { protocol: "MCP", method: "tools/call", tool: "search_docs", count: 301, errors: 1, latencyP95Ms: 720, streaming: false, ttftP95Ms: null },
+      { protocol: "MCP", method: "tools/call", tool: "check_release", count: 173, errors: 0, latencyP95Ms: 3100, streaming: false, ttftP95Ms: null },
+    ],
+  },
+  "7d": {
+    label: "Last 7 days", since: "2026-08-11T09:12:00Z", until: "2026-08-18T09:12:00Z",
+    aggregate: { count: 7850, errors: 81, latencyMs: { p50: 640, p95: 1950, p99: 9100 }, ttftMs: { p50: 240, p95: 760, p99: 1710 }, streamingSamples: 2190 },
+    errorTaxonomy: [{ id: "upstream_timeout", label: "Upstream timeout", count: 36 }, { id: "policy_denied", label: "Policy denied", count: 20 }, { id: "rate_limited", label: "Rate limited", count: 15 }, { id: "payment_required", label: "Payment required", count: 10 }],
+    agents: [
+      { name: "Support agent", count: 3030, errors: 20, latencyP95Ms: 1490, streamingSamples: 1250, ttftP95Ms: 510 },
+      { name: "Docs search", count: 1880, errors: 8, latencyP95Ms: 760, streamingSamples: 0, ttftP95Ms: null },
+      { name: "Research agent", count: 1340, errors: 18, latencyP95Ms: 2920, streamingSamples: 940, ttftP95Ms: 850 },
+      { name: "Release reviewer", count: 1080, errors: 3, latencyP95Ms: 3260, streamingSamples: 0, ttftP95Ms: null },
+      { name: "Code generator", count: 520, errors: 32, latencyP95Ms: 9100, streamingSamples: 0, ttftP95Ms: null },
+    ],
+    operations: [
+      { protocol: "HTTP", method: "Streaming proxy", tool: null, count: 1250, errors: 7, latencyP95Ms: 1490, streaming: true, ttftP95Ms: 510 },
+      { protocol: "HTTP", method: "Transactional proxy", tool: null, count: 2300, errors: 45, latencyP95Ms: 9100, streaming: false, ttftP95Ms: null },
+      { protocol: "MCP", method: "tools/call", tool: "research.report", count: 1340, errors: 18, latencyP95Ms: 2920, streaming: true, ttftP95Ms: 850 },
+      { protocol: "MCP", method: "tools/call", tool: "search_docs", count: 1880, errors: 8, latencyP95Ms: 760, streaming: false, ttftP95Ms: null },
+      { protocol: "MCP", method: "tools/call", tool: "check_release", count: 1080, errors: 3, latencyP95Ms: 3260, streaming: false, ttftP95Ms: null },
+    ],
+  },
+  "31d": {
+    label: "Last 31 days", since: "2026-07-18T09:12:00Z", until: "2026-08-18T09:12:00Z",
+    aggregate: { count: 34020, errors: 410, latencyMs: { p50: 670, p95: 2100, p99: 9700 }, ttftMs: { p50: 250, p95: 790, p99: 1840 }, streamingSamples: 9410 },
+    errorTaxonomy: [{ id: "upstream_timeout", label: "Upstream timeout", count: 181 }, { id: "policy_denied", label: "Policy denied", count: 103 }, { id: "rate_limited", label: "Rate limited", count: 75 }, { id: "payment_required", label: "Payment required", count: 51 }],
+    agents: [
+      { name: "Support agent", count: 13120, errors: 91, latencyP95Ms: 1580, streamingSamples: 5400, ttftP95Ms: 530 },
+      { name: "Docs search", count: 8150, errors: 31, latencyP95Ms: 790, streamingSamples: 0, ttftP95Ms: null },
+      { name: "Research agent", count: 5830, errors: 72, latencyP95Ms: 3050, streamingSamples: 4010, ttftP95Ms: 890 },
+      { name: "Release reviewer", count: 4700, errors: 15, latencyP95Ms: 3410, streamingSamples: 0, ttftP95Ms: null },
+      { name: "Code generator", count: 2220, errors: 201, latencyP95Ms: 9700, streamingSamples: 0, ttftP95Ms: null },
+    ],
+    operations: [
+      { protocol: "HTTP", method: "Streaming proxy", tool: null, count: 5400, errors: 35, latencyP95Ms: 1580, streaming: true, ttftP95Ms: 530 },
+      { protocol: "HTTP", method: "Transactional proxy", tool: null, count: 9940, errors: 257, latencyP95Ms: 9700, streaming: false, ttftP95Ms: null },
+      { protocol: "MCP", method: "tools/call", tool: "research.report", count: 5830, errors: 72, latencyP95Ms: 3050, streaming: true, ttftP95Ms: 890 },
+      { protocol: "MCP", method: "tools/call", tool: "search_docs", count: 8150, errors: 31, latencyP95Ms: 790, streaming: false, ttftP95Ms: null },
+      { protocol: "MCP", method: "tools/call", tool: "check_release", count: 4700, errors: 15, latencyP95Ms: 3410, streaming: false, ttftP95Ms: null },
+    ],
+  },
+};
+
+export const systemSnapshot = {
+  workspace: "Zerker Labs",
+  environment: "Production Gateway · fixture",
+  source: "Gateway system posture fixture v1",
+  refreshedAt: "2026-08-18T09:12:00Z",
+  health: { state: "healthy", source: "Gateway health fixture", capturedAt: "2026-08-18T09:11:48Z", route: "/healthz", auth: "Unauthenticated", subsystems: ["Gateway", "Postgres", "Policy store"] },
+  build: { source: "Gateway build metadata fixture", capturedAt: "2026-08-18T09:11:48Z", route: "/version", auth: "Unauthenticated", version: "gateway development · fixture", commit: "fixture-build-2026-08-18", replicaSamples: 1 },
+  storage: { production: "Postgres durable path", fallback: "Memory · development only", migrations: "Automatic at boot · outcome not evidenced", backup: "Operator responsibility · not evidenced" },
+  kms: { configurationEvidence: "Configured · fixture metadata only", requirement: "Stable 32-byte ZERKER_KMS_KEY required for durable production", fallback: "Ephemeral key · development only", masterRotation: "Unsupported", tenantRotation: "Internal tenant KEK seam · no public REST operation" },
+  security: { apiIdentity: "Gateway API OIDC required at startup", consoleIdentity: "Not implemented · human approval required", tenancy: "Cross-tenant resources return 404", transport: "TLS externally", ssrf: "Checked at write and dial time", authorization: "Caller authorization stripped before credential injection", policyOutage: "Fails closed" },
+  deployment: { binary: "Single statically linked Go binary", replicas: "Supported · active count unavailable", graceful: "60-second rollout allowance", upgrades: "Adjacent rolling upgrades", configuration: "Environment at boot · values never returned", sovereignty: "No call home", rateBoundary: "Per process when replicated" },
+  facilitator: { configurationEvidence: "Configured · fixture metadata only", supported: "Not probed", readiness: "Not probed", gas: "Unknown", mtls: "Capability/configuration posture", accountMapping: "Capability/configuration posture", verification: "Independent re-verification", custody: "Gas relay · no payer/operator fund custody", localSigner: "Available OSS capability", awsSigner: "Implementation exists · not wired into startup" },
+};
+
+export const systemLimitations = [
+  { id: "dev-fallbacks", title: "Development fallbacks", detail: "Memory storage and ephemeral keying are development-only." },
+  { id: "master-rotation", title: "Master-key rotation", detail: "Unsupported; tenant KEK rotation is an internal seam." },
+  { id: "rate-replicas", title: "Replica rate multiplication", detail: "Process boundaries multiply when horizontally replicated." },
+  { id: "policy-outage", title: "Policy-store outage", detail: "Gateway fails closed today." },
+  { id: "rollout", title: "Replica rollout", detail: "One build sample cannot confirm version parity." },
+  { id: "aws-signer", title: "AWS KMS signer", detail: "Adapter exists but is not wired into startup." },
+  { id: "facilitator-readiness", title: "Facilitator readiness", detail: "Configuration does not prove /supported, readiness, or gas." },
+];
+
+export const restOperations = [
+  { id: "getHealthz", kind: "probe", auth: "unauthenticated", destination: "Stack & health" },
+  { id: "getVersion", kind: "probe", auth: "unauthenticated", destination: "Stack & health" },
+  { id: "createAgent", kind: "write", auth: "authenticated", destination: "Agent catalog" },
+  { id: "listAgents", kind: "read", auth: "authenticated", destination: "Agent catalog" },
+  { id: "getAgent", kind: "read", auth: "authenticated", destination: "Agent catalog" },
+  { id: "updateAgent", kind: "write", auth: "authenticated", destination: "Agent catalog" },
+  { id: "deleteAgent", kind: "write", auth: "authenticated", destination: "Agent catalog" },
+  { id: "createCredential", kind: "write", auth: "authenticated", destination: "Credentials" },
+  { id: "listCredentials", kind: "read", auth: "authenticated", destination: "Credentials" },
+  { id: "getCredential", kind: "read", auth: "authenticated", destination: "Credentials" },
+  { id: "putCredential", kind: "write", auth: "authenticated", destination: "Credentials" },
+  { id: "deleteCredential", kind: "write", auth: "authenticated", destination: "Credentials" },
+  { id: "transactInvocation", kind: "proxy", auth: "authenticated", destination: "Invocations" },
+  { id: "streamInvocation", kind: "proxy", auth: "authenticated", destination: "Invocations" },
+  { id: "pollInvocation", kind: "proxy", auth: "authenticated", destination: "Invocations" },
+  { id: "listInvocations", kind: "read", auth: "authenticated", destination: "Invocations" },
+  { id: "getInvocation", kind: "read", auth: "authenticated", destination: "Invocations" },
+  { id: "getAnalytics", kind: "read", auth: "authenticated", destination: "Analytics" },
+  { id: "getSettlementConfig", kind: "read", auth: "authenticated", destination: "Payments" },
+  { id: "patchSettlementConfig", kind: "write", auth: "authenticated", destination: "Payments" },
+  { id: "getPolicy", kind: "read", auth: "authenticated", destination: "Policies" },
+  { id: "putPolicy", kind: "write", auth: "authenticated", destination: "Policies" },
+  { id: "listPolicyDecisions", kind: "read", auth: "authenticated", destination: "Policies" },
+];
+
+export const sdkInventory = [
+  { id: "go", name: "Go SDK", evidence: "Repository-evidenced", delivery: "available" },
+  { id: "typescript", name: "TypeScript SDK", evidence: "Docs/repository discrepancy · sdk/ts absent in audited repository", delivery: "discrepancy" },
+  { id: "wire", name: "Shared x402 wire types", evidence: "Developer-only contract inventory", delivery: "developer" },
+];
+
 export const environments = [
   {
     id: "env_gateway", name: "Production Gateway", kind: "Self-hosted Gateway", delivery: "available", source: "Gateway health fixture",

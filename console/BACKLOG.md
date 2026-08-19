@@ -40,7 +40,7 @@ The autonomous loop completes one safe vertical slice per cycle, in order. It ma
   - Run the full console quality gate and browser-console checks.
   - Produce `AUTH_ARCHITECTURE.md` comparing same-origin BFF sessions with SPA PKCE and stop before implementation.
 
-- [ ] **C07 — Close documentation and OpenAPI parity**
+- [x] **C07 — Close documentation and OpenAPI parity**
   - Reconcile every row in `CAPABILITY_COVERAGE.md` with an operator surface or an explicit non-console rationale.
   - Strengthen analytics with count, errors, latency percentiles, TTFT, fixed windows, limits, and truthful empty states.
   - Strengthen Stack & health with health/version, Postgres, OIDC, KMS, migrations, replicas, rate-limit caveats, facilitator posture, and known limitations.

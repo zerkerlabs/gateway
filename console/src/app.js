@@ -1,6 +1,6 @@
 import "./styles.css";
-import { activity, agents, attention, catalogSnapshot, credentialSnapshot, credentials, environmentSnapshot, environments, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, policySnapshot, privacy, products, stack, trafficSnapshot } from "./data.js";
-import { buildAgentResults, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, formatCount, formatCurrency, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizePayments } from "./view-model.js";
+import { activity, agents, analyticsScenarios, analyticsSnapshot, analyticsWindows, attention, catalogSnapshot, credentialSnapshot, credentials, environmentSnapshot, environments, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, policySnapshot, privacy, products, restOperations, sdkInventory, stack, systemLimitations, systemSnapshot, trafficSnapshot } from "./data.js";
+import { analyticsTTFTLabel, buildAgentResults, buildAnalyticsModel, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, buildRestInventory, buildSDKInventory, buildSystemModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, formatAnalyticsDuration, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizePayments } from "./view-model.js";
 
 const main = document.querySelector("#main-content");
 const modalRoot = document.querySelector("#modal-root");
@@ -10,7 +10,12 @@ const skipLink = document.querySelector(".skip-link");
 const searchTrigger = document.querySelector("#open-search");
 const mobileMenuTrigger = document.querySelector("#mobile-menu");
 const stackSummary = capabilityCounts(stack);
+const systemModel = buildSystemModel(systemSnapshot, systemLimitations);
+const restInventory = buildRestInventory(restOperations);
+const sdkModel = buildSDKInventory(sdkInventory);
 let activeOverviewScenario = "complete";
+let activeAnalyticsScenario = "complete";
+let activeAnalyticsWindow = analyticsSnapshot.defaultWindow;
 let invocationFilters = { ...defaultInvocationFilters };
 let agentFilters = { ...defaultAgentFilters };
 let policyDecisionFilters = { ...defaultPolicyDecisionFilters };
@@ -207,13 +212,43 @@ function invocationsView() {
   </section>`;
 }
 
+function currentAnalyticsModel() {
+  const scenario = analyticsScenarios.find((item) => item.id === activeAnalyticsScenario) ?? analyticsScenarios[0];
+  return buildAnalyticsModel({ snapshot: analyticsSnapshot, windows: analyticsWindows, scenario, windowID: activeAnalyticsWindow });
+}
+
+function analyticsMetricStrip(model) {
+  return `<section class="metric-strip analytics-metrics" aria-label="Analytics fixture metrics"><div><span>${model.countDisplay}</span><small>Completed calls</small><em>${model.window?.label ?? "Selected window"}</em></div><div><span>${model.errorDisplay}</span><small>Errors</small><em>${model.errorRate} error rate</em></div><div><span>${model.latency.p95}</span><small>Latency p95</small><em>Completed samples only</em></div><div><span>${model.ttft.p95}</span><small>TTFT p95</small><em>Streaming only</em></div><div><span>${Number.isFinite(model.aggregate?.streamingSamples) ? model.aggregate.streamingSamples.toLocaleString("en-US") : "Unknown"}</span><small>Streaming samples</small><em>TTFT population</em></div></section>`;
+}
+
+function analyticsPercentiles(model) {
+  return `<section class="analytics-percentiles" aria-label="Aggregate percentile evidence"><div><div><p class="kicker">Completed latency</p><h2>Aggregate percentiles</h2></div><span>${status(model.latency.state === "available" ? "Available · fixture" : model.latency.state.replaceAll("_", " "), model.latency.state === "available" ? "available" : "unavailable")}</span></div><dl><div><dt>p50</dt><dd>${model.latency.p50}</dd></div><div><dt>p95</dt><dd>${model.latency.p95}</dd></div><div><dt>p99</dt><dd>${model.latency.p99}</dd></div></dl><div><div><p class="kicker">Streaming TTFT</p><h2>Aggregate percentiles</h2></div><span>${status(model.ttft.state === "available" ? "Available · fixture" : model.ttft.state.replaceAll("_", " "), model.ttft.state === "available" ? "available" : "unavailable")}</span></div><dl><div><dt>p50</dt><dd>${model.ttft.p50}</dd></div><div><dt>p95</dt><dd>${model.ttft.p95}</dd></div><div><dt>p99</dt><dd>${model.ttft.p99}</dd></div></dl></section>`;
+}
+
+function analyticsEvidence(model) {
+  if (model.availability === "unavailable") return renderDataState("unavailable", "Analytics evidence unavailable", model.publicMessage);
+  if (model.availability === "error") return renderDataState("error", "Analytics fixture error", model.publicMessage);
+  const stateBanner = model.availability === "empty"
+    ? `<section class="state-banner empty" role="status">${status("Empty", "empty")}<div><strong>Complete fixture window · known zero calls</strong><small>Error count is zero; rates have no denominator; latency and TTFT have no samples.</small></div></section>`
+    : model.availability === "partial"
+      ? `<section class="state-banner partial" role="status">${status("Partial", "warning")}<div><strong>Aggregate counts remain available</strong><small>Percentiles, taxonomy, agent, and operation breakdowns are Unavailable, not zero.</small></div></section>` : "";
+  const emptyBreakdowns = model.availability === "empty" ? renderDataState("empty", "No completed calls in this fixture window", "The window is complete. There are no agent, operation, error, latency, or streaming TTFT samples.", true) : "";
+  const unavailableBreakdowns = model.availability === "partial" ? renderDataState("unavailable", "Breakdowns unavailable", "The partial fixture retains aggregate count and errors only. No missing value is rendered as zero.", true) : "";
+  const taxonomy = model.taxonomy?.length ? `<section class="panel analytics-taxonomy"><div class="panel-heading"><div><p class="kicker">Safe error taxonomy</p><h2>${model.errorDisplay} classified errors</h2></div>${status("Caller-safe", "available")}</div><div>${model.taxonomy.map((item) => `<span><strong>${item.count.toLocaleString("en-US")}</strong><small>${item.label}</small></span>`).join("")}</div></section>` : "";
+  const agentsMarkup = model.agents?.length ? `<section class="panel analytics-table-panel"><div class="panel-heading"><div><p class="kicker">Underlying evidence</p><h2>Calls by agent</h2></div><span class="mono muted">${model.agents.length} fixture agents</span></div><div class="analytics-table" role="table" aria-label="Analytics by fixture agent"><div class="analytics-row analytics-head" role="row"><span>Name</span><span>Calls</span><span>Errors</span><span>Error rate</span><span>Latency p95</span><span>TTFT p95</span></div>${model.agents.map((row) => `<div class="analytics-row" role="row"><span data-label="Agent"><strong>${row.name}</strong></span><span data-label="Calls">${row.count.toLocaleString("en-US")}</span><span data-label="Errors">${row.errors.toLocaleString("en-US")}</span><span data-label="Error rate">${row.count ? formatPercent(row.errors, row.count) : "No calls"}</span><span data-label="Latency p95">${formatAnalyticsDuration(row.latencyP95Ms)}</span><span data-label="TTFT p95">${analyticsTTFTLabel(row)}</span></div>`).join("")}</div></section>` : "";
+  const operationsMarkup = model.operations?.length ? `<section class="panel analytics-table-panel"><div class="panel-heading"><div><p class="kicker">Protocol / operation</p><h2>MCP method and tool observability</h2></div>${status("Metadata only", "review")}</div><div class="analytics-table operations" role="table" aria-label="Analytics by protocol and operation"><div class="analytics-row analytics-head" role="row"><span>Protocol</span><span>Method / tool</span><span>Calls</span><span>Errors</span><span>Error rate</span><span>Latency p95</span><span>TTFT p95</span></div>${model.operations.map((row) => `<div class="analytics-row" role="row"><span data-label="Protocol">${status(row.protocol, row.protocol === "MCP" ? "review" : "empty")}</span><span data-label="Method / tool"><strong>${row.method}</strong><small>${row.tool ?? "No tool identity"}</small></span><span data-label="Calls">${row.count.toLocaleString("en-US")}</span><span data-label="Errors">${row.errors.toLocaleString("en-US")}</span><span data-label="Error rate">${formatPercent(row.errors, row.count)}</span><span data-label="Latency p95">${formatAnalyticsDuration(row.latencyP95Ms)}</span><span data-label="TTFT p95">${analyticsTTFTLabel(row)}</span></div>`).join("")}</div></section>` : "";
+  return `${stateBanner}${analyticsMetricStrip(model)}${analyticsPercentiles(model)}${taxonomy}${agentsMarkup}${operationsMarkup}${emptyBreakdowns}${unavailableBreakdowns}`;
+}
+
 function analyticsView() {
-  const rows = [{ name: "Support agent", calls: "486", success: "99.2%", latency: "1.4s", width: "w-92" }, { name: "Docs search", calls: "301", success: "99.7%", latency: "720ms", width: "w-68" }, { name: "Research agent", calls: "214", success: "98.1%", latency: "2.8s", width: "w-52" }, { name: "Release reviewer", calls: "173", success: "100%", latency: "3.1s", width: "w-44" }, { name: "Code generator", calls: "82", success: "91.4%", latency: "8.6s", width: "w-24" }];
-  return `<section class="page-enter">
-    ${pageHeader("Traffic · available OSS", "Analytics", "Latency, error and volume summaries over bounded time windows.", '<span class="range-evidence" aria-label="Fixture window: Last 24 hours">Last 24 hours · fixture</span>')}
-    <section class="metric-strip"><div><span>1,256</span><small>Total calls</small><em>+12.4% vs prior day</em></div><div><span>1.3%</span><small>Error rate</small><em>16 failed calls</em></div><div><span>1.8s</span><small>p95 latency</small><em>p50 620ms</em></div><div><span>720ms</span><small>p95 TTFT</small><em>Streaming only</em></div><div><span>58 MB</span><small>Data moved</small><em>Metadata aggregate</em></div></section>
-    <div class="analytics-grid"><section class="panel chart-panel"><div class="panel-heading"><div><p class="kicker">Volume</p><h2>Calls by agent</h2></div><span class="mono muted">GET /v1/analytics</span></div><div class="bar-chart">${rows.map((row) => `<div class="bar-row"><span>${row.name}</span><div><i class="${row.width}"></i></div><strong>${row.calls}</strong></div>`).join("")}</div></section><section class="panel"><div class="panel-heading"><div><p class="kicker">Quality</p><h2>Service levels</h2></div></div><div class="quality-list">${rows.map((row) => `<div><span><strong>${row.name}</strong><small>${row.calls} calls</small></span><span><strong>${row.success}</strong><small>Success</small></span><span><strong>${row.latency}</strong><small>p95</small></span></div>`).join("")}</div></section></div>
-    <div class="availability-note">Analytics requires an explicit <code>since</code> value, caps windows at 31 days, and excludes in-flight calls from latency percentiles.</div>
+  const model = currentAnalyticsModel();
+  return `<section class="page-enter analytics-page">
+    ${pageHeader("Traffic · available OSS", "Analytics", "Investigate count, errors, latency, and streaming TTFT over explicit fixed windows.")}
+    ${fixtureContext({ ...analyticsSnapshot, range: model.window?.label ?? "Unknown" }, "Analytics")}
+    <section class="analytics-controls" aria-label="Analytics fixture controls"><label><span>Fixed window</span><select id="analytics-window">${Object.entries(analyticsWindows).map(([id, window]) => `<option value="${id}"${id === activeAnalyticsWindow ? " selected" : ""}>${window.label}</option>`).join("")}</select><small>In-memory · maximum 31 days</small></label><label><span>Preview scenario</span><select id="analytics-scenario">${analyticsScenarios.map((scenario) => `<option value="${scenario.id}"${scenario.id === model.scenario.id ? " selected" : ""}>${scenario.label}</option>`).join("")}</select><small>In-memory only · no request</small></label><div class="analytics-window-proof"><span>Required <code>since</code></span><strong>${formatTimestamp(model.window?.since)}</strong><small>Evaluated ${formatTimestamp(model.window?.until)}</small></div><div class="analytics-window-proof"><span>Endpoint contract</span><strong>Dedicated analytics limiter</strong><small>Latency excludes in-flight calls</small></div></section>
+    <p class="sr-only" role="status" aria-live="polite">${model.stateSummary}</p>
+    <div id="analytics-state-region">${analyticsEvidence(model)}</div>
+    <section class="analytics-contract"><div><p class="kicker">Contract boundary</p><h2>Bounded aggregates, not content.</h2></div><div><span><b>Window</b><code>since</code> required · inclusive maximum 31 days</span><span><b>Limiter</b>Dedicated analytics boundary · capacity health not claimed</span><span><b>Population</b>Latency percentiles exclude in-flight calls</span><span><b>TTFT</b>Streaming samples only; transactional rows are Not applicable</span><span><b>Content</b>No bodies, prompts, arguments, outputs, paths, headers, or raw errors</span></div></section>
   </section>`;
 }
 
@@ -410,13 +445,32 @@ function paymentsView() {
   </section>`;
 }
 
+function systemPostureCard(id, kicker, title, badge, tone, facts) {
+  return `<article class="system-posture-card"><div class="system-posture-top"><div><p class="kicker">${kicker}</p><h2>${title}</h2></div>${status(badge, tone)}</div><dl>${facts.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl><button class="inspect-button" data-system-detail="${id}" aria-label="Inspect ${title} fixture posture">Inspect posture →</button></article>`;
+}
+
+function restOperationPosture(operation) {
+  return operation.kind === "probe" ? "Captured fixture only · no probe" : "Available API contract · disabled in fixture";
+}
+
 function stackView() {
-  return `<section class="page-enter">
-    ${pageHeader("System", "Stack & health", "What is available, what works independently, and what remains an integration path.", '<a class="button secondary" href="https://docs.zerker.ai" target="_blank" rel="noreferrer" aria-label="Open Gateway documentation in a new tab">Open documentation <span aria-hidden="true">↗</span></a>')}
-    <section class="runtime-strip"><div><span class="fixture-health-dot" aria-hidden="true"></span><span><strong>Gateway API healthy · fixture</strong><small>Probe captured 12s before fixed snapshot</small></span></div><div><strong>Postgres</strong><small>Persistent storage</small></div><div><strong>Gateway API OIDC</strong><small>Issuer configured · fixture; console login not implemented</small></div><div><strong>23 operations</strong><small>Gateway REST API</small></div><div><strong>${stackSummary.total} components</strong><small>Across Zerker</small></div></section>
-    <div class="stack-list">${stack.map((component, index) => `<article><span class="stack-number">${String(index + 1).padStart(2, "0")}</span><span><strong>${component.name}</strong><small>${component.job}</small></span>${status(component.status, component.tone)}<button data-stack="${component.name}" aria-label="Details for ${component.name}">Details <span aria-hidden="true">→</span></button></article>`).join("")}</div>
-    <section class="api-surface"><div><p class="kicker">Gateway API surface</p><h2>What the admin will eventually operate live.</h2></div><div class="api-groups"><span><b>Catalog</b>5 agent operations</span><span><b>Credentials</b>5 protected-secret operations</span><span><b>Proxy</b>transactional + streaming + poll</span><span><b>Observe</b>invocations + analytics</span><span><b>Govern</b>policy + decisions</span><span><b>Revenue</b>payment gate + settlement config</span></div></section>
-    <section class="deployment-surface"><div><p class="kicker">Deployment posture</p><h2>Self-hosted control without inventing a hosted fleet.</h2></div><div class="deployment-grid"><span><b>Identity</b>Gateway API OIDC required at startup · console login not implemented</span><span><b>Storage</b>Memory for dev · Postgres for persistence</span><span><b>Secrets</b>Managed encryption or external vault reference</span><span><b>Network</b>TLS externally · SSRF checked at write and dial</span><span><b>Capacity</b>Per-caller and per-agent rate boundaries</span><span><b>Operations</b><code>/healthz</code> and <code>/version</code></span></div></section>
+  const operationGroups = Object.entries(restInventory.groups);
+  return `<section class="page-enter stack-page">
+    ${pageHeader("System", "Stack & health", "Captured runtime evidence, production requirements, limitations, and contract inventory.")}
+    ${fixtureContext(systemSnapshot, "Gateway system posture")}
+    <section class="runtime-strip system-runtime"><div><span class="fixture-health-dot" aria-hidden="true"></span><span><strong>${systemModel.health.label}</strong><small>${formatTimestamp(systemSnapshot.health.capturedAt)} · one captured probe</small></span></div><div><strong>${systemSnapshot.build.version}</strong><small>${systemSnapshot.build.commit}</small></div><div><strong>${systemModel.rollout.label}</strong><small>Replica parity not proved</small></div><div><strong>${restInventory.total} operations</strong><small>${restInventory.counts.probe} probe · ${restInventory.counts.read} read · ${restInventory.counts.proxy} proxy · ${restInventory.counts.write} write</small></div><div><strong>${systemModel.facilitator.label}</strong><small>/supported and gas not probed</small></div></section>
+    <section class="system-limitations"><div><p class="kicker">Known limitations · operator verification</p><h2>${systemModel.limitations.length} facts block a stronger readiness claim.</h2><p>Fixture configuration, support, and one captured probe are not continuous health, migration, backup, rollout, signer, or facilitator readiness evidence.</p><button class="inspect-button" data-system-detail="limitations" aria-label="Inspect all known system limitations">Inspect all limitations →</button></div><div>${systemModel.limitations.map((item) => `<span><b>${item.title}</b>${item.detail}</span>`).join("")}</div></section>
+    <section class="system-posture-grid" aria-label="Gateway fixture system posture">
+      ${systemPostureCard("runtime", "Captured probes", "Health & build", systemModel.health.label, "available", [["Health", "One fixed /healthz sample"], ["Build", "One deliberate /version sample"], ["Rollout", systemModel.rollout.label]])}
+      ${systemPostureCard("storage", "Production path", "Storage & migrations", "Contract posture", "review", [["Durable", systemSnapshot.storage.production], ["Migrations", systemSnapshot.storage.migrations], ["Backup", systemSnapshot.storage.backup]])}
+      ${systemPostureCard("kms", "Credential protection", "KMS & key rotation", systemModel.kms.label, "review", [["Requirement", systemSnapshot.kms.requirement], ["Fallback", systemSnapshot.kms.fallback], ["Master rotation", systemSnapshot.kms.masterRotation]])}
+      ${systemPostureCard("security", "Trust boundary", "Identity & network", "Contract invariants", "available", [["Gateway API", systemSnapshot.security.apiIdentity], ["Console auth", systemSnapshot.security.consoleIdentity], ["Tenant isolation", systemSnapshot.security.tenancy]])}
+      ${systemPostureCard("deployment", "Self-hosted operation", "Scale & rollout", systemModel.rollout.label, "warning", [["Replicas", systemSnapshot.deployment.replicas], ["Rate boundary", systemSnapshot.deployment.rateBoundary], ["Grace", systemSnapshot.deployment.graceful]])}
+      ${systemPostureCard("facilitator", "Settlement system", "Facilitator readiness", systemModel.facilitator.label, "warning", [["Configuration", systemSnapshot.facilitator.configurationEvidence], ["/supported", systemSnapshot.facilitator.supported], ["Gas", systemSnapshot.facilitator.gas]])}
+    </section>
+    <section class="api-inventory"><div class="section-heading compact-heading"><div><p class="kicker">Gateway REST contract</p><h2>All ${restInventory.total} operations have an operator destination.</h2></div><p>${restInventory.unauthenticated} unauthenticated probes only. Auth is required for every data, proxy, and configuration operation; this console has no session.</p></div><div class="operation-counts"><span><b>${restInventory.counts.probe}</b>Probe</span><span><b>${restInventory.counts.read}</b>Read</span><span><b>${restInventory.counts.proxy}</b>Proxy</span><span><b>${restInventory.counts.write}</b>Write</span></div><div class="operation-groups">${operationGroups.map(([destination, operations]) => `<section><div><h3>${destination}</h3><span>${formatCount(operations.length, "operation")}</span></div>${operations.map((operation) => `<article><code>${operation.id}</code><span>${status(operation.kind, operation.kind === "write" || operation.kind === "proxy" ? "warning" : operation.kind === "probe" ? "empty" : "review")}</span><span><b>${operation.auth === "unauthenticated" ? "Unauthenticated exemption" : "Authenticated contract"}</b><small>${restOperationPosture(operation)}</small></span></article>`).join("")}</section>`).join("")}</div></section>
+    <section class="sdk-inventory"><div><p class="kicker">SDK & wire contract inventory</p><h2>Repository evidence wins over the strongest docs claim.</h2><p>Developer contracts remain subordinate to runtime operator evidence.</p></div><div>${sdkModel.map((item) => `<article><span><strong>${item.name}</strong><small>${item.evidence}</small></span>${status(item.label, item.tone)}</article>`).join("")}</div></section>
+    <section class="stack-components"><div class="section-heading compact-heading"><div><p class="kicker">Wider Zerker stack</p><h2>Delivery states remain separate.</h2></div><p>These labels describe product contracts, not live integration evidence.</p></div><div class="stack-list">${stack.map((component, index) => `<article><span class="stack-number">${String(index + 1).padStart(2, "0")}</span><span><strong>${component.name}</strong><small>${component.job}</small></span>${status(component.status, component.tone)}<button data-stack="${component.name}" aria-label="Details for ${component.name}">Details <span aria-hidden="true">→</span></button></article>`).join("")}</div></section>
   </section>`;
 }
 
@@ -651,8 +705,13 @@ function bindPageEvents() {
   main.querySelectorAll("[data-onboarding]").forEach((button) => button.addEventListener("click", () => openOnboardingEvidence(button.dataset.onboarding)));
   main.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
   main.querySelectorAll("[data-stack]").forEach((button) => button.addEventListener("click", () => openStackInfo(button.dataset.stack)));
+  main.querySelectorAll("[data-system-detail]").forEach((button) => button.addEventListener("click", () => openSystemPosture(button.dataset.systemDetail)));
   const scenario = main.querySelector("#overview-scenario");
   if (scenario) scenario.addEventListener("change", () => { activeOverviewScenario = scenario.value; render("overview", { scroll: false }); main.querySelector("#overview-scenario")?.focus(); });
+  const analyticsWindow = main.querySelector("#analytics-window");
+  if (analyticsWindow) analyticsWindow.addEventListener("change", () => { activeAnalyticsWindow = analyticsWindow.value; render("analytics", { scroll: false }); main.querySelector("#analytics-window")?.focus(); });
+  const analyticsScenario = main.querySelector("#analytics-scenario");
+  if (analyticsScenario) analyticsScenario.addEventListener("change", () => { activeAnalyticsScenario = analyticsScenario.value; render("analytics", { scroll: false }); main.querySelector("#analytics-scenario")?.focus(); });
   bindInvocationFilters();
   bindAgentFilters();
   bindPolicyFilters();
@@ -782,6 +841,50 @@ function openInvocation(id) {
 }
 
 function detailRows(rows) { return `<dl class="detail-rows">${rows.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join("")}</dl>`; }
+
+function openSystemPosture(id) {
+  const common = `<div class="read-only-banner"><strong>Read-only fixture evidence</strong><span>No probe, readiness check, migration, backup, rollout, key operation, configuration change, or external request occurs here.</span></div><div class="drawer-evidence"><strong>${systemSnapshot.source}</strong><small>Fixed fixture refresh · ${formatTimestamp(systemSnapshot.refreshedAt)}</small></div>`;
+  const bodies = {
+    runtime: {
+      title: "Health & build",
+      subtitle: `${systemSnapshot.health.source} · fixed capture`,
+      body: `${status(systemModel.health.label, "available")}${common}<section class="drawer-section"><h3>Health probe</h3>${detailRows([["Route", systemSnapshot.health.route], ["Authentication", systemSnapshot.health.auth], ["Captured", formatTimestamp(systemSnapshot.health.capturedAt)], ["Subsystems", systemSnapshot.health.subsystems.join(" · ")], ["Boundary", "One captured point · not readiness"]])}</section><section class="drawer-section"><h3>Build metadata</h3>${detailRows([["Route", systemSnapshot.build.route], ["Authentication", systemSnapshot.build.auth], ["Version", systemSnapshot.build.version], ["Commit / build", systemSnapshot.build.commit], ["Captured", formatTimestamp(systemSnapshot.build.capturedAt)], ["Replica samples", String(systemSnapshot.build.replicaSamples)], ["Rollout", systemModel.rollout.label]])}</section><div class="drawer-copy"><strong>Rollout confirmation</strong><p>A single build sample cannot prove every replica matches. Compare deliberate version and commit metadata for each replica externally.</p></div>`,
+    },
+    storage: {
+      title: "Storage & migrations",
+      subtitle: "Documented production posture · outcome not evidenced",
+      body: `${status("Available OSS posture", "available")}${common}<section class="drawer-section"><h3>Storage contract</h3>${detailRows([["Production", systemSnapshot.storage.production], ["Fallback", systemSnapshot.storage.fallback], ["Migrations", systemSnapshot.storage.migrations], ["Backup", systemSnapshot.storage.backup], ["Upgrades", systemSnapshot.deployment.upgrades]])}</section><div class="drawer-copy"><strong>Evidence boundary</strong><p>Automatic boot behavior does not prove the latest migration succeeded. A documented backup responsibility does not prove a backup exists.</p></div>`,
+    },
+    kms: {
+      title: "KMS & key rotation",
+      subtitle: "Configuration metadata fixture · no key material",
+      body: `${status(systemModel.kms.label, "review")}${common}<section class="drawer-section"><h3>Encryption posture</h3>${detailRows([["Configuration evidence", systemSnapshot.kms.configurationEvidence], ["Durable requirement", systemSnapshot.kms.requirement], ["Development fallback", systemSnapshot.kms.fallback], ["Master-key rotation", systemSnapshot.kms.masterRotation], ["Tenant KEK rotation", systemSnapshot.kms.tenantRotation]])}</section><div class="drawer-copy"><strong>Credential boundary</strong><p>No key value, length result, hash, source, path, environment value, plaintext, token, or reveal/copy control is present.</p></div>`,
+    },
+    security: {
+      title: "Identity & network",
+      subtitle: "Gateway contract invariants · console auth human-gated",
+      body: `${status("Available OSS invariants", "available")}${common}<section class="drawer-section"><h3>Trust boundaries</h3>${detailRows([["Gateway API identity", systemSnapshot.security.apiIdentity], ["Console identity", systemSnapshot.security.consoleIdentity], ["Tenant isolation", systemSnapshot.security.tenancy], ["External transport", systemSnapshot.security.transport], ["SSRF", systemSnapshot.security.ssrf], ["Credential injection", systemSnapshot.security.authorization], ["Policy-store outage", systemSnapshot.security.policyOutage]])}</section><div class="drawer-copy"><strong>Authentication boundary</strong><p>Gateway API OIDC configuration is not browser login. This fixture has no authenticated session, token, callback, cookie, CSRF flow, or browser storage.</p></div>`,
+    },
+    deployment: {
+      title: "Scale & rollout",
+      subtitle: "Supported operation · live fleet not evidenced",
+      body: `${status(systemModel.rollout.label, "warning")}${common}<section class="drawer-section"><h3>Deployment contract</h3>${detailRows([["Artifact", systemSnapshot.deployment.binary], ["Replicas", systemSnapshot.deployment.replicas], ["Rate limits", systemSnapshot.deployment.rateBoundary], ["Graceful allowance", systemSnapshot.deployment.graceful], ["Upgrade path", systemSnapshot.deployment.upgrades], ["Configuration", systemSnapshot.deployment.configuration], ["Sovereignty", systemSnapshot.deployment.sovereignty]])}</section><div class="drawer-copy"><strong>Capacity boundary</strong><p>Horizontal support does not evidence an active replica count. Per-process limits multiply across replicas unless an external shared boundary is introduced.</p></div>`,
+    },
+    facilitator: {
+      title: "Facilitator readiness",
+      subtitle: "Configuration fixture · readiness not proved",
+      body: `${status(systemModel.facilitator.label, "warning")}${common}<section class="drawer-section"><h3>Configuration versus readiness</h3>${detailRows([["Configuration", systemSnapshot.facilitator.configurationEvidence], ["/supported", systemSnapshot.facilitator.supported], ["Readiness", systemSnapshot.facilitator.readiness], ["Gas", systemSnapshot.facilitator.gas], ["mTLS", systemSnapshot.facilitator.mtls], ["Account mapping", systemSnapshot.facilitator.accountMapping]])}</section><section class="drawer-section"><h3>Settlement and signer contract</h3>${detailRows([["Independent verification", systemSnapshot.facilitator.verification], ["Custody", systemSnapshot.facilitator.custody], ["Local encrypted-keystore signer", systemSnapshot.facilitator.localSigner], ["AWS KMS signer", systemSnapshot.facilitator.awsSigner], ["Self-hosted facilitator", "Available OSS"], ["Managed facilitator", "Commercial"]])}</section><div class="drawer-copy"><strong>Readiness boundary</strong><p>Configured endpoint and credential metadata do not prove supported networks, readiness, gas, signer selection, settlement ability, or chain finality.</p></div>`,
+    },
+    limitations: {
+      title: "Known system limitations",
+      subtitle: `${systemModel.limitations.length} documented facts · operator verification required`,
+      body: `${status("Readiness constrained", "warning")}${common}<section class="drawer-section"><h3>Limitations inventory</h3>${detailRows(systemModel.limitations.map((item) => [item.title, item.detail]))}</section><div class="drawer-copy"><strong>No remediation action</strong><p>This inventory records contract limits only. It cannot rotate a key, change a rate boundary, recover a policy store, confirm replicas, wire a signer, or probe a facilitator.</p></div>`,
+    },
+  };
+  const item = bodies[id];
+  if (!item) return;
+  openDrawer(item.title, item.subtitle, item.body);
+}
 
 function openStackInfo(name) {
   const component = stack.find((item) => item.name === name); if (!component) return;
