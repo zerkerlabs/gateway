@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "description": "Static product preview of the Zerker Gateway operator console.",
   "scripts": {
-    "test": "node --test && node scripts/improve-loop.mjs --self-test",
+    "test": "node --test \"src/**/*.test.js\" && node scripts/improve-loop.mjs --self-test",
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
