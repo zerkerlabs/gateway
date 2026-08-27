@@ -143,6 +143,25 @@ jobs:
         working-directory: console
         run: npm run check
 
+      # The BFF is the console's server half: it runs the login flow and holds
+      # the Gateway token. Its suite needs no external service — the dev issuer
+      # it authenticates against runs in-process — so it runs unconditionally
+      # here rather than behind an env gate that would quietly skip.
+      - name: npm ci (console server)
+        if: steps.changed.outputs.run == 'true'
+        working-directory: console/server
+        run: npm ci
+
+      - name: npm test (console server)
+        if: steps.changed.outputs.run == 'true'
+        working-directory: console/server
+        run: npm test
+
+      - name: npm audit (console server)
+        if: steps.changed.outputs.run == 'true'
+        working-directory: console/server
+        run: npm audit --audit-level=high
+
   # The gateway's and rooms' persistence suites are behind the `integration`
   # build tag, so `make check` does not run them — they need a real Postgres.
   # Without this job nothing exercises them at all.

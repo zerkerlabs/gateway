@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.7
+#
+# The operator console: the Vite-built static app and the BFF that serves it.
+#
+# They ship as one image on purpose. The BFF exists to be same-origin with the
+# console — that is what removes CORS, keeps the session cookie usable, and
+# keeps the gateway token server-side. Splitting them across two origins would
+# undo the property the whole design rests on.
+
+FROM node:22-bookworm-slim AS client
+
+WORKDIR /src/console
+COPY console/package.json console/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+
+COPY console/ ./
+# The dev-only stub issuer is a test fixture and must not reach an image that
+# fronts a real tenant.
+RUN rm -f server/devidp.js server/*.test.js && npm run build
+
+FROM node:22-bookworm-slim AS server
+
+WORKDIR /src/console/server
+COPY console/server/package.json console/server/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
+
+FROM node:22-bookworm-slim
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+COPY --from=server /src/console/server/node_modules ./server/node_modules
+COPY --from=client /src/console/dist ./dist
+COPY console/server/*.js ./server/
+COPY console/server/package.json ./server/
+RUN rm -f server/devidp.js server/*.test.js
+
+# Unprivileged: the console holds live tokens in memory and has no reason to
+# run as root. node:22 ships a `node` user for exactly this.
+USER node
+
+ENV CONSOLE_PORT=8095 CONSOLE_STATIC_DIR=../dist
+EXPOSE 8095
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.CONSOLE_PORT||8095)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+WORKDIR /app/server
+ENTRYPOINT ["node", "index.js"]

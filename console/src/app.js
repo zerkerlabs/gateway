@@ -1,4 +1,6 @@
 import "./styles.css";
+import { liveAgentsView, loadAgents, bindLiveAgents } from "./live/agents-view.js";
+import { currentSession, renderSignIn, signOut } from "./live/gate.js";
 import { activity, agents, analyticsScenarios, analyticsSnapshot, analyticsWindows, attention, catalogSnapshot, credentialSnapshot, credentials, environmentSnapshot, environments, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, policySnapshot, privacy, products, restOperations, sdkInventory, stack, systemLimitations, systemSnapshot, trafficSnapshot } from "./data.js";
 import { analyticsTTFTLabel, buildAgentResults, buildAnalyticsModel, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, buildRestInventory, buildSDKInventory, buildSystemModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, formatAnalyticsDuration, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizePayments } from "./view-model.js";
 
@@ -474,7 +476,10 @@ function stackView() {
   </section>`;
 }
 
-const views = { overview: overviewView, attention: attentionView, activity: activityView, invocations: invocationsView, analytics: analyticsView, agents: agentsView, environments: environmentsView, policies: policiesView, credentials: credentialsView, products: productsView, payments: paymentsView, stack: stackView };
+// `agents` is the one live surface: it reads and writes the real tenant
+// catalog through the BFF. Every other view here is still fixture-backed and
+// labelled as such — see console/README.md.
+const views = { overview: overviewView, attention: attentionView, activity: activityView, invocations: invocationsView, analytics: analyticsView, agents: liveAgentsView, environments: environmentsView, policies: policiesView, credentials: credentialsView, products: productsView, payments: paymentsView, stack: stackView };
 
 function syncAttentionNavigation() {
   const button = document.querySelector(".side-nav [data-view='attention']");
@@ -1044,4 +1049,35 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-render(location.hash.slice(1) || "overview");
+// Boot is gated: nothing renders until the BFF confirms a session, and an
+// expired session drops straight back to sign-in rather than painting a shell
+// full of 401s.
+function toSignIn(reason) {
+  renderSignIn(document.body, { reason });
+}
+
+async function boot() {
+  const user = await currentSession();
+  if (!user) return toSignIn();
+
+  bindLiveAgents({
+    rerender: () => render(activeView, { scroll: false }),
+    onUnauthenticated: () => toSignIn("expired"),
+  });
+
+  const signOutButton = document.querySelector("[data-action='sign-out']");
+  if (signOutButton) signOutButton.addEventListener("click", signOut);
+
+  const identity = document.querySelector("[data-operator-identity]");
+  if (identity) identity.textContent = user.email || user.name || user.sub;
+
+  try {
+    await loadAgents();
+  } catch {
+    return toSignIn("expired");
+  }
+
+  render(location.hash.slice(1) || "overview");
+}
+
+boot();

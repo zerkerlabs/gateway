@@ -972,3 +972,42 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
   .operation-groups article > span:last-child { grid-column: 1 / -1; padding-top: 7px; border-top: 1px solid var(--line); }
   .sdk-inventory article { align-items: flex-start; flex-direction: column; padding: 12px 0; }
 }
+
+/* ---- live surfaces -------------------------------------------------------
+   Sign-in, the live agent catalog, and the registration form. These reuse the
+   existing tokens rather than introducing any, so the live views are visually
+   continuous with the fixture ones. */
+
+.signin-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--paper); }
+.signin-card { width: min(420px, 100%); background: var(--white); border: 1px solid var(--line); border-radius: 14px; padding: 32px; }
+.signin-card .brand-row { margin-bottom: 28px; display: flex; align-items: center; gap: 8px; }
+.signin-card h1 { margin: 0 0 8px; font-size: 22px; letter-spacing: -0.01em; }
+.signin-card > p { margin: 0 0 24px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.signin-card .button { width: 100%; }
+.signin-note { margin: 16px 0 0; color: var(--faint); font-size: 11px; line-height: 1.5; }
+
+.sidebar-bottom .sign-out { width: 100%; margin-top: 10px; }
+
+.live-catalog { display: grid; gap: 10px; }
+.live-agent-row { display: grid; gap: 14px; grid-template-columns: minmax(0, 2.2fr) auto repeat(3, minmax(0, 1fr)); align-items: start;
+  background: var(--white); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+.live-agent-row h3 { margin: 0 0 4px; font-size: 14px; }
+.live-agent-row p { margin: 0; font-size: 12px; line-height: 1.45; }
+.live-agent-row .mono { font-family: "Geist Mono", monospace; font-size: 11px; word-break: break-all; }
+.live-agent-row .muted { color: var(--muted); }
+.live-agent-row .kicker { margin-bottom: 4px; }
+
+.live-agent-form { margin-bottom: 16px; }
+.live-agent-form form { display: grid; gap: 16px; padding: 4px 2px 2px; }
+.live-agent-form label { display: grid; gap: 6px; }
+.live-agent-form label > span { font: 560 10px "Geist Mono", monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.live-agent-form input, .live-agent-form select { min-height: 40px; border: 1px solid var(--line-dark); border-radius: 8px; padding: 0 12px; font-size: 13px; background: var(--white); color: var(--ink); }
+.live-agent-form input:focus-visible, .live-agent-form select:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
+.live-agent-form small { color: var(--faint); font-size: 11px; line-height: 1.45; }
+.live-agent-form .form-actions { display: flex; gap: 10px; }
+
+.form-error { margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; background: var(--red-soft); color: var(--red); font-size: 12px; border: 1px solid var(--red); }
+
+@media (max-width: 900px) {
+  .live-agent-row { grid-template-columns: 1fr; gap: 10px; }
+}

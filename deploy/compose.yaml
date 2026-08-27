@@ -11,6 +11,7 @@
 #   dev-auth   adds a throwaway OIDC issuer so the stack boots with auth enforced
 #              and no IdP account — DEV ONLY (see deploy/README.md)
 #   rooms      adds Rooms and its ZMem memory backend
+#   console    adds the operator console and its backend-for-frontend
 #
 # TLS is deliberately absent: this file is the stack, not the edge. Terminate
 # TLS in front of it (a reverse proxy, a load balancer, your platform) — the
@@ -90,6 +91,36 @@ services:
       - --token-ttl=24h
     volumes:
       - ./.dev:/dev-token
+    restart: unless-stopped
+
+  # ---- profile: console ---------------------------------------------------
+  console:
+    profiles: [console]
+    image: ${CONSOLE_IMAGE:-zerker-console:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.console
+    environment:
+      CONSOLE_PORT: "8095"
+      # The console's own public origin. Callback and logout URLs are built
+      # from it and must match what is registered at the IdP exactly. It is
+      # never derived from a request header, so a reverse proxy in front of
+      # this cannot change it by sending X-Forwarded-Host.
+      CONSOLE_ORIGIN: ${CONSOLE_ORIGIN:?set CONSOLE_ORIGIN — e.g. https://console.example.com}
+      CONSOLE_OIDC_ISSUER: ${CONSOLE_OIDC_ISSUER:?set CONSOLE_OIDC_ISSUER}
+      CONSOLE_OIDC_CLIENT_ID: ${CONSOLE_OIDC_CLIENT_ID:?set CONSOLE_OIDC_CLIENT_ID}
+      # A confidential client: this secret stays on the server and is what lets
+      # the console hold tokens the browser never receives.
+      CONSOLE_OIDC_CLIENT_SECRET: ${CONSOLE_OIDC_CLIENT_SECRET:?set CONSOLE_OIDC_CLIENT_SECRET}
+      # Must equal ZERKER_OIDC_AUDIENCE. The gateway builds one verifier for
+      # one audience, so console tokens and machine tokens share it.
+      CONSOLE_OIDC_AUDIENCE: ${ZERKER_OIDC_AUDIENCE:?set ZERKER_OIDC_AUDIENCE}
+      CONSOLE_GATEWAY_BASE_URL: http://gateway:8080
+    ports:
+      - "${CONSOLE_PORT:-8095}:8095"
+    depends_on:
+      gateway:
+        condition: service_started
     restart: unless-stopped
 
   # ---- profile: rooms -----------------------------------------------------

@@ -51,6 +51,8 @@ jobs:
             dockerfile: deploy/Dockerfile.rooms
           - image: zmem-sidecar
             dockerfile: deploy/Dockerfile.zmem
+          - image: console
+            dockerfile: deploy/Dockerfile.console
     steps:
       - uses: actions/checkout@v4
 
