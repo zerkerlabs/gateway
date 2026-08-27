@@ -1,0 +1,182 @@
+# Zerker Gateway — a self-hostable stack.
+#
+#   cd deploy && cp .env.example .env && $EDITOR .env
+#   docker compose up -d --build
+#
+# Everything here runs from source in this repo; set GATEWAY_IMAGE / ROOMS_IMAGE
+# / ZMEM_IMAGE to published tags to pull instead of build.
+#
+# Profiles:
+#   (default)  postgres + gateway
+#   dev-auth   adds a throwaway OIDC issuer so the stack boots with auth enforced
+#              and no IdP account — DEV ONLY (see deploy/README.md)
+#   rooms      adds Rooms and its ZMem memory backend
+#   console    adds the operator console and its backend-for-frontend
+#
+# TLS is deliberately absent: this file is the stack, not the edge. Terminate
+# TLS in front of it (a reverse proxy, a load balancer, your platform) — the
+# gateway serves plain HTTP and expects to be fronted (AGENTS.md §3, invariant 5).
+
+name: zerker-gateway
+
+x-drain: &drain
+  # The gateway drains for up to 30s of in-flight HTTP plus a further 30s for
+  # transactional proxy calls to reach a terminal status. Anything shorter cuts
+  # live invocations off mid-record.
+  stop_grace_period: 60s
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-zerker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-zerker}
+      # Read by the init script below to create the second database.
+      ROOMS_DB: ${ROOMS_DB:-rooms}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Loopback only: convenient for psql, not reachable from off the host.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-zerker} -d ${POSTGRES_DB:-zerker}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  gateway:
+    <<: *drain
+    image: ${GATEWAY_IMAGE:-zerker-gateway:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+    environment:
+      ZERKER_ADDR: ":8080"
+      ZERKER_DATABASE_URL: postgres://${POSTGRES_USER:-zerker}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-zerker}?sslmode=disable
+      # Required — the gateway exits immediately without these, by design.
+      ZERKER_OIDC_ISSUER: ${ZERKER_OIDC_ISSUER:?set ZERKER_OIDC_ISSUER (or use --profile dev-auth)}
+      ZERKER_OIDC_AUDIENCE: ${ZERKER_OIDC_AUDIENCE:?set ZERKER_OIDC_AUDIENCE}
+      # Unset, every request 401s with no diagnostic. Name the claim your IdP issues.
+      ZERKER_OIDC_TENANT_CLAIM: ${ZERKER_OIDC_TENANT_CLAIM:-tenant}
+      # The master key wrapping stored upstream credentials. Unset, the gateway
+      # generates a random ephemeral one at boot and every credential stored
+      # before the last restart becomes undecryptable. Back this value up.
+      ZERKER_KMS_KEY: ${ZERKER_KMS_KEY:?set ZERKER_KMS_KEY — openssl rand -hex 32}
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---- profile: dev-auth --------------------------------------------------
+  mock-oidc:
+    profiles: [dev-auth]
+    image: zerker-mock-oidc:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.mock-oidc
+    command:
+      - --addr=0.0.0.0:9099
+      - --issuer=http://mock-oidc:9099
+      - --audience=${ZERKER_OIDC_AUDIENCE:-zerker-gateway}
+      - --tenant=${DEV_TENANT:-acme}
+      - --token-file=/dev-token/token
+      - --token-ttl=24h
+    volumes:
+      - ./.dev:/dev-token
+    restart: unless-stopped
+
+  # ---- profile: console ---------------------------------------------------
+  console:
+    profiles: [console]
+    image: ${CONSOLE_IMAGE:-zerker-console:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.console
+    environment:
+      CONSOLE_PORT: "8095"
+      # The console's own public origin. Callback and logout URLs are built
+      # from it and must match what is registered at the IdP exactly. It is
+      # never derived from a request header, so a reverse proxy in front of
+      # this cannot change it by sending X-Forwarded-Host.
+      CONSOLE_ORIGIN: ${CONSOLE_ORIGIN:?set CONSOLE_ORIGIN — e.g. https://console.example.com}
+      CONSOLE_OIDC_ISSUER: ${CONSOLE_OIDC_ISSUER:?set CONSOLE_OIDC_ISSUER}
+      CONSOLE_OIDC_CLIENT_ID: ${CONSOLE_OIDC_CLIENT_ID:?set CONSOLE_OIDC_CLIENT_ID}
+      # A confidential client: this secret stays on the server and is what lets
+      # the console hold tokens the browser never receives.
+      CONSOLE_OIDC_CLIENT_SECRET: ${CONSOLE_OIDC_CLIENT_SECRET:?set CONSOLE_OIDC_CLIENT_SECRET}
+      # Must equal ZERKER_OIDC_AUDIENCE. The gateway builds one verifier for
+      # one audience, so console tokens and machine tokens share it.
+      CONSOLE_OIDC_AUDIENCE: ${ZERKER_OIDC_AUDIENCE:?set ZERKER_OIDC_AUDIENCE}
+      CONSOLE_GATEWAY_BASE_URL: http://gateway:8080
+    ports:
+      - "${CONSOLE_PORT:-8095}:8095"
+    depends_on:
+      gateway:
+        condition: service_started
+    restart: unless-stopped
+
+  # ---- profile: rooms -----------------------------------------------------
+  zmem:
+    profiles: [rooms]
+    image: ${ZMEM_IMAGE:-zerker-zmem:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.zmem
+    environment:
+      ZMEM_TENANT_ID: ${ZMEM_TENANT_ID:?set ZMEM_TENANT_ID}
+      ZMEM_SERVICE_TOKEN: ${ZMEM_SERVICE_TOKEN:?set ZMEM_SERVICE_TOKEN — openssl rand -hex 32}
+    volumes:
+      - zmemdata:/var/lib/zmem
+    # No ports: ZMem is a tenant-local sidecar. It is reachable on the compose
+    # network and nowhere else — do not publish 8766.
+    restart: unless-stopped
+
+  rooms:
+    profiles: [rooms]
+    <<: *drain
+    image: ${ROOMS_IMAGE:-zerker-rooms:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.rooms
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+    environment:
+      ROOMS_ADDR: ":8090"
+      ROOMS_DATABASE_URL: postgres://${POSTGRES_USER:-zerker}:${POSTGRES_PASSWORD}@postgres:5432/${ROOMS_DB:-rooms}?sslmode=disable
+      ROOMS_OIDC_ISSUER: ${ROOMS_OIDC_ISSUER:?set ROOMS_OIDC_ISSUER}
+      ROOMS_OIDC_AUDIENCE: ${ROOMS_OIDC_AUDIENCE:?set ROOMS_OIDC_AUDIENCE}
+      ROOMS_OIDC_TENANT_CLAIM: ${ROOMS_OIDC_TENANT_CLAIM:-tenant}
+      # Every agent-to-agent call goes through the gateway's proxy, never direct.
+      ROOMS_GATEWAY_BASE_URL: http://gateway:8080
+      ROOMS_GATEWAY_TENANT: ${ROOMS_GATEWAY_TENANT:?set ROOMS_GATEWAY_TENANT — one Rooms deployment serves one gateway tenant}
+      # A bearer the gateway accepts for that tenant. Rooms holds it as-is and
+      # does not refresh it, so it needs a long-lived token (see README).
+      ROOMS_GATEWAY_CREDENTIAL: ${ROOMS_GATEWAY_CREDENTIAL:?set ROOMS_GATEWAY_CREDENTIAL}
+      ROOMS_ZMEM_BASE_URL: http://zmem:8766
+      ROOMS_ZMEM_SERVICE_TOKEN: ${ZMEM_SERVICE_TOKEN}
+      ROOMS_ZMEM_TENANT_ID: ${ZMEM_TENANT_ID}
+    ports:
+      - "${ROOMS_PORT:-8090}:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      zmem:
+        # Rooms fails startup if its memory backend is unreachable — by design,
+        # there is no fallback to a fake. Wait for it.
+        condition: service_healthy
+      gateway:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  zmemdata:

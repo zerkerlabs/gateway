@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.7
+#
+# The ZMem sidecar image — the memory backend Rooms onboards members from.
+#
+#   docker build -f deploy/Dockerfile.zmem -t zerker-zmem .
+#
+# ZMem is a separate project (github.com/zerkerlabs/zmem, MIT) integrated over
+# its public HTTP interface, never vendored (AGENTS.md §1). This image only
+# packages a published wheel so a Rooms deployment has a backend to point at.
+#
+# The pin below MUST match the one .github/workflows/ci.yml installs — that is
+# the version the Rooms memory-client suite is proven against, and a container
+# running a different one would be a backend nothing tested. scripts/check-zmem-pin.sh
+# fails the build if the two drift apart.
+#
+# The URL carries a #sha256 fragment, which pip verifies before installing. A
+# tag and even a release asset can be replaced in place; the digest cannot.
+
+FROM python:3.13-slim-bookworm
+
+ARG ZMEM_VERSION=0.1.12
+ARG ZMEM_SHA256=ae75cb6e6018cd86edc247384e43c99d5c07a5968db674bfd62948b97b61dbe2
+
+RUN pip install --no-cache-dir \
+      "zerker-memory @ https://github.com/zerkerlabs/zmem/releases/download/v${ZMEM_VERSION}/zerker_memory-${ZMEM_VERSION}-py3-none-any.whl#sha256=${ZMEM_SHA256}"
+
+# ZMem writes one SQLite database per (tenant, room) under the storage root, so
+# this path wants a real local disk. It is a volume, not a layer.
+# Unbuffered: without it the service's stdout sits in a pipe buffer and a
+# hosted box shows an empty log for a process that is working fine.
+ENV PYTHONUNBUFFERED=1
+ENV ZMEM_DATA_DIR=/var/lib/zmem
+RUN useradd --system --uid 10001 --home-dir "$ZMEM_DATA_DIR" --create-home zmem
+VOLUME ["/var/lib/zmem"]
+
+# ZMEM_TENANT_ID is server configuration, never caller input: Rooms asserts
+# every response against its own configured tenant and refuses a mismatch.
+ENV ZMEM_TENANT_ID=local \
+    ZMEM_HOST=0.0.0.0 \
+    ZMEM_PORT=8766
+
+# The bind is 0.0.0.0 because a sidecar container is reached over the container
+# network rather than over loopback. ZMem refuses a non-loopback bind without
+# both --allow-remote and a bearer token, which is the property that makes this
+# safe — so do NOT publish this port to the host. The container network is the
+# trust boundary here; on the hosted box nothing outside it can route to :8766.
+USER zmem
+EXPOSE 8766
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \
+  CMD ["python", "-c", "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.environ['ZMEM_PORT']+'/readyz',timeout=2)"]
+
+ENTRYPOINT ["sh", "-c", "exec zmem --db \"$ZMEM_DATA_DIR/control.sqlite\" serve --tenant-id \"$ZMEM_TENANT_ID\" --storage-root \"$ZMEM_DATA_DIR/rooms\" --host \"$ZMEM_HOST\" --port \"$ZMEM_PORT\" --allow-remote"]

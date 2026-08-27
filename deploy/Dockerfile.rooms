@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+#
+# The Rooms image. Build from the REPO ROOT:
+#
+#   docker build -f deploy/Dockerfile.rooms -t zerker-rooms .
+#
+# Rooms is a separate deployable, not part of the gateway — it owns membership
+# and shared task state, and issues every agent-to-agent call through the
+# gateway's proxy. Its module has no replace directives, so the build only needs
+# rooms/ itself; the context is still the repo root to keep the two image builds
+# invoked the same way.
+
+FROM --platform=$BUILDPLATFORM golang:1.26.4-bookworm AS build
+
+ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=unknown
+
+ENV GOWORK=off CGO_ENABLED=0 GOOS=linux
+WORKDIR /src
+
+COPY rooms/go.mod rooms/go.sum ./rooms/
+RUN --mount=type=cache,target=/go/pkg/mod \
+    cd rooms && go mod download
+
+COPY rooms/ ./rooms/
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    cd rooms && GOARCH=$TARGETARCH go build \
+      -trimpath \
+      -ldflags "-s -w \
+        -X github.com/zerkerlabs/gateway/rooms/internal/version.Version=${VERSION} \
+        -X github.com/zerkerlabs/gateway/rooms/internal/version.Commit=${COMMIT}" \
+      -o /out/rooms ./cmd/rooms
+
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=build /out/rooms /usr/local/bin/rooms
+
+USER nonroot:nonroot
+EXPOSE 8090
+
+ENTRYPOINT ["/usr/local/bin/rooms"]

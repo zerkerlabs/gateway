@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1.7
+#
+# DEV ONLY. The throwaway OIDC issuer from gateway/scripts/mock-oidc, packaged so
+# `docker compose --profile dev-auth up` boots a stack you can actually call.
+#
+# It mints a token for one fixed identity and serves discovery + JWKS over plain
+# HTTP. It is not published to a registry and it must never be pointed at
+# anything real. Production points ZERKER_OIDC_ISSUER at an actual IdP.
+
+FROM --platform=$BUILDPLATFORM golang:1.26.4-bookworm AS build
+
+ARG TARGETARCH
+ENV GOWORK=off CGO_ENABLED=0 GOOS=linux
+WORKDIR /src
+
+COPY gateway/scripts/mock-oidc/go.mod gateway/scripts/mock-oidc/go.su[m] ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY gateway/scripts/mock-oidc/ ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    GOARCH=$TARGETARCH go build -trimpath -o /out/mock-oidc .
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/mock-oidc /usr/local/bin/mock-oidc
+USER nonroot:nonroot
+EXPOSE 9099
+ENTRYPOINT ["/usr/local/bin/mock-oidc"]

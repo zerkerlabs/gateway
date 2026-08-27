@@ -31,3 +31,10 @@ coverage.html
 *.swp
 /gateway/scripts/mock-oidc/mock-oidc
 .gstack/
+
+# deploy: local compose state
+deploy/.env
+deploy/.dev/
+
+# ...but the template it is copied from must ship (.env.* above catches it).
+!deploy/.env.example

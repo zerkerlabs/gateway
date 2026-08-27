@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1.7
+#
+# The gateway image. Build from the REPO ROOT, not from deploy/:
+#
+#   docker build -f deploy/Dockerfile.gateway -t zerker-gateway .
+#
+# The context is the repo root because gateway/go.mod replaces x402types with
+# ../x402types (ADR-0010) — the module cannot resolve its own dependency from
+# inside gateway/.
+#
+# GOWORK=off is deliberate: go.work also lists rooms/, facilitator/, sdk/go and
+# the dev-only mock-oidc module, none of which this image needs. Turning the
+# workspace off lets the build copy two modules instead of six, and the
+# module's own replace directive resolves x402types the same way per-module CI
+# does.
+
+FROM --platform=$BUILDPLATFORM golang:1.26.4-bookworm AS build
+
+ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=unknown
+
+ENV GOWORK=off CGO_ENABLED=0 GOOS=linux
+WORKDIR /src
+
+# Manifests first, so a source-only change doesn't re-download the module graph.
+COPY gateway/go.mod gateway/go.sum ./gateway/
+COPY x402types/go.mod x402types/go.su[m] ./x402types/
+RUN --mount=type=cache,target=/go/pkg/mod \
+    cd gateway && go mod download
+
+COPY x402types/ ./x402types/
+COPY gateway/ ./gateway/
+
+# -trimpath keeps build paths out of the binary; -s -w drop the symbol and DWARF
+# tables. The two -X flags are the same ones gateway/Makefile sets, so /version
+# reports something real instead of "dev / unknown".
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    cd gateway && GOARCH=$TARGETARCH go build \
+      -trimpath \
+      -ldflags "-s -w \
+        -X github.com/zerkerlabs/gateway/gateway/internal/version.Version=${VERSION} \
+        -X github.com/zerkerlabs/gateway/gateway/internal/version.Commit=${COMMIT}" \
+      -o /out/zerker-gateway ./cmd/zerker-gateway
+
+# distroless/static: no shell, no package manager, no libc — the binary is
+# static and needs none of them. It does carry CA certificates, which the
+# gateway needs to dial https upstreams and its OIDC issuer.
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=build /out/zerker-gateway /usr/local/bin/zerker-gateway
+
+USER nonroot:nonroot
+EXPOSE 8080
+
+# No HEALTHCHECK: the image has no shell or HTTP client to run one with. The
+# gateway serves GET /healthz unauthenticated for exactly this purpose — probe
+# it from the orchestrator (compose, ECS, a load balancer), not from inside.
+ENTRYPOINT ["/usr/local/bin/zerker-gateway"]
