@@ -10,14 +10,19 @@
 import http from 'node:http';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 
-export async function startDevIdP({ port = 0, clientId = 'console-dev', tenant = 'demo', subject = 'dev|1' } = {}) {
+// `issuer` overrides the advertised issuer URL. Containers cannot reach a
+// 127.0.0.1 issuer on the host, and the value must be byte-identical
+// everywhere — the discovery document, the token's `iss`, and what each client
+// was configured with — so it is one setting rather than something derived per
+// caller.
+export async function startDevIdP({ port = 0, clientId = 'console-dev', tenant = 'demo', subject = 'dev|1', issuer: issuerOverride } = {}) {
   const { publicKey, privateKey } = await generateKeyPair('RS256', { extractable: true });
   const jwk = { ...(await exportJWK(publicKey)), kid: 'dev', use: 'sig', alg: 'RS256' };
   const codes = new Map();
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    const issuer = `http://127.0.0.1:${server.address().port}`;
+    const issuer = issuerOverride || `http://127.0.0.1:${server.address().port}`;
     const json = (body, status = 200) => {
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify(body));
@@ -106,11 +111,17 @@ export async function startDevIdP({ port = 0, clientId = 'console-dev', tenant =
     }
   });
 
-  await new Promise((r) => server.listen(port, '127.0.0.1', r));
+  // 0.0.0.0 so containers on a bridge network can reach it; this is a dev
+  // fixture and binds wide on purpose.
+  await new Promise((r) => server.listen(port, issuerOverride ? '0.0.0.0' : '127.0.0.1', r));
   return { server, issuer: `http://127.0.0.1:${server.address().port}` };
 }
 
 if (process.argv[1]?.endsWith('devidp.js')) {
-  const { issuer } = await startDevIdP({ port: Number(process.env.DEV_IDP_PORT) || 9099 });
+  const { issuer } = await startDevIdP({
+    port: Number(process.env.DEV_IDP_PORT) || 9099,
+    issuer: process.env.DEV_IDP_ISSUER,
+    tenant: process.env.DEV_IDP_TENANT || 'demo',
+  });
   console.log(`dev-idp: ${issuer} — DEV ONLY, authenticates nobody`);
 }
