@@ -94,6 +94,11 @@ services:
     restart: unless-stopped
 
   # ---- profile: console ---------------------------------------------------
+  #
+  # Plain ${VAR}, not ${VAR:?}, for the same reason as the rooms profile below:
+  # Compose interpolates before it applies profiles, so a guard here would fail
+  # `up` for the default stack that does not run the console. The BFF refuses
+  # to start without these, so the failure stays closed.
   console:
     profiles: [console]
     image: ${CONSOLE_IMAGE:-zerker-console:local}
@@ -106,16 +111,21 @@ services:
       # from it and must match what is registered at the IdP exactly. It is
       # never derived from a request header, so a reverse proxy in front of
       # this cannot change it by sending X-Forwarded-Host.
-      CONSOLE_ORIGIN: ${CONSOLE_ORIGIN:?set CONSOLE_ORIGIN — e.g. https://console.example.com}
-      CONSOLE_OIDC_ISSUER: ${CONSOLE_OIDC_ISSUER:?set CONSOLE_OIDC_ISSUER}
-      CONSOLE_OIDC_CLIENT_ID: ${CONSOLE_OIDC_CLIENT_ID:?set CONSOLE_OIDC_CLIENT_ID}
+      CONSOLE_ORIGIN: ${CONSOLE_ORIGIN}
+      CONSOLE_OIDC_ISSUER: ${CONSOLE_OIDC_ISSUER}
+      CONSOLE_OIDC_CLIENT_ID: ${CONSOLE_OIDC_CLIENT_ID}
       # A confidential client: this secret stays on the server and is what lets
       # the console hold tokens the browser never receives.
-      CONSOLE_OIDC_CLIENT_SECRET: ${CONSOLE_OIDC_CLIENT_SECRET:?set CONSOLE_OIDC_CLIENT_SECRET}
+      CONSOLE_OIDC_CLIENT_SECRET: ${CONSOLE_OIDC_CLIENT_SECRET}
       # Must equal ZERKER_OIDC_AUDIENCE. The gateway builds one verifier for
       # one audience, so console tokens and machine tokens share it.
-      CONSOLE_OIDC_AUDIENCE: ${ZERKER_OIDC_AUDIENCE:?set ZERKER_OIDC_AUDIENCE}
+      CONSOLE_OIDC_AUDIENCE: ${ZERKER_OIDC_AUDIENCE}
       CONSOLE_GATEWAY_BASE_URL: http://gateway:8080
+      # DEV ONLY. Session cookies are Secure and __Host- prefixed, which a
+      # browser will not accept over plain HTTP — so a localhost stack cannot
+      # log in at all unless this is set. Never set it in front of real
+      # traffic: it downgrades the cookie the whole session model depends on.
+      CONSOLE_COOKIE_INSECURE: ${CONSOLE_COOKIE_INSECURE:-false}
     ports:
       - "${CONSOLE_PORT:-8095}:8095"
     depends_on:
@@ -124,6 +134,13 @@ services:
     restart: unless-stopped
 
   # ---- profile: rooms -----------------------------------------------------
+  #
+  # These use plain ${VAR} rather than the ${VAR:?} guards the default services
+  # use. Compose interpolates the entire file before it applies profiles, so a
+  # required-variable guard here fails `up` for everyone — including the
+  # default stack, which does not run Rooms at all. Rooms and the sidecar both
+  # refuse to start without their configuration, so the failure is still
+  # closed; it just happens when the service is actually asked for.
   zmem:
     profiles: [rooms]
     image: ${ZMEM_IMAGE:-zerker-zmem:local}
@@ -131,8 +148,8 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.zmem
     environment:
-      ZMEM_TENANT_ID: ${ZMEM_TENANT_ID:?set ZMEM_TENANT_ID}
-      ZMEM_SERVICE_TOKEN: ${ZMEM_SERVICE_TOKEN:?set ZMEM_SERVICE_TOKEN — openssl rand -hex 32}
+      ZMEM_TENANT_ID: ${ZMEM_TENANT_ID}
+      ZMEM_SERVICE_TOKEN: ${ZMEM_SERVICE_TOKEN}
     volumes:
       - zmemdata:/var/lib/zmem
     # No ports: ZMem is a tenant-local sidecar. It is reachable on the compose
@@ -152,15 +169,15 @@ services:
     environment:
       ROOMS_ADDR: ":8090"
       ROOMS_DATABASE_URL: postgres://${POSTGRES_USER:-zerker}:${POSTGRES_PASSWORD}@postgres:5432/${ROOMS_DB:-rooms}?sslmode=disable
-      ROOMS_OIDC_ISSUER: ${ROOMS_OIDC_ISSUER:?set ROOMS_OIDC_ISSUER}
-      ROOMS_OIDC_AUDIENCE: ${ROOMS_OIDC_AUDIENCE:?set ROOMS_OIDC_AUDIENCE}
+      ROOMS_OIDC_ISSUER: ${ROOMS_OIDC_ISSUER}
+      ROOMS_OIDC_AUDIENCE: ${ROOMS_OIDC_AUDIENCE}
       ROOMS_OIDC_TENANT_CLAIM: ${ROOMS_OIDC_TENANT_CLAIM:-tenant}
       # Every agent-to-agent call goes through the gateway's proxy, never direct.
       ROOMS_GATEWAY_BASE_URL: http://gateway:8080
-      ROOMS_GATEWAY_TENANT: ${ROOMS_GATEWAY_TENANT:?set ROOMS_GATEWAY_TENANT — one Rooms deployment serves one gateway tenant}
+      ROOMS_GATEWAY_TENANT: ${ROOMS_GATEWAY_TENANT}
       # A bearer the gateway accepts for that tenant. Rooms holds it as-is and
       # does not refresh it, so it needs a long-lived token (see README).
-      ROOMS_GATEWAY_CREDENTIAL: ${ROOMS_GATEWAY_CREDENTIAL:?set ROOMS_GATEWAY_CREDENTIAL}
+      ROOMS_GATEWAY_CREDENTIAL: ${ROOMS_GATEWAY_CREDENTIAL}
       ROOMS_ZMEM_BASE_URL: http://zmem:8766
       ROOMS_ZMEM_SERVICE_TOKEN: ${ZMEM_SERVICE_TOKEN}
       ROOMS_ZMEM_TENANT_ID: ${ZMEM_TENANT_ID}
