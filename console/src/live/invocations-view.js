@@ -2,8 +2,7 @@
 // server-side, and looks a single invocation up by id through
 // GET /v1/invocations/{id} for the detail view.
 //
-// Two facts this view must not blur, both called out by the ticket that added
-// it:
+// Two facts this view must not blur:
 //
 //   traffic shown here — an invocation record is only created once a request
 //                        clears policy and payment. A denial or an unpaid x402
@@ -34,6 +33,12 @@ import { liveAgentsState } from './agents-view.js';
 import { renderSignIn } from './gate.js';
 
 const PAGE_SIZE = 20;
+
+// How long the search box waits after the last keystroke before treating an
+// inv_-shaped query as a lookup. Without this, every intermediate prefix of
+// an id the operator is still typing would fire its own GET, almost always
+// 404 first, and flash "not found" for an id that in fact exists.
+const LOOKUP_DEBOUNCE_MS = 400;
 
 // Enumerated straight from gateway/openapi.yaml's InvocationListItem — the
 // gateway returns no results for an unrecognized error_class rather than
@@ -79,8 +84,8 @@ function unauthenticated() {
 // --- normalization -----------------------------------------------------------
 
 // api.js owns normalizeAgent but not an invocation equivalent — this view is
-// the only consumer so far, and adding one to api.js for a single caller
-// would be scope creep on a file this ticket does not otherwise touch.
+// the only consumer so far, so an invocation-specific normalizer lives here
+// rather than as a single-caller addition to api.js.
 export function normalizeInvocation(raw) {
   return {
     id: raw.id,
@@ -589,11 +594,10 @@ async function loadInvocations() {
   }
 }
 
-// Typing into the search box can fire one lookup per keystroke once the
-// value looks like an id (see the `input` listener below — un-debounced).
-// Each call checks state.detail.id is still its own id before writing a
-// result, so a slow response to an earlier, incomplete id can never clobber
-// a later one.
+// The `input` listener below debounces calls into this by
+// LOOKUP_DEBOUNCE_MS, so only the id the operator has settled on is fetched.
+// This also checks state.detail.id is still its own id before writing a
+// result, so a slow response to a stale id can never clobber a newer one.
 async function openDetail(id) {
   state.detail = { id, status: 'loading', error: null, record: null };
   rerenderIfMounted();
@@ -631,6 +635,11 @@ function rerenderIfMounted() {
   root.outerHTML = liveInvocationsView();
 }
 
+// Pending debounce timer for the id-lookup search box; cancelled and
+// replaced on every keystroke so only the value the operator stops typing on
+// ever reaches openDetail.
+let lookupTimer = null;
+
 if (typeof document !== 'undefined') {
   document.addEventListener('click', async (event) => {
     const el = event.target.closest('[data-live-invocation-action]');
@@ -665,8 +674,16 @@ if (typeof document !== 'undefined') {
   document.addEventListener('input', (event) => {
     if (event.target.id !== 'invocation-query') return;
     state.query = event.target.value;
+    if (lookupTimer) {
+      clearTimeout(lookupTimer);
+      lookupTimer = null;
+    }
     if (isInvocationId(state.query)) {
-      openDetail(state.query.trim());
+      const id = state.query.trim();
+      lookupTimer = setTimeout(() => {
+        lookupTimer = null;
+        openDetail(id);
+      }, LOOKUP_DEBOUNCE_MS);
     }
     rerenderIfMounted();
     // Re-rendering replaces the input, so put the caret back where it was.
