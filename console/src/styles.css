@@ -988,14 +988,20 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 
 .sidebar-bottom .sign-out { width: 100%; margin-top: 10px; }
 
-.live-catalog { display: grid; gap: 10px; }
-.live-agent-row { display: grid; gap: 14px; grid-template-columns: minmax(0, 2.2fr) auto repeat(3, minmax(0, 1fr)); align-items: start;
-  background: var(--white); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
-.live-agent-row h3 { margin: 0 0 4px; font-size: 14px; }
-.live-agent-row p { margin: 0; font-size: 12px; line-height: 1.45; }
-.live-agent-row .mono { font-family: "Geist Mono", monospace; font-size: 11px; word-break: break-all; }
+.live-catalog { display: grid; gap: 8px; }
+/* Nine columns, matching .catalog-columns above it so the header row and the
+   data rows stay locked together. Rows are top-aligned rather than centred:
+   cells carry a label plus a detail line and centring makes short cells drift
+   away from the identity column the eye is tracking. */
+.live-agent-row { grid-template-columns: 1.5fr .8fr .8fr 1fr .85fr 1fr .95fr 1.15fr 84px; align-items: start; }
+.live-agent-row .mono { font-family: "Geist Mono", monospace; word-break: break-all; }
 .live-agent-row .muted { color: var(--muted); }
-.live-agent-row .kicker { margin-bottom: 4px; }
+.live-agent-row .catalog-inspect { display: flex; justify-content: flex-end; }
+.live-agent-row .catalog-inspect .button { min-height: 28px; padding: 0 10px; font-size: 9px; white-space: nowrap; }
+.live-agent-row .status + small { margin-top: 4px; }
+.agent-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.agent-tags em { font-style: normal; font: 520 7px "Geist Mono", monospace; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted); background: var(--paper); border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; }
 
 .live-agent-form { margin-bottom: 16px; }
 .live-agent-form form { display: grid; gap: 16px; padding: 4px 2px 2px; }
@@ -1008,6 +1014,26 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 
 .form-error { margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; background: var(--red-soft); color: var(--red); font-size: 12px; border: 1px solid var(--red); }
 
-@media (max-width: 900px) {
-  .live-agent-row { grid-template-columns: 1fr; gap: 10px; }
+/* The live row is a .catalog-row too, so it inherits that element's responsive
+   data-label treatment. These blocks only have to restate the column count,
+   and they use the sheet's existing 1120/820/650 breakpoints rather than
+   introducing a fourth. */
+@media (max-width: 1120px) {
+  .live-agent-row { grid-template-columns: 1.4fr .8fr .8fr 1fr 1fr 1.1fr 80px; }
+  /* Rate boundary and pricing are the two least urgent cells; fold them into
+     the identity column's territory rather than shrinking every column. */
+  .live-agent-row > span[data-label="Rate boundary"],
+  .live-agent-row > span[data-label="Pricing"] { display: none; }
+}
+
+@media (max-width: 820px) {
+  .live-agent-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .live-agent-row > span[data-label="Rate boundary"],
+  .live-agent-row > span[data-label="Pricing"] { display: block; }
+  .live-agent-row > .agent-identity { grid-column: 1 / -1; }
+  .live-agent-row > .catalog-inspect { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+@media (max-width: 650px) {
+  .live-agent-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
