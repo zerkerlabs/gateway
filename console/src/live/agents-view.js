@@ -33,6 +33,7 @@ const WINDOW_LABEL = 'today (UTC)';
 const state = {
   agents: [],
   traffic: new Map(),
+  analyticsGroups: [],
   trafficState: 'unknown', // 'ready' | 'unavailable' | 'unknown'
   credentialNames: new Map(),
   credentialsState: 'unknown',
@@ -334,13 +335,18 @@ export async function loadAgents() {
   await Promise.all([loadTraffic(), loadCredentialNames()]);
 }
 
+// The attention view's failing-agents rule reuses these same raw groups
+// (see attention-view.js's buildContext) rather than issuing its own
+// getAnalytics call for the identical window and grouping.
 async function loadTraffic() {
   try {
     const res = await api.getAnalytics({ since: windowSince(), bucket: 'day', group_by: 'agent_id' });
     state.traffic = summarizeAnalyticsByAgent(res);
+    state.analyticsGroups = res?.groups || [];
     state.trafficState = 'ready';
   } catch {
     state.traffic = new Map();
+    state.analyticsGroups = [];
     state.trafficState = 'unavailable';
   }
 }

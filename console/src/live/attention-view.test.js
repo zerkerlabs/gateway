@@ -209,7 +209,6 @@ test('badgeSummary shows a known positive count even while another rule is unava
 function withReady(attentionOver, agentsOver, fn) {
   const savedAttention = {
     status: liveAttentionState.status,
-    analytics: liveAttentionState.analytics,
     settlementFailed: liveAttentionState.settlementFailed,
     settledUpstreamFailed: liveAttentionState.settledUpstreamFailed,
     settlementConfig: liveAttentionState.settlementConfig,
@@ -219,10 +218,11 @@ function withReady(attentionOver, agentsOver, fn) {
     error: liveAgentsState.error,
     credentialsState: liveAgentsState.credentialsState,
     credentialNames: liveAgentsState.credentialNames,
+    trafficState: liveAgentsState.trafficState,
+    analyticsGroups: liveAgentsState.analyticsGroups,
   };
   Object.assign(liveAttentionState, {
     status: 'ready',
-    analytics: { state: 'ready', groups: [] },
     settlementFailed: { state: 'ready', total: 0 },
     settledUpstreamFailed: { state: 'ready', total: 0 },
     settlementConfig: { state: 'ready', configured: true },
@@ -233,6 +233,8 @@ function withReady(attentionOver, agentsOver, fn) {
     error: null,
     credentialsState: 'ready',
     credentialNames: new Map(),
+    trafficState: 'ready',
+    analyticsGroups: [],
     ...agentsOver,
   });
   try {
@@ -271,7 +273,7 @@ test('a suspended agent renders as a card that deep-links to the agent catalog',
 });
 
 test('a failed read renders its rule as unavailable, not as evidence of a clean queue', () => {
-  withReady({ analytics: { state: 'unavailable', groups: [] } }, {}, (html) => {
+  withReady({}, { trafficState: 'unavailable', analyticsGroups: [] }, (html) => {
     assert.match(html, /Elevated error rate is unknown/);
     assert.doesNotMatch(html, /Nothing needs attention/);
   });

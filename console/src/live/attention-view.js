@@ -18,7 +18,7 @@
 //                          zero. It never renders the digit 0.
 
 import { api, ApiError } from './api.js';
-import { liveAgentsState, windowSince } from './agents-view.js';
+import { liveAgentsState } from './agents-view.js';
 import { count } from './format.js';
 import { renderSignIn } from './gate.js';
 
@@ -185,7 +185,6 @@ export function badgeSummary(queue) {
 
 const state = {
   status: 'idle', // idle | loading | ready
-  analytics: { state: 'unknown', groups: [] },
   settlementFailed: { state: 'unknown', total: 0 },
   settledUpstreamFailed: { state: 'unknown', total: 0 },
   settlementConfig: { state: 'unknown', configured: null },
@@ -196,7 +195,7 @@ function buildContext() {
     agents: liveAgentsState.error ? null : liveAgentsState.agents,
     agentNames: new Map((liveAgentsState.agents || []).map((a) => [a.id, a.name])),
     credentialNames: liveAgentsState.credentialsState === 'ready' ? liveAgentsState.credentialNames : null,
-    analyticsGroups: state.analytics.state === 'ready' ? state.analytics.groups : null,
+    analyticsGroups: liveAgentsState.trafficState === 'ready' ? liveAgentsState.analyticsGroups : null,
     settlementFailedTotal: state.settlementFailed.state === 'ready' ? state.settlementFailed.total : null,
     settledUpstreamFailedTotal: state.settledUpstreamFailed.state === 'ready' ? state.settledUpstreamFailed.total : null,
     settlementConfigured: state.settlementConfig.state === 'ready' ? state.settlementConfig.configured : null,
@@ -210,25 +209,24 @@ function unauthenticated() {
 // Suspended and pending agents come free — liveAgentsState.agents is already
 // loaded before any view first renders (see app.js's boot()), and
 // credentialNames is the same list agents-view already fetched for its own
-// credential column. Only the four reads below have no other consumer in
-// this console, so they are fetched once here rather than per rule.
+// credential column. The error-rate rule's analytics groups come free too —
+// agents-view.js's loadTraffic() already fetches them for the traffic column
+// (see buildContext above). Only the three reads below have no other
+// consumer in this console, so they are fetched once here rather than per
+// rule.
 async function loadAttentionData() {
   const results = await Promise.allSettled([
-    api.getAnalytics({ since: windowSince(), bucket: 'day', group_by: 'agent_id' }),
     api.listInvocations({ settlement: 'settlement_failed', limit: 1, offset: 0 }),
     api.listInvocations({ settlement: 'settled_upstream_failed', limit: 1, offset: 0 }),
     api.getSettlementConfig(),
   ]);
-  const [analytics, settlementFailed, settledUpstreamFailed, settlementConfig] = results;
+  const [settlementFailed, settledUpstreamFailed, settlementConfig] = results;
 
   if (results.some((r) => r.status === 'rejected' && r.reason instanceof ApiError && r.reason.status === 401)) {
     unauthenticated();
     return;
   }
 
-  state.analytics = analytics.status === 'fulfilled'
-    ? { state: 'ready', groups: analytics.value?.groups || [] }
-    : { state: 'unavailable', groups: [] };
   state.settlementFailed = settlementFailed.status === 'fulfilled'
     ? { state: 'ready', total: settlementFailed.value?.total ?? 0 }
     : { state: 'unavailable', total: 0 };
@@ -241,7 +239,14 @@ async function loadAttentionData() {
   state.status = 'ready';
 }
 
-function ensureLoaded() {
+// Exported so app.js's boot() can start this alongside loadAgents(), rather
+// than waiting for the operator to open the Needs attention tab. Every rule
+// and the sidebar badge would otherwise sit unevaluated for the whole
+// session until that first visit — which defeats the badge's job of
+// alerting someone who hasn't looked yet. Idempotent: a later call from
+// liveAttentionView() (someone opening the tab before this settles) is a
+// no-op once loading has started.
+export function ensureAttentionLoaded() {
   if (state.status !== 'idle') return;
   state.status = 'loading';
   loadAttentionData().then(() => {
@@ -301,7 +306,7 @@ function renderHeader() {
 }
 
 export function liveAttentionView() {
-  if (typeof document !== 'undefined') ensureLoaded();
+  if (typeof document !== 'undefined') ensureAttentionLoaded();
 
   const header = renderHeader();
 
