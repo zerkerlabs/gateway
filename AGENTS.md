@@ -34,6 +34,7 @@ A **Go workspace monorepo** (`go.work`) of independent modules:
 | Module | What it is |
 |--------|-----------|
 | `gateway/` | The gateway service — catalog, MCP-native transport, routing proxy, auth, SSRF protection, per-tenant credential isolation, x402 payment gate |
+| `rooms/` | The agent-collaboration substrate — membership, turn reservation, governed memory |
 | `facilitator/` | The self-hostable x402 `/settle` server — independently re-verifies a payment and submits it on-chain with your own gas key |
 | `x402types/` | The shared x402 wire contract, generated from its OpenAPI schema |
 | `sdk/go/` | Go client SDK |
@@ -41,6 +42,17 @@ A **Go workspace monorepo** (`go.work`) of independent modules:
 Within a module, standard Go: `cmd/<binary>` for entrypoints, `internal/` for
 non-exported packages. Keep packages small and single-purpose. Cross-module wire
 types live only in `x402types/` — never duplicated.
+
+Two surfaces in this repo are **not** Go modules. They are not part of the Go
+workspace, `make check` does not cover them, and each has its own gate:
+
+| Surface | What it is | Its gate |
+|---------|-----------|----------|
+| `console/` | The operator console — a Vite/vanilla-JS single-page app (`console/src/`) plus its backend-for-frontend (`console/server/`), the Node service that runs the OIDC login and proxies same-origin `/api` calls to the gateway with a bearer the browser never sees | `make console-check` |
+| `www/` | The documentation and product website | `make -C www check` |
+
+If your change touches either directory, running `make check` proves nothing
+about it. See §4.
 
 ---
 
@@ -115,6 +127,37 @@ pass a change — fix the change.
 On a fresh checkout, run `make tools` once to install the pinned versions of
 `gofumpt` and `golangci-lint` that `make check` requires. (`make run` / `go test`
 only need Go.)
+
+**`make check` fans out over the Go modules only** — it does not build, lint, or
+test `console/` or `www/`. A change to either one can leave `make check`
+completely green while the surface you edited is broken. Run that surface's own
+gate as well, and treat it as the same hard requirement:
+
+| You touched | Also run |
+|-------------|----------|
+| `console/` | `make console-check` — installs from `console/package-lock.json`, runs the unit tests and the Vite build. The BFF has its own suite: `npm ci && npm test` in `console/server/`, plus `npm audit --audit-level=high`. |
+| `www/` | `make -C www check` |
+
+CI enforces all of these as separate required contexts (`check console`,
+`check www`), so skipping one does not get the change merged — it just finds
+out later.
+
+### Working in `console/`
+
+It is JavaScript, not Go, and §3's conventions do not apply. Match the
+surrounding code and read these first:
+
+- `console/UX_RUBRIC.md` — the contract for how this console is allowed to
+  present data. The load-bearing rule: **an unknown value is never rendered as
+  zero.** "No data yet", "unavailable", and "0" are three different statements
+  and the console must not collapse them.
+- `console/PRODUCT_GOAL.md` — what the console is for.
+- `console/README.md` — how to run it, and which views read live gateway data
+  versus which are still fixture-backed.
+
+No dependency may be added to `console/` or `console/server/` without saying why
+in the PR. The BFF holds the gateway bearer token, so its dependency tree is
+part of the attack surface in the same way `gateway/`'s is.
 
 ---
 
