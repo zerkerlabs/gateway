@@ -88,11 +88,11 @@ test("system posture never promotes one probe, configuration, or one build sampl
 test("REST inventory contains the exact unique contract classes, auth exemptions, and destinations", () => {
   const model = buildRestInventory(restOperations);
   assert.equal(model.valid, true);
-  assert.equal(model.total, 23);
-  assert.equal(model.unique, 23);
+  assert.equal(model.total, 25);
+  assert.equal(model.unique, 25);
   assert.equal(model.unauthenticated, 2);
-  assert.deepEqual(model.counts, { probe: 2, read: 10, proxy: 3, write: 8 });
-  assert.deepEqual(restOperations.map((item) => item.id), ["getHealthz", "getVersion", "createAgent", "listAgents", "getAgent", "updateAgent", "deleteAgent", "createCredential", "listCredentials", "getCredential", "putCredential", "deleteCredential", "transactInvocation", "streamInvocation", "pollInvocation", "listInvocations", "getInvocation", "getAnalytics", "getSettlementConfig", "patchSettlementConfig", "getPolicy", "putPolicy", "listPolicyDecisions"]);
+  assert.deepEqual(model.counts, { probe: 2, read: 11, proxy: 3, write: 9 });
+  assert.deepEqual(restOperations.map((item) => item.id), ["getHealthz", "getVersion", "createAgent", "listAgents", "getAgent", "updateAgent", "deleteAgent", "createAgentEvent", "summarizeAgentEvents", "createCredential", "listCredentials", "getCredential", "putCredential", "deleteCredential", "transactInvocation", "streamInvocation", "pollInvocation", "listInvocations", "getInvocation", "getAnalytics", "getSettlementConfig", "patchSettlementConfig", "getPolicy", "putPolicy", "listPolicyDecisions"]);
   assert.deepEqual(restOperations.filter((item) => item.auth === "unauthenticated").map((item) => item.id), ["getHealthz", "getVersion"]);
   assert.ok(restOperations.every((item) => item.destination));
   assert.equal(buildRestInventory([...restOperations, restOperations[0]]).valid, false);

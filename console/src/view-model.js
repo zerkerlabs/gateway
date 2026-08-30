@@ -740,8 +740,8 @@ export function buildRestInventory(operations) {
     if (!operation.destination) destinationsComplete = false;
     (groups[operation.destination ?? "Unmapped"] ??= []).push({ ...operation });
   }
-  const valid = operations?.length === 23 && ids.size === 23 && !duplicate && unauthenticated === 2
-    && counts.probe === 2 && counts.read === 10 && counts.proxy === 3 && counts.write === 8 && destinationsComplete;
+  const valid = operations?.length === 25 && ids.size === 25 && !duplicate && unauthenticated === 2
+    && counts.probe === 2 && counts.read === 11 && counts.proxy === 3 && counts.write === 9 && destinationsComplete;
   return { total: operations?.length ?? 0, unique: ids.size, duplicate, unauthenticated, counts, destinationsComplete, groups, valid };
 }
 

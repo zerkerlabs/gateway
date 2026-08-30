@@ -452,7 +452,7 @@ function systemPostureCard(id, kicker, title, badge, tone, facts) {
 }
 
 function restOperationPosture(operation) {
-  return operation.kind === "probe" ? "Captured fixture only · no probe" : "Available API contract · disabled in fixture";
+  return operation.kind === "probe" ? "Unauthenticated · exempt from the console session" : "Requires the operator's authenticated session";
 }
 
 function stackView() {
@@ -470,7 +470,7 @@ function stackView() {
       ${systemPostureCard("deployment", "Self-hosted operation", "Scale & rollout", systemModel.rollout.label, "warning", [["Replicas", systemSnapshot.deployment.replicas], ["Rate boundary", systemSnapshot.deployment.rateBoundary], ["Grace", systemSnapshot.deployment.graceful]])}
       ${systemPostureCard("facilitator", "Settlement system", "Facilitator readiness", systemModel.facilitator.label, "warning", [["Configuration", systemSnapshot.facilitator.configurationEvidence], ["/supported", systemSnapshot.facilitator.supported], ["Gas", systemSnapshot.facilitator.gas]])}
     </section>
-    <section class="api-inventory"><div class="section-heading compact-heading"><div><p class="kicker">Gateway REST contract</p><h2>All ${restInventory.total} operations have an operator destination.</h2></div><p>${restInventory.unauthenticated} unauthenticated probes only. Auth is required for every data, proxy, and configuration operation; this console has no session.</p></div><div class="operation-counts"><span><b>${restInventory.counts.probe}</b>Probe</span><span><b>${restInventory.counts.read}</b>Read</span><span><b>${restInventory.counts.proxy}</b>Proxy</span><span><b>${restInventory.counts.write}</b>Write</span></div><div class="operation-groups">${operationGroups.map(([destination, operations]) => `<section><div><h3>${destination}</h3><span>${formatCount(operations.length, "operation")}</span></div>${operations.map((operation) => `<article><code>${operation.id}</code><span>${status(operation.kind, operation.kind === "write" || operation.kind === "proxy" ? "warning" : operation.kind === "probe" ? "empty" : "review")}</span><span><b>${operation.auth === "unauthenticated" ? "Unauthenticated exemption" : "Authenticated contract"}</b><small>${restOperationPosture(operation)}</small></span></article>`).join("")}</section>`).join("")}</div></section>
+    <section class="api-inventory"><div class="section-heading compact-heading"><div><p class="kicker">Gateway REST contract</p><h2>All ${restInventory.total} operations have an operator destination.</h2></div><p>${restInventory.unauthenticated} unauthenticated probes only. Auth is required for every data, proxy, and configuration operation; the signed-in operator's session satisfies it.</p></div><div class="operation-counts"><span><b>${restInventory.counts.probe}</b>Probe</span><span><b>${restInventory.counts.read}</b>Read</span><span><b>${restInventory.counts.proxy}</b>Proxy</span><span><b>${restInventory.counts.write}</b>Write</span></div><div class="operation-groups">${operationGroups.map(([destination, operations]) => `<section><div><h3>${destination}</h3><span>${formatCount(operations.length, "operation")}</span></div>${operations.map((operation) => `<article><code>${operation.id}</code><span>${status(operation.kind, operation.kind === "write" || operation.kind === "proxy" ? "warning" : operation.kind === "probe" ? "empty" : "review")}</span><span><b>${operation.auth === "unauthenticated" ? "Unauthenticated exemption" : "Authenticated contract"}</b><small>${restOperationPosture(operation)}</small></span></article>`).join("")}</section>`).join("")}</div></section>
     <section class="sdk-inventory"><div><p class="kicker">SDK & wire contract inventory</p><h2>Repository evidence wins over the strongest docs claim.</h2><p>Developer contracts remain subordinate to runtime operator evidence.</p></div><div>${sdkModel.map((item) => `<article><span><strong>${item.name}</strong><small>${item.evidence}</small></span>${status(item.label, item.tone)}</article>`).join("")}</div></section>
     <section class="stack-components"><div class="section-heading compact-heading"><div><p class="kicker">Wider Zerker stack</p><h2>Delivery states remain separate.</h2></div><p>These labels describe product contracts, not live integration evidence.</p></div><div class="stack-list">${stack.map((component, index) => `<article><span class="stack-number">${String(index + 1).padStart(2, "0")}</span><span><strong>${component.name}</strong><small>${component.job}</small></span>${status(component.status, component.tone)}<button data-stack="${component.name}" aria-label="Details for ${component.name}">Details <span aria-hidden="true">→</span></button></article>`).join("")}</div></section>
   </section>`;
@@ -1068,8 +1068,9 @@ async function boot() {
   const signOutButton = document.querySelector("[data-action='sign-out']");
   if (signOutButton) signOutButton.addEventListener("click", signOut);
 
-  const identity = document.querySelector("[data-operator-identity]");
-  if (identity) identity.textContent = user.email || user.name || user.sub;
+  document.querySelectorAll("[data-operator-identity]").forEach((identity) => {
+    identity.textContent = user.email || user.name || user.sub;
+  });
 
   try {
     await loadAgents();
