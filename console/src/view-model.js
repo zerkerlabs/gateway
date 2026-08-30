@@ -740,6 +740,8 @@ export function buildRestInventory(operations) {
     if (!operation.destination) destinationsComplete = false;
     (groups[operation.destination ?? "Unmapped"] ??= []).push({ ...operation });
   }
+  // These counts are a fixed snapshot of restOperations (data.js), not derived logic — bump them in
+  // lockstep whenever an operation is added, removed, or reclassified there.
   const valid = operations?.length === 25 && ids.size === 25 && !duplicate && unauthenticated === 2
     && counts.probe === 2 && counts.read === 11 && counts.proxy === 3 && counts.write === 9 && destinationsComplete;
   return { total: operations?.length ?? 0, unique: ids.size, duplicate, unauthenticated, counts, destinationsComplete, groups, valid };
