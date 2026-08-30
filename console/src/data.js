@@ -305,7 +305,7 @@ export const systemSnapshot = {
   build: { source: "Gateway build metadata fixture", capturedAt: "2026-08-18T09:11:48Z", route: "/version", auth: "Unauthenticated", version: "gateway development · fixture", commit: "fixture-build-2026-08-18", replicaSamples: 1 },
   storage: { production: "Postgres durable path", fallback: "Memory · development only", migrations: "Automatic at boot · outcome not evidenced", backup: "Operator responsibility · not evidenced" },
   kms: { configurationEvidence: "Configured · fixture metadata only", requirement: "Stable 32-byte ZERKER_KMS_KEY required for durable production", fallback: "Ephemeral key · development only", masterRotation: "Unsupported", tenantRotation: "Internal tenant KEK seam · no public REST operation" },
-  security: { apiIdentity: "Gateway API OIDC required at startup", consoleIdentity: "Not implemented · human approval required", tenancy: "Cross-tenant resources return 404", transport: "TLS externally", ssrf: "Checked at write and dial time", authorization: "Caller authorization stripped before credential injection", policyOutage: "Fails closed" },
+  security: { apiIdentity: "Gateway API OIDC required at startup", consoleIdentity: "Same-origin BFF session over OIDC · gateway bearer held server-side, never in the browser", tenancy: "Cross-tenant resources return 404", transport: "TLS externally", ssrf: "Checked at write and dial time", authorization: "Caller authorization stripped before credential injection", policyOutage: "Fails closed" },
   deployment: { binary: "Single statically linked Go binary", replicas: "Supported · active count unavailable", graceful: "60-second rollout allowance", upgrades: "Adjacent rolling upgrades", configuration: "Environment at boot · values never returned", sovereignty: "No call home", rateBoundary: "Per process when replicated" },
   facilitator: { configurationEvidence: "Configured · fixture metadata only", supported: "Not probed", readiness: "Not probed", gas: "Unknown", mtls: "Capability/configuration posture", accountMapping: "Capability/configuration posture", verification: "Independent re-verification", custody: "Gas relay · no payer/operator fund custody", localSigner: "Available OSS capability", awsSigner: "Implementation exists · not wired into startup" },
 };
@@ -328,6 +328,8 @@ export const restOperations = [
   { id: "getAgent", kind: "read", auth: "authenticated", destination: "Agent catalog" },
   { id: "updateAgent", kind: "write", auth: "authenticated", destination: "Agent catalog" },
   { id: "deleteAgent", kind: "write", auth: "authenticated", destination: "Agent catalog" },
+  { id: "createAgentEvent", kind: "write", auth: "authenticated", destination: "Agent activity" },
+  { id: "summarizeAgentEvents", kind: "read", auth: "authenticated", destination: "Agent activity" },
   { id: "createCredential", kind: "write", auth: "authenticated", destination: "Credentials" },
   { id: "listCredentials", kind: "read", auth: "authenticated", destination: "Credentials" },
   { id: "getCredential", kind: "read", auth: "authenticated", destination: "Credentials" },

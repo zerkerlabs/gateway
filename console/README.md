@@ -2,7 +2,7 @@
 
 A static, fixture-backed product prototype for the future Zerker Gateway operator console. It maps the current catalog, proxy, MCP, policy, credential, invocation, analytics, payment, settlement, identity, deployment, health/build, facilitator-readiness, SDK, and REST contract surfaces, plus separately labeled Zerker integration paths.
 
-Analytics uses fixed 1-hour, 24-hour, 7-day, and 31-day fixture windows with count, safe error taxonomy, latency percentiles, streaming TTFT, MCP method/tool aggregates, and explicit empty/partial/unavailable/error scenarios. Stack & health separates one captured fixture probe from configuration, support, readiness, rollout, KMS, migration, backup, replica, and signer posture. All 23 REST operation IDs are inventory only and cannot be called.
+Analytics uses fixed 1-hour, 24-hour, 7-day, and 31-day fixture windows with count, safe error taxonomy, latency percentiles, streaming TTFT, MCP method/tool aggregates, and explicit empty/partial/unavailable/error scenarios. Stack & health separates one captured fixture probe from configuration, support, readiness, rollout, KMS, migration, backup, replica, and signer posture. All 25 REST operation IDs are inventory only; the console does not call most of them today.
 
 It is intentionally separate from:
 
@@ -37,7 +37,7 @@ npm run improve:status
 npm run improve:stop
 ```
 
-The durable contract lives in `PRODUCT_GOAL.md`, `CAPABILITY_COVERAGE.md`, `BACKLOG.md`, and `UX_RUBRIC.md`. The completed Safe campaign maps every ledger row and all 23 Gateway REST operations to an honest operator destination or explicit non-console rationale. `AUTH_ARCHITECTURE.md` compares browser-auth approaches and keeps implementation blocked on its human approval checklist. Runtime state and logs stay under ignored `.loop/`. The runner is restricted to `console/`, cancels extension dialogs, stops on out-of-scope changes or repeated verification failures, and never pushes, merges, deploys, or accesses production.
+The durable contract lives in `PRODUCT_GOAL.md`, `CAPABILITY_COVERAGE.md`, `BACKLOG.md`, and `UX_RUBRIC.md`. The completed Safe campaign maps every ledger row and all 25 Gateway REST operations to an honest operator destination or explicit non-console rationale. `AUTH_ARCHITECTURE.md` compares browser-auth approaches and keeps implementation blocked on its human approval checklist. Runtime state and logs stay under ignored `.loop/`. The runner is restricted to `console/`, cancels extension dialogs, stops on out-of-scope changes or repeated verification failures, and never pushes, merges, deploys, or accesses production.
 
 For an unattended terminal on macOS, keep the process awake:
 
