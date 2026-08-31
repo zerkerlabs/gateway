@@ -33,6 +33,9 @@ Output uses `zerker.agent-discovery.v1`:
 ```json
 {
   "schema": "zerker.agent-discovery.v1",
+  "host": {
+    "host_id": "9f2c1e0b7a4d6f38c02e1b9a7d4f6c1e0b7a4d6f38c02e1b9a7d4f6c1e0b7a4d"
+  },
   "agents": [
     {
       "key": "claude-code",
@@ -50,6 +53,8 @@ Output uses `zerker.agent-discovery.v1`:
   ]
 }
 ```
+
+`host.host_id` is a SHA-256 hash of the machine's hostname. It is stable across runs on the same machine and discloses nothing about the machine itself. The readable hostname is omitted by default; pass `--include-hostname` to add `host.hostname` to the report. A hostname often contains a person's name (`alexs-macbook-pro.local`), so only opt in when you intend to identify the machine, not just distinguish it.
 
 This version reports only discovery evidence. It does not claim a cryptographic identity binding or authority relationship.
 
@@ -84,6 +89,8 @@ It registers each agent with these defaults:
 - no body capture;
 - no payment;
 - no external publication.
+
+Each enrollment also records the machine it came from: `zerker_host_id` (always) and `zerker_hostname` (only with `--include-hostname`). This is what lets two people enrolling the same tool from two different laptops land as two distinct agents instead of colliding on name. If a name conflict is detected against an agent enrolled from a different machine, the error says so instead of asking the operator to review a record on a machine they cannot see.
 
 Plain HTTP is accepted only for numeric loopback addresses. The client refuses redirects so a bearer token cannot be forwarded elsewhere.
 

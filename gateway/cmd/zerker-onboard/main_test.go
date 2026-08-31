@@ -16,7 +16,7 @@ func TestRunPrintsCalmHumanSummary(t *testing.T) {
 	t.Parallel()
 
 	var stdout bytes.Buffer
-	err := run(nil, &stdout, &bytes.Buffer{}, func() (discovery.Report, error) {
+	err := run(nil, &stdout, &bytes.Buffer{}, func(bool) (discovery.Report, error) {
 		return discovery.Report{Schema: discovery.Schema, Agents: []discovery.Agent{
 			{Name: "Claude Code", Installed: true, Configured: true, MCPServerCount: 3},
 			{Name: "Codex", Configured: true},
@@ -44,8 +44,11 @@ func TestRunPrintsStableJSON(t *testing.T) {
 	t.Parallel()
 
 	var stdout bytes.Buffer
-	err := run([]string{"--json"}, &stdout, &bytes.Buffer{}, func() (discovery.Report, error) {
-		return discovery.Report{Schema: discovery.Schema, Agents: []discovery.Agent{}}, nil
+	err := run([]string{"--json"}, &stdout, &bytes.Buffer{}, func(includeHostname bool) (discovery.Report, error) {
+		if includeHostname {
+			t.Fatal("scan() received includeHostname = true, want false by default")
+		}
+		return discovery.Report{Schema: discovery.Schema, Host: discovery.Host{HostID: "abc123"}, Agents: []discovery.Agent{}}, nil
 	})
 	if err != nil {
 		t.Fatalf("run() error = %v", err)
@@ -55,6 +58,30 @@ func TestRunPrintsStableJSON(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"agents": []`) {
 		t.Fatalf("JSON output must preserve empty agents array:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"host_id": "abc123"`) {
+		t.Fatalf("JSON output must include the host block:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "hostname") {
+		t.Fatalf("JSON output must omit hostname by default:\n%s", stdout.String())
+	}
+}
+
+func TestRunPassesIncludeHostnameFlagToScan(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	err := run([]string{"--json", "--include-hostname"}, &stdout, &bytes.Buffer{}, func(includeHostname bool) (discovery.Report, error) {
+		if !includeHostname {
+			t.Fatal("scan() received includeHostname = false, want true")
+		}
+		return discovery.Report{Schema: discovery.Schema, Host: discovery.Host{HostID: "abc123", Hostname: "alexs-macbook-pro.local"}, Agents: []discovery.Agent{}}, nil
+	})
+	if err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"hostname": "alexs-macbook-pro.local"`) {
+		t.Fatalf("JSON output missing hostname:\n%s", stdout.String())
 	}
 }
 
@@ -102,7 +129,7 @@ func TestLoadTokenTrimsTokenFile(t *testing.T) {
 func TestRunFailsWhenScanFails(t *testing.T) {
 	t.Parallel()
 
-	err := run(nil, &bytes.Buffer{}, &bytes.Buffer{}, func() (discovery.Report, error) {
+	err := run(nil, &bytes.Buffer{}, &bytes.Buffer{}, func(bool) (discovery.Report, error) {
 		return discovery.Report{}, errors.New("home unavailable")
 	})
 	if err == nil || !strings.Contains(err.Error(), "scan local agents: home unavailable") {

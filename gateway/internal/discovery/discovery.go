@@ -3,6 +3,8 @@
 package discovery
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,18 +36,35 @@ type Agent struct {
 	Evidence       []Evidence `json:"evidence"`
 }
 
+// Host identifies the machine a scan ran on. HostID is always present;
+// Hostname is populated only when the operator explicitly opts in, since a
+// hostname often names a person (e.g. "alexs-macbook-pro.local").
+type Host struct {
+	HostID   string `json:"host_id"`
+	Hostname string `json:"hostname,omitempty"`
+}
+
 // Report is the stable machine-readable result of a local scan.
 type Report struct {
 	Schema string  `json:"schema"`
+	Host   Host    `json:"host"`
 	Agents []Agent `json:"agents"`
 }
 
 // Options provides the operating-system seams used by Scan. Zero values use
-// the real user's home directory, executable path, and filesystem.
+// the real user's home directory, executable path, filesystem, and hostname.
 type Options struct {
 	HomeDir  string
 	LookPath func(string) (string, error)
 	FS       fs.FS
+
+	// Hostname overrides the machine hostname used to derive Host. Tests set
+	// this for determinism; production leaves it empty to use os.Hostname().
+	Hostname string
+
+	// IncludeHostname includes the readable hostname in the report. It is
+	// false by default because a hostname is personal information.
+	IncludeHostname bool
 }
 
 type candidate struct {
@@ -90,7 +109,20 @@ func Scan(opts Options) (Report, error) {
 		filesystem = os.DirFS(home)
 	}
 
-	report := Report{Schema: Schema, Agents: []Agent{}}
+	hostname := opts.Hostname
+	if hostname == "" {
+		var err error
+		hostname, err = os.Hostname()
+		if err != nil {
+			return Report{}, fmt.Errorf("resolve hostname: %w", err)
+		}
+	}
+	host := Host{HostID: HostID(hostname)}
+	if opts.IncludeHostname {
+		host.Hostname = hostname
+	}
+
+	report := Report{Schema: Schema, Host: host, Agents: []Agent{}}
 	for _, known := range supported {
 		found := Agent{
 			Key:      known.key,
@@ -138,6 +170,16 @@ func Scan(opts Options) (Report, error) {
 		return report.Agents[i].Name < report.Agents[j].Name
 	})
 	return report, nil
+}
+
+// HostID derives a stable, non-identifying machine identifier from the given
+// hostname: it is the SHA-256 hash of the hostname, namespaced so it cannot be
+// confused with a hash of the same string computed elsewhere. Hashing means
+// the same machine always produces the same host_id, while the id itself
+// discloses nothing about the machine it names.
+func HostID(hostname string) string {
+	sum := sha256.Sum256([]byte("zerker.host-id.v1|" + hostname))
+	return hex.EncodeToString(sum[:])
 }
 
 func countMCPServers(filesystem fs.FS, name string) (int, error) {

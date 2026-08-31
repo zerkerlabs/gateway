@@ -126,6 +126,60 @@ func TestScanReturnsEmptyReportWhenNothingIsFound(t *testing.T) {
 	}
 }
 
+func TestScanOmitsHostnameByDefault(t *testing.T) {
+	t.Parallel()
+
+	report, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "alexs-macbook-pro.local"})
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if report.Host.Hostname != "" {
+		t.Fatalf("Hostname = %q, want empty by default", report.Host.Hostname)
+	}
+	if report.Host.HostID == "" {
+		t.Fatal("HostID is empty, want a stable non-empty id")
+	}
+	if report.Host.HostID == "alexs-macbook-pro.local" || strings.Contains(report.Host.HostID, "alexs") {
+		t.Fatalf("HostID = %q leaks the hostname", report.Host.HostID)
+	}
+}
+
+func TestScanIncludesHostnameWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	report, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "alexs-macbook-pro.local", IncludeHostname: true})
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if report.Host.Hostname != "alexs-macbook-pro.local" {
+		t.Fatalf("Hostname = %q, want the machine's hostname", report.Host.Hostname)
+	}
+}
+
+func TestScanHostIDIsStableAcrossRuns(t *testing.T) {
+	t.Parallel()
+
+	first, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "build-runner-1"})
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	second, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "build-runner-1"})
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if first.Host.HostID != second.Host.HostID {
+		t.Fatalf("HostID = %q then %q, want the same machine to produce the same id", first.Host.HostID, second.Host.HostID)
+	}
+
+	other, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "build-runner-2"})
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if other.Host.HostID == first.Host.HostID {
+		t.Fatal("HostID matched across different hostnames, want distinct ids")
+	}
+}
+
 func alwaysMissing(string) (string, error) {
 	return "", errors.New("not found")
 }
