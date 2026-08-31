@@ -7,6 +7,7 @@ import { liveAnalyticsView } from "./live/analytics-view.js";
 import { liveActivityView } from "./live/activity-view.js";
 import { liveCredentialsView } from "./live/credentials-view.js";
 import { livePoliciesView } from "./live/policies-view.js";
+import { livePaymentsView } from "./live/payments-view.js";
 import { currentSession, renderSignIn, signOut } from "./live/gate.js";
 import { activity, agents, analyticsScenarios, analyticsSnapshot, analyticsWindows, attention, catalogSnapshot, credentialSnapshot, credentials, environmentSnapshot, environments, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, policySnapshot, privacy, products, restOperations, sdkInventory, stack, systemLimitations, systemSnapshot, trafficSnapshot } from "./data.js";
 import { analyticsTTFTLabel, buildAgentResults, buildAnalyticsModel, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, buildRestInventory, buildSDKInventory, buildSystemModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, formatAnalyticsDuration, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizePayments } from "./view-model.js";
@@ -487,7 +488,7 @@ function stackView() {
 // and `policies` are live surfaces, reading (and for `agents`, writing) real
 // tenant state through the BFF. Every other view here is still fixture-backed
 // and labelled as such — see console/README.md.
-const views = { overview: liveOverviewView, attention: liveAttentionView, activity: liveActivityView, invocations: liveInvocationsView, analytics: liveAnalyticsView, agents: liveAgentsView, environments: environmentsView, policies: livePoliciesView, credentials: liveCredentialsView, products: productsView, payments: paymentsView, stack: stackView };
+const views = { overview: liveOverviewView, attention: liveAttentionView, activity: liveActivityView, invocations: liveInvocationsView, analytics: liveAnalyticsView, agents: liveAgentsView, environments: environmentsView, policies: livePoliciesView, credentials: liveCredentialsView, products: productsView, payments: livePaymentsView, stack: stackView };
 
 const mobilePrimaryViews = new Set(["overview", "invocations", "agents", "stack"]);
 
