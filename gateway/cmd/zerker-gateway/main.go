@@ -31,6 +31,7 @@ import (
 	"github.com/zerkerlabs/gateway/gateway/internal/proxy"
 	"github.com/zerkerlabs/gateway/gateway/internal/ratelimit"
 	reasonauth "github.com/zerkerlabs/gateway/gateway/internal/reason"
+	"github.com/zerkerlabs/gateway/gateway/internal/receipt"
 	"github.com/zerkerlabs/gateway/gateway/internal/server"
 	"github.com/zerkerlabs/gateway/gateway/internal/settlement"
 	"github.com/zerkerlabs/gateway/gateway/internal/version"
@@ -116,6 +117,20 @@ func run(logger *slog.Logger, addr string) error {
 		WithSettler(httpapi.NewFacilitatorSettler(nil), credSvc).
 		WithPolicy(policyStore).
 		WithPolicyDecisions(decisionStore)
+
+	// Trust receipts are opt-in: unset ZERKER_TREESHIP_BIN leaves the emitter
+	// off and proxy behavior byte-identical to before.
+	//
+	// The nil check is on the CONCRETE pointer, deliberately. Passing a nil
+	// *TreeshipCLIEmitter into WithReceipts would store a non-nil
+	// receipt.Emitter holding a nil pointer, and the proxy's `emitter == nil`
+	// guard would stop firing -- every completed invocation would then call
+	// Emit on a nil receiver. A nil interface and an interface holding nil are
+	// different things, and only one of them is what "receipts disabled" means.
+	if emitter := receipt.TreeshipCLIFromEnv(receipt.OSGetenv, nil); emitter != nil {
+		apiHandler = apiHandler.WithReceipts(emitter)
+		logger.Info("treeship trust receipts enabled", "actor", emitter.Actor())
+	}
 
 	srv := &http.Server{
 		Addr: addr,

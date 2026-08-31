@@ -39,3 +39,10 @@
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `ZERKER_TOKEN` | No | — | Bearer token used by `zerker-onboard --observe-all`. When unset, the command reads the file selected by `--token-file`, which defaults to `/tmp/zerker-dev-token`. The token is never printed. |
+
+### Trust receipts (Treeship)
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `ZERKER_TREESHIP_BIN` | No | — | Absolute path to the `treeship` binary. Setting it enables trust receipts: after each proxied invocation for an agent with receipts enabled, the gateway signs a Treeship `action.v1` artifact binding that invocation's ID, status and shape. Unset (the default) disables receipts entirely — no attestation is attempted and proxy behavior is unchanged. Emission is fail-open and off the request path, so an unreachable or broken binary never affects a proxied call. |
+| `ZERKER_TREESHIP_ACTOR` | No | `agent://zerker-gateway` | Actor URI recorded as the signer of gateway trust receipts. Only read when ZERKER_TREESHIP_BIN is set. |
