@@ -32,6 +32,7 @@ const WINDOW_LABEL = 'today (UTC)';
 
 const state = {
   agents: [],
+  agentsTotal: 0, // tenant-wide count from the list response; see catalogComplete()
   traffic: new Map(),
   analyticsGroups: [],
   trafficState: 'unknown', // 'ready' | 'unavailable' | 'unknown'
@@ -57,6 +58,15 @@ function esc(v) {
 // than half the filters querying and half not — which would make "no matches"
 // mean two different things — all four filter the loaded set, and the UI says
 // so. Exported for tests.
+// listAgents() asks for per_page=100 and never follows further pages, so the
+// loaded catalog can be a strict subset of the tenant's agents. Callers that
+// join against liveAgentsState.agents (credential references, policy-rule
+// agent names) must treat an incomplete catalog the same as a failed one
+// rather than concluding "not found" from a page that was never complete.
+export function catalogComplete() {
+  return state.agents.length >= state.agentsTotal;
+}
+
 export function filterAgents(agents, filters) {
   const q = (filters.query || '').trim().toLowerCase();
   return agents.filter((a) => {
@@ -318,6 +328,7 @@ export async function loadAgents() {
   try {
     const res = await api.listAgents();
     state.agents = (res?.agents || []).map(normalizeAgent);
+    state.agentsTotal = Number.isFinite(res?.total) ? res.total : state.agents.length;
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) throw err;
     state.error =

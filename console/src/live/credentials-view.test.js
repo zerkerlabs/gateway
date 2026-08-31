@@ -72,16 +72,19 @@ test('an unreferenced credential has no referencing agents', () => {
 
 // --- filterCredentials -------------------------------------------------------
 
-function withAgents(agents, fn) {
+function withAgents(agents, fn, { total = agents.length } = {}) {
   const saved = [...liveAgentsState.agents];
   const savedError = liveAgentsState.error;
+  const savedTotal = liveAgentsState.agentsTotal;
   liveAgentsState.agents = agents;
   liveAgentsState.error = null;
+  liveAgentsState.agentsTotal = total;
   try {
     return fn();
   } finally {
     liveAgentsState.agents = saved;
     liveAgentsState.error = savedError;
+    liveAgentsState.agentsTotal = savedTotal;
   }
 }
 
@@ -174,6 +177,18 @@ test('a failed agent catalog read makes references unknown, not falsely unrefere
       liveAgentsState.error = null;
     }
   });
+});
+
+test('an incomplete agent catalog makes references unknown, not falsely unreferenced', () => {
+  // agents-view.js only fetches one page (per_page=100). If the tenant has
+  // more agents than were loaded, a credential referenced only by an agent
+  // past that page must not read as "Not referenced".
+  withAgents([agent({ id: 'agt_a', credential_ref: 'cred_9' })], () => {
+    withState({ credentials: [credential({ id: 'cred_1' })] }, (html) => {
+      assert.match(html, /Agent catalog unavailable or incomplete/);
+      assert.doesNotMatch(html, /Not referenced/);
+    });
+  }, { total: 150 });
 });
 
 test('no write control exists anywhere on the page', () => {

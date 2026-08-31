@@ -27,7 +27,7 @@
 
 import { api, ApiError } from './api.js';
 import { count, relative, timestamp, UNKNOWN } from './format.js';
-import { liveAgentsState } from './agents-view.js';
+import { liveAgentsState, catalogComplete } from './agents-view.js';
 import { renderSignIn } from './gate.js';
 
 function esc(v) {
@@ -77,12 +77,14 @@ export function referencingAgents(credentialId, agents) {
   return agents.filter((a) => a.credentialRef === credentialId);
 }
 
-// Three outcomes, not two: an agent catalog that failed to load makes the
-// reference state genuinely unknown, and that must never collapse into
-// "unreferenced" — that would tell an operator a credential is safe to
-// delete when the truth is the console simply couldn't check.
+// Three outcomes, not two: an agent catalog that failed to load, or that
+// only partially loaded (agents-view.js fetches a single page and never
+// follows further pages), makes the reference state genuinely unknown, and
+// that must never collapse into "unreferenced" — that would tell an
+// operator a credential is safe to delete when the truth is the console
+// simply couldn't check every agent.
 function referenceState(credentialId) {
-  if (liveAgentsState.error) return { id: 'unknown', label: 'Unknown', agents: [] };
+  if (liveAgentsState.error || !catalogComplete()) return { id: 'unknown', label: 'Unknown', agents: [] };
   const agents = referencingAgents(credentialId, liveAgentsState.agents);
   if (!agents.length) return { id: 'unreferenced', label: 'Not referenced', agents: [] };
   return { id: 'referenced', label: `Referenced · ${agents.length}`, agents };
@@ -142,7 +144,7 @@ function secretReferenceCell(c) {
 function referenceCell(c) {
   const ref = referenceState(c.id);
   if (ref.id === 'unknown') {
-    return `<span class="status unavailable">Unknown</span><small>Agent catalog unavailable</small>`;
+    return `<span class="status unavailable">Unknown</span><small>Agent catalog unavailable or incomplete</small>`;
   }
   if (ref.id === 'unreferenced') {
     return `<span class="status empty">Not referenced</span><small>No agent's credential_ref points here</small>`;
