@@ -33,6 +33,7 @@ const selectCols = `id, tenant_id, agent_id, mode, status,
 	ttft_ms, error_class, model, mcp_method, mcp_tool,
 	payment_network, payment_asset, payment_amount, payment_payer, payment_nonce,
 	reason_request_digest, reasoning_result_digest,
+	policy_action, policy_matched_rule,
 	settlement_status, settlement_tx_hash, settled_amount, operator_amount,
 	facilitator_fee, settlement_attempts, settlement_reason, settled_at`
 
@@ -67,6 +68,8 @@ func scanInvocation(row rowScanner) (*Invocation, error) {
 		paymentNonce          *string
 		reasonRequestDigest   *string
 		reasoningResultDigest *string
+		policyAction          *string
+		policyMatchedRule     *string
 		settlementStatus      *string
 		settlementTxHash      *string
 		settledAmount         *string
@@ -83,6 +86,7 @@ func scanInvocation(row rowScanner) (*Invocation, error) {
 		&ttftMS, &errorClass, &model, &mcpMethod, &mcpTool,
 		&paymentNetwork, &paymentAsset, &paymentAmount, &paymentPayer, &paymentNonce,
 		&reasonRequestDigest, &reasoningResultDigest,
+		&policyAction, &policyMatchedRule,
 		&settlementStatus, &settlementTxHash, &settledAmount, &operatorAmount,
 		&facilitatorFee, &settlementAttempts, &settlementReason, &settledAt,
 	); err != nil {
@@ -112,6 +116,8 @@ func scanInvocation(row rowScanner) (*Invocation, error) {
 	inv.PaymentNonce = paymentNonce
 	inv.ReasonRequestDigest = reasonRequestDigest
 	inv.ReasoningResultDigest = reasoningResultDigest
+	inv.PolicyAction = policyAction
+	inv.PolicyMatchedRule = policyMatchedRule
 	if settlementStatus != nil {
 		ss := SettlementStatus(*settlementStatus)
 		inv.SettlementStatus = &ss
@@ -152,16 +158,18 @@ func (s *PostgresStore) Create(ctx context.Context, tenantID string, inv *Invoca
 			 ttft_ms, error_class, model, mcp_method, mcp_tool,
 			 payment_network, payment_asset, payment_amount, payment_payer, payment_nonce,
 			 reason_request_digest, reasoning_result_digest,
+			 policy_action, policy_matched_rule,
 			 settlement_status, settlement_tx_hash, settled_amount, operator_amount,
 			 facilitator_fee, settlement_attempts, settlement_reason, settled_at,
 			 created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-		        $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, NOW(), NOW())
+		        $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW(), NOW())
 		RETURNING `+selectCols,
 		id, tenantID, inv.AgentID, string(inv.Mode), string(inv.Status), inv.RequestSize, inv.RequestBody,
 		inv.TTFTMS, errorClassStr, inv.Model, inv.MCPMethod, inv.MCPTool,
 		inv.PaymentNetwork, inv.PaymentAsset, inv.PaymentAmount, inv.PaymentPayer, inv.PaymentNonce,
 		inv.ReasonRequestDigest, inv.ReasoningResultDigest,
+		inv.PolicyAction, inv.PolicyMatchedRule,
 		settlementStatusStr, inv.SettlementTxHash, inv.SettledAmount, inv.OperatorAmount,
 		inv.FacilitatorFee, inv.SettlementAttempts, inv.SettlementReason, inv.SettledAt,
 	)
@@ -303,6 +311,11 @@ func (s *PostgresStore) ListFiltered(ctx context.Context, tenantID string, filte
 	if filter.Model != "" {
 		clauses = append(clauses, fmt.Sprintf("model=$%d", n))
 		args = append(args, filter.Model)
+		n++
+	}
+	if filter.PolicyAction != nil {
+		clauses = append(clauses, fmt.Sprintf("policy_action=$%d", n))
+		args = append(args, *filter.PolicyAction)
 		n++
 	}
 	if filter.SettlementStatus != nil {

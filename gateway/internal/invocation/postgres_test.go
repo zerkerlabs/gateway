@@ -608,3 +608,94 @@ func TestPG_Update_CrossTenantBlocked(t *testing.T) {
 		t.Errorf("cross-tenant update: err = %v, want ErrNotFound", err)
 	}
 }
+
+// The policy decision recorded on the invocation has to survive the round trip
+// through Postgres, and — the part worth a test of its own — a row with no
+// decision has to come back with no decision rather than a zero value. The
+// INSERT omitting a column is a mistake this file has caught before (see
+// TestPG_Create_PreservesRequestSize), and here it would silently report every
+// call as unevaluated.
+func TestPG_Create_PersistsPolicyDecision(t *testing.T) {
+	s := newPGStore(t)
+	action, rule := "warn", "3"
+	inv := &invocation.Invocation{
+		AgentID:           agentID,
+		Mode:              invocation.ModeTransactional,
+		Status:            invocation.StatusPending,
+		PolicyAction:      &action,
+		PolicyMatchedRule: &rule,
+	}
+	pgMustCreate(t, s, tenantA, inv)
+
+	got, err := s.Get(context.Background(), tenantA, inv.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.PolicyAction == nil || *got.PolicyAction != "warn" {
+		t.Errorf("PolicyAction = %v, want warn", got.PolicyAction)
+	}
+	if got.PolicyMatchedRule == nil || *got.PolicyMatchedRule != "3" {
+		t.Errorf("PolicyMatchedRule = %v, want \"3\"", got.PolicyMatchedRule)
+	}
+}
+
+func TestPG_Create_PolicyDecisionStaysNullWhenNoneApplied(t *testing.T) {
+	s := newPGStore(t)
+	inv := &invocation.Invocation{
+		AgentID: agentID,
+		Mode:    invocation.ModeTransactional,
+		Status:  invocation.StatusPending,
+	}
+	pgMustCreate(t, s, tenantA, inv)
+
+	got, err := s.Get(context.Background(), tenantA, inv.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	// Null, not "" and not "allow": no policy was evaluated for this call.
+	if got.PolicyAction != nil {
+		t.Errorf("PolicyAction = %q, want nil", *got.PolicyAction)
+	}
+	if got.PolicyMatchedRule != nil {
+		t.Errorf("PolicyMatchedRule = %q, want nil", *got.PolicyMatchedRule)
+	}
+}
+
+func TestPG_ListFiltered_ByPolicyAction(t *testing.T) {
+	s := newPGStore(t)
+	allow, warn := "allow", "warn"
+	for _, action := range []*string{&allow, &warn, &warn, nil} {
+		pgMustCreate(t, s, tenantA, &invocation.Invocation{
+			AgentID:      agentID,
+			Mode:         invocation.ModeTransactional,
+			Status:       invocation.StatusSucceeded,
+			PolicyAction: action,
+		})
+	}
+
+	rows, total, err := s.ListFiltered(context.Background(), tenantA,
+		invocation.ListFilter{PolicyAction: &warn, Limit: 10})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if total != 2 || len(rows) != 2 {
+		t.Fatalf("total = %d, rows = %d, want 2 and 2", total, len(rows))
+	}
+	for _, r := range rows {
+		if r.PolicyAction == nil || *r.PolicyAction != "warn" {
+			t.Errorf("row %s has PolicyAction %v, want warn", r.ID, r.PolicyAction)
+		}
+	}
+
+	// SQL equality never matches NULL, so the undecided row is excluded from
+	// every action filter — which is the behaviour we want, stated as a test
+	// so it cannot drift into a coalesce.
+	rows, _, err = s.ListFiltered(context.Background(), tenantA,
+		invocation.ListFilter{PolicyAction: &allow, Limit: 10})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("allow filter returned %d rows, want 1 — a null decision is not an allow", len(rows))
+	}
+}

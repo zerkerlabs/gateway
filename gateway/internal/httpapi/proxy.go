@@ -320,7 +320,7 @@ func (h *Handler) handleTransact(w http.ResponseWriter, r *http.Request) {
 	if h.rateObserver != nil {
 		ratePerMin = h.rateObserver.Observe(tenant, agentID)
 	}
-	proceed, policyWarning := h.enforcePolicy(w, r, policy.RequestContext{
+	proceed, policyWarning, policyDecision := h.enforcePolicy(w, r, policy.RequestContext{
 		TenantID:   tenant,
 		Scopes:     auth.ScopesFromContext(r.Context()),
 		AgentID:    agentID,
@@ -376,6 +376,14 @@ func (h *Handler) handleTransact(w http.ResponseWriter, r *http.Request) {
 		PaymentAmount:  paymentAmount,
 		PaymentPayer:   paymentPayer,
 		PaymentNonce:   paymentNonce,
+	}
+	if policyDecision != nil {
+		// Copied, not referenced: the decision log is written asynchronously
+		// and read with a bounded limit, so a row that pointed at it would
+		// lose its own history as that log rolled over.
+		action := string(policyDecision.Action)
+		inv.PolicyAction = &action
+		inv.PolicyMatchedRule = &policyDecision.MatchedRule
 	}
 	if reasonAuthorization != nil {
 		inv.ReasonRequestDigest = &reasonAuthorization.RequestDigest
@@ -684,7 +692,7 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 	if h.rateObserver != nil {
 		ratePerMin = h.rateObserver.Observe(tenant, agentID)
 	}
-	proceed, policyWarning := h.enforcePolicy(w, r, policy.RequestContext{
+	proceed, policyWarning, policyDecision := h.enforcePolicy(w, r, policy.RequestContext{
 		TenantID:   tenant,
 		Scopes:     auth.ScopesFromContext(r.Context()),
 		AgentID:    agentID,
@@ -738,6 +746,12 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 		PaymentAmount:  paymentAmount,
 		PaymentPayer:   paymentPayer,
 		PaymentNonce:   paymentNonce,
+	}
+	if policyDecision != nil {
+		// Same copy-not-reference reasoning as the transactional path above.
+		action := string(policyDecision.Action)
+		inv.PolicyAction = &action
+		inv.PolicyMatchedRule = &policyDecision.MatchedRule
 	}
 	if model != "" {
 		inv.Model = &model

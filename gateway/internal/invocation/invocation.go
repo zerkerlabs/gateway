@@ -113,6 +113,22 @@ type Invocation struct {
 	PaymentPayer   *string     // payer address from the verified x402 authorization; nil for unpriced routes (spec 0005)
 	PaymentNonce   *string     // x402 authorization nonce (best-effort replay tracking); nil for unpriced routes (spec 0005)
 
+	// PolicyAction and PolicyMatchedRule record what the policy engine decided
+	// about this call, copied from the Decision that enforcePolicy made
+	// immediately before this record was created (spec 0009).
+	//
+	// Both nil means no policy decision applies — the tenant has no policy
+	// document, or the surface is not wired. That is a different fact from
+	// "allowed", and reading nil as allow would report every pre-policy
+	// invocation in the table as having passed a check that never ran.
+	//
+	// PolicyAction is only ever "allow" or "warn". A deny returns from
+	// enforcePolicy before Create is reached, so a denied call never becomes an
+	// invocation at all; the absence of denials here is not evidence that
+	// nothing is being denied.
+	PolicyAction      *string
+	PolicyMatchedRule *string // 1-based rule position, or empty when the default applied
+
 	// Reason commitments are set only for independently verified, exact-match
 	// MCP tools/call envelopes. ReasonRequestDigest is tenant-unique and acts as
 	// the durable one-shot replay reservation.
@@ -178,6 +194,7 @@ type ListFilter struct {
 	Mode             *Mode             // nil = all modes
 	ErrorClass       *ErrorClass       // nil = include all error classes (including NULL rows)
 	Model            string            // empty = all models
+	PolicyAction     *string           // nil = all policy actions (including rows with none)
 	SettlementStatus *SettlementStatus // nil = all settlement statuses (including NULL rows)
 	Since            *time.Time        // nil = no lower bound on created_at
 	Until            *time.Time        // nil = no upper bound on created_at

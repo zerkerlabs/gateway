@@ -34,6 +34,12 @@ const policyWarningHeader = "X-Zerker-Policy-Warning"
 // response is otherwise ready to send (spec 0009 §Surface: "forwarded ...
 // flagged").
 //
+// The third return is the Decision itself, so the caller can record on the
+// invocation what policy decided about it. It is nil exactly when no decision
+// was made — no policy store wired, or the tenant has no policy document — so
+// the caller can distinguish that from a decision that came out as allow.
+// It is also nil on the deny and error paths, which never reach an invocation.
+//
 // A tenant with no policy document configured (Get returns ErrNotFound) is a
 // no-op: proceed=true, warnHeader="" — the call behaves exactly as it did
 // before this surface existed (spec 0009 "No policy configured = no behavior
@@ -46,19 +52,19 @@ const policyWarningHeader = "X-Zerker-Policy-Warning"
 // store-read failure in this handler already is (see the agent store Get in
 // handleTransact/handleStream): logged and a 500, never guessed as a coarse
 // policy denial.
-func (h *Handler) enforcePolicy(w http.ResponseWriter, r *http.Request, reqCtx policy.RequestContext) (proceed bool, warnHeader string) {
+func (h *Handler) enforcePolicy(w http.ResponseWriter, r *http.Request, reqCtx policy.RequestContext) (proceed bool, warnHeader string, decision *policy.Decision) {
 	if h.policyStore == nil {
-		return true, ""
+		return true, "", nil
 	}
 
 	p, err := h.policyStore.Get(r.Context(), reqCtx.TenantID)
 	if err != nil {
 		if errors.Is(err, policy.ErrNotFound) {
-			return true, ""
+			return true, "", nil
 		}
 		h.logger.Error("policy enforcement: load policy", "tenant", reqCtx.TenantID, "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		return false, ""
+		return false, "", nil
 	}
 
 	d := h.evaluator.Evaluate(p, reqCtx)
@@ -82,11 +88,11 @@ func (h *Handler) enforcePolicy(w http.ResponseWriter, r *http.Request, reqCtx p
 		// conditions. d.Reason is already coarse — a rule's 1-based position
 		// and a fixed explanation, never rule content (policy.Decision doc).
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "denied by policy", "reason": d.Reason})
-		return false, ""
+		return false, "", nil
 	case policy.ActionWarn:
-		return true, d.Reason
+		return true, d.Reason, &d
 	default: // policy.ActionAllow
-		return true, ""
+		return true, "", &d
 	}
 }
 

@@ -725,6 +725,14 @@ paths:
         - name: settlement
           in: query
           schema: { type: string, enum: [pending, settled, settlement_failed, settled_upstream_failed] }
+        - name: policy
+          in: query
+          description: >-
+            Filter by the policy decision recorded on the invocation. Only
+            `allow` and `warn` are accepted — a policy deny returns before the
+            invocation is created, so no invocation can carry one. Rows with no
+            decision (no policy configured) match neither value.
+          schema: { type: string, enum: [allow, warn] }
         - name: since
           in: query
           description: RFC 3339 timestamp; inclusive lower bound on `created_at`.
@@ -1403,6 +1411,8 @@ components:
         - payment_amount
         - payment_payer
         - payment_nonce
+        - policy_action
+        - policy_matched_rule
         - upstream_status
         - latency_ms
         - ttft_ms
@@ -1431,6 +1441,26 @@ components:
         payment_amount: { type: string, nullable: true }
         payment_payer: { type: string, nullable: true }
         payment_nonce: { type: string, nullable: true }
+        policy_action:
+          type: string
+          nullable: true
+          enum: [allow, warn]
+          description: >-
+            What the policy engine decided about this call, recorded at the
+            moment the decision was made (spec 0009). Null means no decision
+            applied — the tenant has no policy document — which is a different
+            fact from `allow` and must not be read as one.
+
+            `deny` never appears: a denied call returns before the invocation
+            is created, so the absence of denials here is not evidence that
+            nothing is being denied. Read the policy decision log for those.
+        policy_matched_rule:
+          type: string
+          nullable: true
+          description: >-
+            The 1-based position of the rule that produced `policy_action`, or
+            an empty string when the tenant's configured default applied
+            because no rule matched. Null whenever `policy_action` is null.
         settlement:
           allOf:
             - $ref: "#/components/schemas/InvocationSettlement"
@@ -1470,6 +1500,8 @@ components:
         - payment_amount
         - payment_payer
         - payment_nonce
+        - policy_action
+        - policy_matched_rule
         - upstream_status
         - latency_ms
         - ttft_ms
@@ -1499,6 +1531,26 @@ components:
         payment_amount: { type: string, nullable: true }
         payment_payer: { type: string, nullable: true }
         payment_nonce: { type: string, nullable: true }
+        policy_action:
+          type: string
+          nullable: true
+          enum: [allow, warn]
+          description: >-
+            What the policy engine decided about this call, recorded at the
+            moment the decision was made (spec 0009). Null means no decision
+            applied — the tenant has no policy document — which is a different
+            fact from `allow` and must not be read as one.
+
+            `deny` never appears: a denied call returns before the invocation
+            is created, so the absence of denials here is not evidence that
+            nothing is being denied. Read the policy decision log for those.
+        policy_matched_rule:
+          type: string
+          nullable: true
+          description: >-
+            The 1-based position of the rule that produced `policy_action`, or
+            an empty string when the tenant's configured default applied
+            because no rule matched. Null whenever `policy_action` is null.
         settlement:
           allOf:
             - $ref: "#/components/schemas/InvocationSettlement"
