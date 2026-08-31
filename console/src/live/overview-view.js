@@ -108,8 +108,12 @@ async function loadOverview() {
   }
 
   state.fetchedAt = new Date().toISOString();
-  state.totalCalls = total.status === 'fulfilled' ? { phase: 'ready', total: total.value?.total ?? 0 } : { phase: 'error', total: null };
-  state.failedCalls = failed.status === 'fulfilled' ? { phase: 'ready', total: failed.value?.total ?? 0 } : { phase: 'error', total: null };
+  state.totalCalls = total.status === 'fulfilled' && Number.isFinite(total.value?.total)
+    ? { phase: 'ready', total: total.value.total }
+    : { phase: 'error', total: null };
+  state.failedCalls = failed.status === 'fulfilled' && Number.isFinite(failed.value?.total)
+    ? { phase: 'ready', total: failed.value.total }
+    : { phase: 'error', total: null };
   state.sample = sample.status === 'fulfilled'
     ? { phase: 'ready', items: (sample.value?.data || []).map(normalizeInvocation) }
     : { phase: 'error', items: [] };
