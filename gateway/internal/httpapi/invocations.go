@@ -74,6 +74,8 @@ type invocationListItem struct {
 	PaymentAmount  *string               `json:"payment_amount"`
 	PaymentPayer   *string               `json:"payment_payer"`
 	PaymentNonce   *string               `json:"payment_nonce"`
+	PolicyAction   *string               `json:"policy_action"`
+	PolicyRule     *string               `json:"policy_matched_rule"`
 	Settlement     *invocationSettlement `json:"settlement,omitempty"`
 	UpstreamStatus *int                  `json:"upstream_status"`
 	LatencyMS      *int64                `json:"latency_ms"`
@@ -107,6 +109,8 @@ func toInvocationListItem(inv *invocation.Invocation) invocationListItem {
 		Model:          inv.Model,
 		MCPMethod:      inv.MCPMethod,
 		MCPTool:        inv.MCPTool,
+		PolicyAction:   inv.PolicyAction,
+		PolicyRule:     inv.PolicyMatchedRule,
 		PaymentNetwork: inv.PaymentNetwork,
 		PaymentAsset:   inv.PaymentAsset,
 		PaymentAmount:  inv.PaymentAmount,
@@ -219,12 +223,30 @@ func (h *Handler) handleListInvocations(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// `policy` selects on the decision recorded at the time of the call. Only
+	// allow and warn are accepted, and that is not an oversight: a policy deny
+	// returns before the invocation row is created, so no row can ever carry
+	// it. Accepting `deny` here would return an empty page that reads as
+	// "nothing was denied" rather than "denials are not in this table".
+	var policyAction *string
+	if pv := q.Get("policy"); pv != "" {
+		switch pv {
+		case "allow", "warn":
+			policyAction = &pv
+		default:
+			writeError(w, http.StatusBadRequest,
+				"invalid policy: must be allow or warn (a denied request creates no invocation)")
+			return
+		}
+	}
+
 	filter := invocation.ListFilter{
 		AgentID:          q.Get("agent_id"),
 		Status:           status,
 		Mode:             mode,
 		ErrorClass:       errorClass,
 		Model:            q.Get("model"),
+		PolicyAction:     policyAction,
 		SettlementStatus: settlementStatus,
 		Since:            since,
 		Until:            until,
@@ -270,6 +292,8 @@ type invocationDetailResponse struct {
 	PaymentAmount  *string               `json:"payment_amount"`
 	PaymentPayer   *string               `json:"payment_payer"`
 	PaymentNonce   *string               `json:"payment_nonce"`
+	PolicyAction   *string               `json:"policy_action"`
+	PolicyRule     *string               `json:"policy_matched_rule"`
 	Settlement     *invocationSettlement `json:"settlement,omitempty"`
 	UpstreamStatus *int                  `json:"upstream_status"`
 	LatencyMS      *int64                `json:"latency_ms"`
@@ -335,6 +359,8 @@ func toInvocationDetailResponse(inv *invocation.Invocation, hasReadBody bool) in
 		Model:          inv.Model,
 		MCPMethod:      inv.MCPMethod,
 		MCPTool:        inv.MCPTool,
+		PolicyAction:   inv.PolicyAction,
+		PolicyRule:     inv.PolicyMatchedRule,
 		PaymentNetwork: inv.PaymentNetwork,
 		PaymentAsset:   inv.PaymentAsset,
 		PaymentAmount:  inv.PaymentAmount,

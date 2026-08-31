@@ -169,6 +169,13 @@ func (s *MemoryStore) ListFiltered(ctx context.Context, tenantID string, filter 
 				continue
 			}
 		}
+		if filter.PolicyAction != nil {
+			// A row with no decision matches no policy filter — nil is "no
+			// policy applied", not a wildcard and not "allow".
+			if rec.PolicyAction == nil || *rec.PolicyAction != *filter.PolicyAction {
+				continue
+			}
+		}
 		if filter.SettlementStatus != nil {
 			if rec.SettlementStatus == nil || *rec.SettlementStatus != *filter.SettlementStatus {
 				continue
