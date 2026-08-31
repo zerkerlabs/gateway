@@ -138,6 +138,9 @@ func (c *Client) ObserveAll(ctx context.Context, report discovery.Report) (Resul
 			continue
 		}
 		if collision, ok := byName[found.Name]; ok {
+			if existingHostID, ok := collision.Metadata["zerker_host_id"].(string); ok && existingHostID != "" && existingHostID != report.Host.HostID {
+				return Result{}, fmt.Errorf("agent %q is already enrolled from another machine (id %s); rename this agent or enroll it from that machine", found.Name, collision.ID)
+			}
 			return Result{}, fmt.Errorf("agent %q already exists without discovery key (id %s); review it before importing", found.Name, collision.ID)
 		}
 	}
@@ -146,7 +149,7 @@ func (c *Client) ObserveAll(ctx context.Context, report discovery.Report) (Resul
 		if _, ok := byKey[found.Key]; ok {
 			continue
 		}
-		if err := c.create(ctx, found); err != nil {
+		if err := c.create(ctx, found, report.Host); err != nil {
 			return result, fmt.Errorf("observe %s: %w", found.Name, err)
 		}
 		result.Added = append(result.Added, found.Name)
@@ -353,7 +356,22 @@ func (c *Client) summaryAt(ctx context.Context, path string) (AgentToday, error)
 	}, nil
 }
 
-func (c *Client) create(ctx context.Context, found discovery.Agent) error {
+func (c *Client) create(ctx context.Context, found discovery.Agent, host discovery.Host) error {
+	metadata := map[string]any{
+		"zerker_discovery_key":    found.Key,
+		"zerker_discovery_schema": discovery.Schema,
+		"zerker_onboarding_mode":  "observe",
+		"zerker_exposure":         "internal",
+		"zerker_identity_status":  "discovered",
+		"zerker_host_id":          host.HostID,
+		"provider":                found.Provider,
+		"installed":               found.Installed,
+		"configured":              found.Configured,
+		"mcp_server_count":        found.MCPServerCount,
+	}
+	if host.Hostname != "" {
+		metadata["zerker_hostname"] = host.Hostname
+	}
 	payload := map[string]any{
 		"name":          found.Name,
 		"description":   fmt.Sprintf("Local %s agent enrolled through Zerker discovery.", found.Name),
@@ -361,17 +379,7 @@ func (c *Client) create(ctx context.Context, found discovery.Agent) error {
 		"capture_body":  false,
 		"emit_receipts": false,
 		"protocol":      "http",
-		"metadata": map[string]any{
-			"zerker_discovery_key":    found.Key,
-			"zerker_discovery_schema": discovery.Schema,
-			"zerker_onboarding_mode":  "observe",
-			"zerker_exposure":         "internal",
-			"zerker_identity_status":  "discovered",
-			"provider":                found.Provider,
-			"installed":               found.Installed,
-			"configured":              found.Configured,
-			"mcp_server_count":        found.MCPServerCount,
-		},
+		"metadata":      metadata,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

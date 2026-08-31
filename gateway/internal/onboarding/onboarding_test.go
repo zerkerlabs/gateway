@@ -80,10 +80,14 @@ func TestObserveAllUsesPrivateFailSafeDefaultsAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
-	report := discovery.Report{Schema: discovery.Schema, Agents: []discovery.Agent{
-		{Key: "claude-code", Name: "Claude Code", Provider: "Anthropic", Installed: true, Configured: true},
-		{Key: "hermes", Name: "Hermes", Provider: "Nous Research", Installed: true, Configured: true},
-	}}
+	report := discovery.Report{
+		Schema: discovery.Schema,
+		Host:   discovery.Host{HostID: "host-abc123"},
+		Agents: []discovery.Agent{
+			{Key: "claude-code", Name: "Claude Code", Provider: "Anthropic", Installed: true, Configured: true},
+			{Key: "hermes", Name: "Hermes", Provider: "Nous Research", Installed: true, Configured: true},
+		},
+	}
 
 	first, err := client.ObserveAll(context.Background(), report)
 	if err != nil {
@@ -93,6 +97,8 @@ func TestObserveAllUsesPrivateFailSafeDefaultsAndIsIdempotent(t *testing.T) {
 		t.Fatalf("first result = %#v", first)
 	}
 
+	// Re-running observe-all on the same machine must not be broken by the
+	// addition of the host field: the discovery-key lookup still dedupes.
 	second, err := client.ObserveAll(context.Background(), report)
 	if err != nil {
 		t.Fatalf("second ObserveAll() error = %v", err)
@@ -102,6 +108,52 @@ func TestObserveAllUsesPrivateFailSafeDefaultsAndIsIdempotent(t *testing.T) {
 	}
 	if len(created) != 2 {
 		t.Fatalf("created %d agents, want exactly 2", len(created))
+	}
+	for _, agent := range created {
+		if agent.Metadata["zerker_host_id"] != "host-abc123" {
+			t.Errorf("%s zerker_host_id = %#v, want %q", agent.Name, agent.Metadata["zerker_host_id"], "host-abc123")
+		}
+		if _, ok := agent.Metadata["zerker_hostname"]; ok {
+			t.Errorf("%s metadata carries zerker_hostname, want it omitted when hostname is empty", agent.Name)
+		}
+	}
+}
+
+func TestCreateWritesHostnameMetadataWhenPresent(t *testing.T) {
+	t.Parallel()
+
+	var created map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(listResponse{})
+		case http.MethodPost:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode create: %v", err)
+			}
+			created, _ = body["metadata"].(map[string]any)
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	report := discovery.Report{
+		Host:   discovery.Host{HostID: "host-abc123", Hostname: "alexs-macbook-pro.local"},
+		Agents: []discovery.Agent{{Key: "claude-code", Name: "Claude Code"}},
+	}
+	if _, err := client.ObserveAll(context.Background(), report); err != nil {
+		t.Fatalf("ObserveAll() error = %v", err)
+	}
+	if created["zerker_host_id"] != "host-abc123" {
+		t.Errorf("zerker_host_id = %#v, want %q", created["zerker_host_id"], "host-abc123")
+	}
+	if created["zerker_hostname"] != "alexs-macbook-pro.local" {
+		t.Errorf("zerker_hostname = %#v, want %q", created["zerker_hostname"], "alexs-macbook-pro.local")
 	}
 }
 
@@ -258,6 +310,40 @@ func TestObserveAllPreflightsNameConflictsBeforeWriting(t *testing.T) {
 	}})
 	if err == nil || !strings.Contains(err.Error(), "review it before importing") {
 		t.Fatalf("ObserveAll() error = %v, want review conflict", err)
+	}
+	if posts != 0 {
+		t.Fatalf("POST count = %d, want no partial writes", posts)
+	}
+}
+
+func TestObserveAllNamesAnotherMachineWhenCollisionHasADifferentHostID(t *testing.T) {
+	t.Parallel()
+
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts++
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(listResponse{Agents: []listedAgent{{
+			ID:       "agt_existing",
+			Name:     "Hermes",
+			Metadata: map[string]any{"zerker_host_id": "host-other-machine"},
+		}}})
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	_, err = client.ObserveAll(context.Background(), discovery.Report{
+		Host:   discovery.Host{HostID: "host-this-machine"},
+		Agents: []discovery.Agent{{Key: "hermes", Name: "Hermes"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "already enrolled from another machine") {
+		t.Fatalf("ObserveAll() error = %v, want another-machine conflict", err)
 	}
 	if posts != 0 {
 		t.Fatalf("POST count = %d, want no partial writes", posts)

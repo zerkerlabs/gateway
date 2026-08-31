@@ -17,20 +17,21 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr, func() (discovery.Report, error) {
-		return discovery.Scan(discovery.Options{})
+	if err := run(os.Args[1:], os.Stdout, os.Stderr, func(includeHostname bool) (discovery.Report, error) {
+		return discovery.Scan(discovery.Options{IncludeHostname: includeHostname})
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "zerker-onboard: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string, stdout, stderr io.Writer, scan func() (discovery.Report, error)) error {
+func run(args []string, stdout, stderr io.Writer, scan func(includeHostname bool) (discovery.Report, error)) error {
 	flags := flag.NewFlagSet("zerker-onboard", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	jsonOutput := flags.Bool("json", false, "print stable machine-readable output")
 	observeAll := flags.Bool("observe-all", false, "enroll every discovered agent with internal observe-only defaults")
 	today := flags.Bool("today", false, "show the calm internal activity summary for the last 24 hours")
+	includeHostname := flags.Bool("include-hostname", false, "include this machine's readable hostname in the report; a hostname often contains a person's name, so this is off by default")
 	gatewayURL := flags.String("gateway", "http://127.0.0.1:8080", "Zerker Gateway URL")
 	tokenFile := flags.String("token-file", "/tmp/zerker-dev-token", "file containing the Gateway bearer token")
 	if err := flags.Parse(args); err != nil {
@@ -58,7 +59,7 @@ func run(args []string, stdout, stderr io.Writer, scan func() (discovery.Report,
 		return printToday(stdout, result)
 	}
 
-	report, err := scan()
+	report, err := scan(*includeHostname)
 	if err != nil {
 		return fmt.Errorf("scan local agents: %w", err)
 	}

@@ -33,6 +33,9 @@ Output uses `zerker.agent-discovery.v1`:
 ```json
 {
   "schema": "zerker.agent-discovery.v1",
+  "host": {
+    "host_id": "9f2c1e0b7a4d6f38c02e1b9a7d4f6c1e0b7a4d6f38c02e1b9a7d4f6c1e0b7a4d"
+  },
   "agents": [
     {
       "key": "claude-code",
@@ -50,6 +53,12 @@ Output uses `zerker.agent-discovery.v1`:
   ]
 }
 ```
+
+`host.host_id` is a SHA-256 digest, never a raw identifier. It is taken over the most stable value the platform exposes — `/etc/machine-id` (or `/var/lib/dbus/machine-id`) on Linux, the `IOPlatformUUID` hardware UUID on macOS — so the same machine produces the same id across runs, and across a wiped or restored home directory. Where the platform exposes neither, the digest falls back to 256 random bits generated once and persisted under `~/.zerker/host-id`.
+
+The hostname is deliberately not a source: it is low-entropy and follows predictable patterns, so a digest of it could be reversed by hashing a dictionary of plausible names. Every source above carries at least 122 bits of entropy, which puts that attack out of reach. What `host_id` discloses is therefore *whether two enrollments came from the same machine*, and nothing else about it — it is not a secret, and it is not an attestation that the machine is what it claims to be.
+
+The readable hostname is omitted by default; pass `--include-hostname` to add `host.hostname` to the report. A hostname often contains a person's name (`alexs-macbook-pro.local`), so only opt in when you intend to identify the machine, not just distinguish it.
 
 This version reports only discovery evidence. It does not claim a cryptographic identity binding or authority relationship.
 
@@ -84,6 +93,8 @@ It registers each agent with these defaults:
 - no body capture;
 - no payment;
 - no external publication.
+
+Each enrollment also records the machine it came from: `zerker_host_id` (always) and `zerker_hostname` (only with `--include-hostname`). This is what lets two people enrolling the same tool from two different laptops land as two distinct agents instead of colliding on name. If a name conflict is detected against an agent enrolled from a different machine, the error says so instead of asking the operator to review a record on a machine they cannot see.
 
 Plain HTTP is accepted only for numeric loopback addresses. The client refuses redirects so a bearer token cannot be forwarded elsewhere.
 
