@@ -2,7 +2,7 @@
 // server-side, and looks a single invocation up by id through
 // GET /v1/invocations/{id} for the detail view.
 //
-// Two facts this view must not blur:
+// Three facts this view must not blur:
 //
 //   traffic shown here — an invocation record is only created once a request
 //                        clears policy and payment. A denial or an unpaid x402
@@ -15,11 +15,14 @@
 //                        retry would succeed. Any retryability shown here is
 //                        this console's own reading of the error class, and
 //                        is labelled as such.
-//
-// There is no Policy column and no policy filter: invocations carry no policy
-// field, policy decisions are a separate record with no invocation id, and
-// there is no join key between them. Matching on agent plus a nearby
-// timestamp would be a guess rendered as a fact.
+//   the Policy column   — `policy_action` is only ever `allow` or `warn`: a
+//                        denial returns before the invocation record is
+//                        created, so `deny` can never appear here and the
+//                        filter never offers it. A null `policy_action` means
+//                        the tenant has no policy configured, which is a
+//                        different fact from `allow` and is rendered as its
+//                        own "No policy configured" state rather than folded
+//                        into allow.
 //
 // This module wires its own document-level listeners and kicks off its own
 // first load, guarded by `typeof document`, because unlike the agent catalog
@@ -46,13 +49,18 @@ const LOOKUP_DEBOUNCE_MS = 400;
 const ERROR_CLASSES = ['timeout', 'upstream_5xx', 'upstream_4xx', 'ssrf_blocked', 'credential_error', 'cancelled', 'internal'];
 const SETTLEMENT_STATUSES = ['pending', 'settled', 'settlement_failed', 'settled_upstream_failed'];
 
+// `deny` is deliberately absent: a policy denial returns before the
+// invocation is created, so it can never be the value on a row and offering
+// it as a filter option would promise a result that can never come back.
+const POLICY_ACTIONS = ['allow', 'warn'];
+
 // `inv_<uuidv7>`. Loose on purpose: this only decides whether the search box
 // behaves as a direct id lookup, not whether the id is well-formed — the
 // gateway is the one system allowed to say an id doesn't exist.
 const ID_PATTERN = /^inv_\S+$/i;
 
 function defaultFilters() {
-  return { status: 'all', mode: 'all', agentId: 'all', errorClass: 'all', settlement: 'all', range: 'all' };
+  return { status: 'all', mode: 'all', agentId: 'all', errorClass: 'all', settlement: 'all', policy: 'all', range: 'all' };
 }
 
 const state = {
@@ -93,6 +101,13 @@ export function normalizeInvocation(raw) {
     mode: raw.mode,
     status: raw.status,
     errorClass: raw.error_class || null,
+    // Null means the tenant has no policy configured, not "allowed" — see the
+    // file header. `deny` is impossible: a denied call never reaches this
+    // record. policyMatchedRule uses `??` rather than `||` because `''` (the
+    // tenant default matched, no explicit rule) is a meaningful, distinct
+    // value from null and must survive.
+    policyAction: raw.policy_action ?? null,
+    policyMatchedRule: raw.policy_matched_rule ?? null,
     model: raw.model || null,
     mcpMethod: raw.mcp_method || null,
     mcpTool: raw.mcp_tool || null,
@@ -136,6 +151,7 @@ export function buildQueryParams(filters, limit, offset) {
   if (filters.agentId !== 'all') params.agent_id = filters.agentId;
   if (filters.errorClass !== 'all') params.error_class = filters.errorClass;
   if (filters.settlement !== 'all') params.settlement = filters.settlement;
+  if (filters.policy !== 'all') params.policy = filters.policy;
   const since = rangeSince(filters.range);
   if (since) params.since = since;
   return params;
@@ -210,6 +226,32 @@ function settlementStatusLabel(value) {
   return SETTLEMENT_LABELS[value] || value;
 }
 
+const POLICY_ACTION_LABELS = { allow: 'Allow', warn: 'Warn' };
+
+// Distinct from UNKNOWN on purpose — UNKNOWN means "the gateway didn't tell
+// us"; a null policy_action is the gateway telling us plainly that this
+// tenant has no policy document, which is a known fact and not an absence of
+// one. Collapsing it into "Allow" would tell an operator a call was vetted
+// and cleared when in fact nothing ever evaluated it.
+export function policyActionLabel(action) {
+  if (action === null) return 'No policy configured';
+  return POLICY_ACTION_LABELS[action] || action;
+}
+
+// `allow` and `warn` reuse the shared .status colour classes; a null action
+// gets the same neutral "empty" treatment as an unrecognized status chip
+// elsewhere in this file, never the green used for an actual allow.
+function policyChip(action) {
+  if (action === null) return `<span class="status empty">${esc(policyActionLabel(action))}</span>`;
+  return `<span class="status ${esc(action)}">${esc(policyActionLabel(action))}</span>`;
+}
+
+export function policyMatchLabel(item) {
+  if (item.policyAction === null) return 'Not applicable';
+  if (item.policyMatchedRule === '') return 'Tenant default · no rule matched';
+  return item.policyMatchedRule ? `Rule ${item.policyMatchedRule}` : UNKNOWN;
+}
+
 function sizeLabel(n) {
   return Number.isFinite(n) ? `${count(n)} B` : UNKNOWN;
 }
@@ -246,14 +288,20 @@ export function failureDiagnosis(item) {
   };
 }
 
-// The stages an invocation record can actually evidence: whether a payment
-// gate ran, whether settlement resolved, what the upstream call did, and the
-// terminal result. There is no Identity or Policy stage here — unlike the
-// fixture this replaces, an invocation carries no policy field to report one
-// from.
+// The stages an invocation record can actually evidence: what policy decided,
+// whether a payment gate ran, whether settlement resolved, what the upstream
+// call did, and the terminal result. There is no Identity stage here — an
+// invocation carries no identity field to report one from. The Policy stage
+// uses the real policy_action rather than assuming allow; a deny can never
+// appear because a denied call never becomes an invocation.
 export function deriveTrace(item) {
   const paymentPresent = Boolean(item.paymentAmount);
   const stages = [
+    {
+      label: 'Policy',
+      state: item.policyAction === 'warn' ? 'warning' : item.policyAction === 'allow' ? 'completed' : 'unknown',
+      detail: item.policyAction === null ? 'No policy configured for this tenant' : `${policyActionLabel(item.policyAction)} · ${policyMatchLabel(item)}`,
+    },
     {
       label: 'Payment gate',
       state: paymentPresent ? 'completed' : 'skipped',
@@ -313,6 +361,7 @@ export function row(item, names) {
       </span>
       <span data-label="Mode"><strong>${modeLabel(item.mode)}</strong></span>
       <span data-label="Result">${statusChip(item.status)}</span>
+      <span data-label="Policy">${policyChip(item.policyAction)}</span>
       <span data-label="Latency"><strong>${duration(item.latencyMs)}</strong></span>
       <span data-label="Sizes"><small>Req ${sizeLabel(item.reqSize)}</small><small>Resp ${sizeLabel(item.respSize)}</small></span>
       <span data-label="Error class">${item.errorClass ? `<span class="status failed">${esc(errorClassLabel(item.errorClass))}</span>` : '<strong>No error</strong>'}</span>
@@ -379,6 +428,12 @@ function filterBar() {
       [['all', 'All'], ...SETTLEMENT_STATUSES.map((v) => [v, settlementStatusLabel(v)])],
       f.settlement
     )}</label>
+    <label><span>Policy</span>${sel(
+      'policy',
+      [['all', 'All'], ...POLICY_ACTIONS.map((v) => [v, policyActionLabel(v)])],
+      f.policy
+    )}<small>Denied calls never create an invocation, so there is no "Deny" option here — filter the policy decision
+      log instead.</small></label>
     <label><span>Time range</span>${sel(
       'range',
       [
@@ -493,6 +548,8 @@ function detailPanel() {
       ['Agent', agentDisplay],
       ['Mode', modeLabel(item.mode)],
       ['Result', item.status],
+      ['Policy decision', policyActionLabel(item.policyAction)],
+      ['Policy matched rule', policyMatchLabel(item)],
       ['Model', item.model || 'Not supplied'],
       ['MCP method', item.mcpMethod || 'Not applicable'],
       ['MCP tool', item.mcpTool || 'Not applicable'],
@@ -556,7 +613,7 @@ export function liveInvocationsView() {
     ? ''
     : rows.length
       ? `${resultsHeading(rows)}
-         <div class="catalog-columns" aria-hidden="true"><span>Time</span><span>Invocation</span><span>Agent / operation</span><span>Mode</span><span>Result</span><span>Latency</span><span>Sizes</span><span>Error class</span><span>Action</span></div>
+         <div class="catalog-columns" aria-hidden="true"><span>Time</span><span>Invocation</span><span>Agent / operation</span><span>Mode</span><span>Result</span><span>Policy</span><span>Latency</span><span>Sizes</span><span>Error class</span><span>Action</span></div>
          <section class="catalog-list live-catalog">${rows.map((item) => row(item, names)).join('')}</section>
          ${paginationBar()}`
       : `<div class="catalog-empty"><p class="kicker">${state.invocations.length ? 'Filtered page' : 'Live tenant'}</p>

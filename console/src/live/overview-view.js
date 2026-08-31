@@ -341,7 +341,7 @@ function renderRuntimePanel(model) {
 }
 
 function columnsHeader() {
-  const columns = ['Time', 'Invocation', 'Agent / operation', 'Mode', 'Result', 'Latency', 'Sizes', 'Error class', 'Action'];
+  const columns = ['Time', 'Invocation', 'Agent / operation', 'Mode', 'Result', 'Policy', 'Latency', 'Sizes', 'Error class', 'Action'];
   return `<div class="catalog-columns" aria-hidden="true">${columns.map((c) => `<span>${esc(c)}</span>`).join('')}</div>`;
 }
 
