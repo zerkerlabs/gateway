@@ -315,10 +315,10 @@ test('an invalid window is refused in the UI, with no data rendered', () => {
   });
 });
 
-test('a 429 surfaces the wait instead of an empty chart', () => {
-  withState({ status: 'rate_limited', error: "This endpoint carries its own, tighter rate limit and it was just hit. Its Retry-After is capped at 60 seconds — wait a moment, then retry." }, (html) => {
+test('a 429 surfaces the wait instead of an empty chart, without claiming to know the real Retry-After', () => {
+  withState({ status: 'rate_limited', error: "This endpoint carries its own, tighter rate limit and it was just hit. The console cannot read this response's actual Retry-After value; 60 seconds is the endpoint's worst case, not necessarily the real wait. Give it a moment, then retry." }, (html) => {
     assert.match(html, /rate limit/);
-    assert.match(html, /60 seconds/);
+    assert.match(html, /worst case/);
     assert.match(html, /data-live-analytics-action="retry"/);
   });
 });

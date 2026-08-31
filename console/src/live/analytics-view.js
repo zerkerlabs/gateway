@@ -200,7 +200,12 @@ async function loadAnalytics() {
     if (err instanceof ApiError && err.status === 401) return unauthenticated();
     if (err instanceof ApiError && err.status === 429) {
       state.status = 'rate_limited';
-      state.error = "This endpoint carries its own, tighter rate limit and it was just hit. Its Retry-After is capped at 60 seconds — wait a moment, then retry.";
+      // The response carries a real Retry-After header, but the shared client
+      // (api.js) does not expose response headers to callers, so this view has
+      // no way to read the actual wait it names. 60 seconds is the endpoint's
+      // documented worst case, not the true value for this response — say so
+      // rather than presenting a guess as fact.
+      state.error = "This endpoint carries its own, tighter rate limit and it was just hit. The console cannot read this response's actual Retry-After value; 60 seconds is the endpoint's worst case, not necessarily the real wait. Give it a moment, then retry.";
       return;
     }
     state.status = 'error';
