@@ -45,10 +45,11 @@ const (
 	groupAuthorization = "Action authorization"
 	groupSecrets       = "Secrets & KMS" //nolint:gosec // G101 false positive: a UI section label, not a credential value
 	groupOnboarding    = "Local onboarding"
+	groupReceipts      = "Trust receipts (Treeship)"
 )
 
 // Groups is the render order for the reference's sections.
-var Groups = []string{groupServer, groupStorage, groupAuth, groupAuthorization, groupSecrets, groupOnboarding}
+var Groups = []string{groupServer, groupStorage, groupAuth, groupAuthorization, groupSecrets, groupOnboarding, groupReceipts}
 
 // Reference is the canonical list of environment variables the gateway honors.
 // It reflects existing behavior only; no setting is invented here.
@@ -128,5 +129,24 @@ var Reference = []Var{
 		Description: "Bearer token used by `zerker-onboard --observe-all`. When unset, " +
 			"the command reads the file selected by `--token-file`, which defaults to " +
 			"`/tmp/zerker-dev-token`. The token is never printed.",
+	},
+	{
+		Name:  "ZERKER_TREESHIP_BIN",
+		Group: groupReceipts,
+		Description: "Absolute path to the `treeship` binary. Setting it enables trust " +
+			"receipts: after each proxied invocation for an agent with receipts enabled, " +
+			"the gateway signs a Treeship `action.v1` artifact binding that invocation's " +
+			"ID, status and shape. Unset (the default) disables receipts entirely — no " +
+			"attestation is attempted and proxy behavior is unchanged. Emission is " +
+			"fail-open and off the request path, so an unreachable or broken binary " +
+			"never affects a proxied call.",
+	},
+	{
+		Name:       "ZERKER_TREESHIP_ACTOR",
+		Group:      groupReceipts,
+		Default:    "agent://zerker-gateway",
+		HasDefault: true,
+		Description: "Actor URI recorded as the signer of gateway trust receipts. Only " +
+			"read when ZERKER_TREESHIP_BIN is set.",
 	},
 }
