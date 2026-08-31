@@ -3,7 +3,9 @@
 package discovery
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,8 +15,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Schema identifies the stable machine-readable discovery contract.
@@ -69,10 +73,17 @@ type Options struct {
 	// false by default because a hostname is personal information.
 	IncludeHostname bool
 
-	// HostIDPath overrides where the persisted per-machine identifier is
-	// stored. Tests set this for isolation; production leaves it empty to
-	// use "<HomeDir>/.zerker/host-id".
+	// HostIDPath overrides where the fallback per-machine identifier is
+	// persisted. Tests set this for isolation; production leaves it empty to
+	// use "<HomeDir>/.zerker/host-id". It is only consulted on platforms that
+	// expose no stable machine identifier of their own.
 	HostIDPath string
+
+	// MachineID resolves the stable platform machine identifier that host_id
+	// is derived from. Tests set this for determinism; production leaves it
+	// nil to read the real platform value. Returning an empty string selects
+	// the persisted-random fallback.
+	MachineID func() string
 }
 
 type candidate struct {
@@ -121,7 +132,11 @@ func Scan(opts Options) (Report, error) {
 	if hostIDPath == "" {
 		hostIDPath = filepath.Join(home, ".zerker", "host-id")
 	}
-	hostID, err := loadOrCreateHostID(hostIDPath)
+	machineID := opts.MachineID
+	if machineID == nil {
+		machineID = platformMachineID
+	}
+	hostID, err := resolveHostID(machineID(), hostIDPath)
 	if err != nil {
 		return Report{}, fmt.Errorf("resolve host id: %w", err)
 	}
@@ -187,13 +202,91 @@ func Scan(opts Options) (Report, error) {
 	return report, nil
 }
 
-const hostIDLength = 32 // bytes of random identifier, hex-encoded on disk
+// hostIDNamespace domain-separates the digest, so a host id cannot be matched
+// against some other system's hash of the same machine identifier.
+const hostIDNamespace = "zerker.host-id.v1|"
 
-// loadOrCreateHostID returns the persistent, randomly generated identifier
-// stored at path, creating it on first use. Unlike a hash of the hostname,
-// a random id carries no information about the machine it names: it cannot
-// be recovered by hashing a dictionary of plausible hostnames.
-func loadOrCreateHostID(path string) (string, error) {
+const fallbackIDLength = 32 // bytes of random identifier, hex-encoded on disk
+
+// resolveHostID returns the stable, non-identifying identifier for this
+// machine. It is always a SHA-256 digest, never a raw machine identifier.
+//
+// The digest is taken over the most stable value the platform exposes:
+//
+//   - Linux: /etc/machine-id, else /var/lib/dbus/machine-id — 128 bits fixed
+//     at OS install.
+//   - macOS: IOPlatformUUID from the IOPlatformExpertDevice registry node —
+//     the hardware UUID, fixed for the life of the logic board.
+//   - anywhere else, or when neither is readable: 256 random bits generated
+//     once and persisted at fallbackPath.
+//
+// Deriving from the platform value rather than a file under the home directory
+// is what makes the id track the machine: a reimaged home directory still
+// produces the same id, and a cloned home directory (a corporate laptop image,
+// a restored dotfile backup) does not make two machines share one — which is
+// the collision this field exists to prevent.
+//
+// The hostname is deliberately not a source. It is low-entropy and follows
+// predictable patterns ("alexs-macbook-pro.local"), so a digest of it can be
+// reversed by hashing a dictionary of plausible names. Every source above
+// carries at least 122 bits of entropy, which puts that attack out of reach.
+func resolveHostID(machineID, fallbackPath string) (string, error) {
+	if machineID == "" {
+		var err error
+		if machineID, err = loadOrCreateFallbackID(fallbackPath); err != nil {
+			return "", err
+		}
+	}
+	sum := sha256.Sum256([]byte(hostIDNamespace + machineID))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// platformMachineID reads the stable machine identifier the operating system
+// maintains, or returns "" when the platform exposes none we can read.
+func platformMachineID() string {
+	switch runtime.GOOS {
+	case "linux":
+		for _, path := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
+			raw, err := os.ReadFile(path) //nolint:gosec // fixed, non-user-controlled system paths.
+			if err != nil {
+				continue
+			}
+			if id := strings.TrimSpace(string(raw)); id != "" {
+				return id
+			}
+		}
+	case "darwin":
+		return darwinPlatformUUID()
+	}
+	return ""
+}
+
+// darwinPlatformUUID extracts IOPlatformUUID from ioreg. The line it parses
+// looks like: `"IOPlatformUUID" = "0A1B2C3D-4E5F-..."`.
+func darwinPlatformUUID() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, `"IOPlatformUUID"`) {
+			continue
+		}
+		if quoted := strings.Split(line, `"`); len(quoted) >= 4 {
+			if id := strings.TrimSpace(quoted[3]); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// loadOrCreateFallbackID returns the random value persisted at path, creating
+// it on first use. It stands in for a platform machine identifier where none
+// is available; the value here is the digest pre-image, not the host id.
+func loadOrCreateFallbackID(path string) (string, error) {
 	if existing, err := os.ReadFile(path); err == nil { //nolint:gosec // path is a fixed, non-user-controlled location under the home directory.
 		if id := strings.TrimSpace(string(existing)); id != "" {
 			return id, nil
@@ -202,7 +295,7 @@ func loadOrCreateHostID(path string) (string, error) {
 		return "", fmt.Errorf("read host id: %w", err)
 	}
 
-	raw := make([]byte, hostIDLength)
+	raw := make([]byte, fallbackIDLength)
 	if _, err := rand.Read(raw); err != nil {
 		return "", fmt.Errorf("generate host id: %w", err)
 	}

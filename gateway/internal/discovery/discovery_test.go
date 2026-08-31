@@ -1,6 +1,8 @@
 package discovery
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"os"
@@ -26,7 +28,7 @@ func TestScanFindsInstalledAndConfiguredAgentsWithoutExposingSecrets(t *testing.
 		return "", errors.New("not found")
 	}
 
-	report, err := Scan(Options{HomeDir: "/Users/private", FS: filesystem, LookPath: lookPath, HostIDPath: tempHostIDPath(t)})
+	report, err := Scan(Options{HomeDir: "/Users/private", FS: filesystem, LookPath: lookPath, HostIDPath: tempHostIDPath(t), MachineID: fixedMachineID("test-machine")})
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -76,6 +78,7 @@ func TestScanFindsHermesFromItsCommandAndHome(t *testing.T) {
 			return "", errors.New("not found")
 		},
 		HostIDPath: tempHostIDPath(t),
+		MachineID:  fixedMachineID("test-machine"),
 	})
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -103,6 +106,7 @@ func TestScanIgnoresMalformedOptionalMCPConfig(t *testing.T) {
 		},
 		LookPath:   alwaysMissing,
 		HostIDPath: tempHostIDPath(t),
+		MachineID:  fixedMachineID("test-machine"),
 	})
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
@@ -118,7 +122,7 @@ func TestScanIgnoresMalformedOptionalMCPConfig(t *testing.T) {
 func TestScanReturnsEmptyReportWhenNothingIsFound(t *testing.T) {
 	t.Parallel()
 
-	report, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, HostIDPath: tempHostIDPath(t)})
+	report, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, HostIDPath: tempHostIDPath(t), MachineID: fixedMachineID("test-machine")})
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -133,7 +137,7 @@ func TestScanReturnsEmptyReportWhenNothingIsFound(t *testing.T) {
 func TestScanOmitsHostnameByDefault(t *testing.T) {
 	t.Parallel()
 
-	report, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "alexs-macbook-pro.local", HostIDPath: tempHostIDPath(t)})
+	report, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "alexs-macbook-pro.local", HostIDPath: tempHostIDPath(t), MachineID: fixedMachineID("test-machine")})
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -151,7 +155,7 @@ func TestScanOmitsHostnameByDefault(t *testing.T) {
 func TestScanIncludesHostnameWhenRequested(t *testing.T) {
 	t.Parallel()
 
-	report, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "alexs-macbook-pro.local", IncludeHostname: true, HostIDPath: tempHostIDPath(t)})
+	report, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "alexs-macbook-pro.local", IncludeHostname: true, HostIDPath: tempHostIDPath(t), MachineID: fixedMachineID("test-machine")})
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -163,31 +167,97 @@ func TestScanIncludesHostnameWhenRequested(t *testing.T) {
 func TestScanHostIDIsStableAcrossRunsAndIndependentOfHostname(t *testing.T) {
 	t.Parallel()
 
-	hostIDPath := tempHostIDPath(t)
-	first, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "build-runner-1", HostIDPath: hostIDPath})
-	if err != nil {
-		t.Fatalf("Scan() error = %v", err)
-	}
-	// A different hostname on the same machine (same persisted host id file)
-	// must not change the id: the id is not derived from the hostname.
-	second, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "build-runner-2", HostIDPath: hostIDPath})
-	if err != nil {
-		t.Fatalf("Scan() error = %v", err)
-	}
-	if first.Host.HostID != second.Host.HostID {
-		t.Fatalf("HostID = %q then %q, want the same machine to produce the same id regardless of hostname", first.Host.HostID, second.Host.HostID)
+	scan := func(hostname, machineID, hostIDPath string) string {
+		t.Helper()
+		report, err := Scan(Options{
+			HomeDir:    "/unused",
+			FS:         fstest.MapFS{},
+			LookPath:   alwaysMissing,
+			Hostname:   hostname,
+			HostIDPath: hostIDPath,
+			MachineID:  fixedMachineID(machineID),
+		})
+		if err != nil {
+			t.Fatalf("Scan() error = %v", err)
+		}
+		return report.Host.HostID
 	}
 
-	other, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, Hostname: "build-runner-1", HostIDPath: tempHostIDPath(t)})
-	if err != nil {
-		t.Fatalf("Scan() error = %v", err)
+	// A different hostname on the same machine must not change the id: the id
+	// is not derived from the hostname.
+	path := tempHostIDPath(t)
+	first := scan("build-runner-1", "machine-a", path)
+	if second := scan("build-runner-2", "machine-a", path); first != second {
+		t.Fatalf("HostID = %q then %q, want the same machine to produce the same id regardless of hostname", first, second)
 	}
-	if other.Host.HostID == first.Host.HostID {
+
+	// A different machine must produce a different id, even under the same
+	// hostname.
+	if other := scan("build-runner-1", "machine-b", path); other == first {
 		t.Fatal("HostID matched across two distinct machines, want distinct ids")
 	}
 }
 
-func TestScanPersistsHostIDForReuseAndItIsHighEntropy(t *testing.T) {
+// The id tracks the machine, not the home directory. These are the two ways a
+// home-directory-resident token gets it wrong, and the reason host_id is
+// derived from a platform identifier instead.
+func TestScanHostIDTracksTheMachineNotTheHomeDirectory(t *testing.T) {
+	t.Parallel()
+
+	scan := func(machineID, hostIDPath string) string {
+		t.Helper()
+		report, err := Scan(Options{
+			HomeDir:    "/unused",
+			FS:         fstest.MapFS{},
+			LookPath:   alwaysMissing,
+			HostIDPath: hostIDPath,
+			MachineID:  fixedMachineID(machineID),
+		})
+		if err != nil {
+			t.Fatalf("Scan() error = %v", err)
+		}
+		return report.Host.HostID
+	}
+
+	// Wiping or reimaging the home directory keeps the same id.
+	if before, after := scan("machine-a", tempHostIDPath(t)), scan("machine-a", tempHostIDPath(t)); before != after {
+		t.Fatalf("HostID = %q then %q, want a reimaged home directory to keep the machine's id", before, after)
+	}
+
+	// Cloning one home directory onto two machines still gives two ids.
+	shared := tempHostIDPath(t)
+	if a, b := scan("machine-a", shared), scan("machine-b", shared); a == b {
+		t.Fatal("two machines sharing a home directory got one HostID, want distinct ids")
+	}
+}
+
+func TestScanHostIDIsAHashNotTheRawMachineIdentifier(t *testing.T) {
+	t.Parallel()
+
+	const machineID = "0A1B2C3D-4E5F-6789-ABCD-EF0123456789"
+	report, err := Scan(Options{
+		HomeDir:    "/unused",
+		FS:         fstest.MapFS{},
+		LookPath:   alwaysMissing,
+		HostIDPath: tempHostIDPath(t),
+		MachineID:  fixedMachineID(machineID),
+	})
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if strings.Contains(report.Host.HostID, machineID) {
+		t.Fatalf("HostID = %q carries the raw machine identifier", report.Host.HostID)
+	}
+	sum := sha256.Sum256([]byte(hostIDNamespace + machineID))
+	if want := hex.EncodeToString(sum[:]); report.Host.HostID != want {
+		t.Fatalf("HostID = %q, want the namespaced digest %q", report.Host.HostID, want)
+	}
+}
+
+// Where the platform exposes no machine identifier, the id falls back to a
+// random value persisted once. The persisted value is the digest pre-image,
+// not the id itself.
+func TestScanFallsBackToAPersistedRandomIDWhenThePlatformHasNone(t *testing.T) {
 	t.Parallel()
 
 	hostIDPath := tempHostIDPath(t)
@@ -195,7 +265,14 @@ func TestScanPersistsHostIDForReuseAndItIsHighEntropy(t *testing.T) {
 		t.Fatalf("host id file already exists before first scan: %v", err)
 	}
 
-	report, err := Scan(Options{HomeDir: "/unused", FS: fstest.MapFS{}, LookPath: alwaysMissing, HostIDPath: hostIDPath})
+	opts := Options{
+		HomeDir:    "/unused",
+		FS:         fstest.MapFS{},
+		LookPath:   alwaysMissing,
+		HostIDPath: hostIDPath,
+		MachineID:  fixedMachineID(""),
+	}
+	report, err := Scan(opts)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -203,18 +280,35 @@ func TestScanPersistsHostIDForReuseAndItIsHighEntropy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host id was not persisted: %v", err)
 	}
-	if string(persisted) != report.Host.HostID {
-		t.Fatalf("persisted host id = %q, want %q", persisted, report.Host.HostID)
+	// fallbackIDLength random bytes hex-encoded; guards against a low-entropy
+	// pre-image that a dictionary attack could recover.
+	if len(persisted) != fallbackIDLength*2 {
+		t.Fatalf("persisted pre-image = %q, want %d hex characters of random entropy", persisted, fallbackIDLength*2)
 	}
-	// hostIDLength random bytes hex-encoded; guards against a low-entropy id
-	// that a dictionary attack against plausible hostnames could recover.
-	if len(report.Host.HostID) != hostIDLength*2 {
-		t.Fatalf("HostID = %q, want %d hex characters of random entropy", report.Host.HostID, hostIDLength*2)
+	if string(persisted) == report.Host.HostID {
+		t.Fatal("the persisted value is the emitted HostID, want the id to be a digest of it")
+	}
+	sum := sha256.Sum256([]byte(hostIDNamespace + string(persisted)))
+	if want := hex.EncodeToString(sum[:]); report.Host.HostID != want {
+		t.Fatalf("HostID = %q, want the digest of the persisted pre-image %q", report.Host.HostID, want)
+	}
+
+	// The persisted value is reused rather than regenerated.
+	again, err := Scan(opts)
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if again.Host.HostID != report.Host.HostID {
+		t.Fatalf("HostID = %q then %q, want the persisted fallback to be reused", report.Host.HostID, again.Host.HostID)
 	}
 }
 
 func alwaysMissing(string) (string, error) {
 	return "", errors.New("not found")
+}
+
+func fixedMachineID(id string) func() string {
+	return func() string { return id }
 }
 
 func tempHostIDPath(t *testing.T) string {

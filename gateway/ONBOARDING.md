@@ -54,7 +54,11 @@ Output uses `zerker.agent-discovery.v1`:
 }
 ```
 
-`host.host_id` is a randomly generated identifier, persisted the first time the scan runs (under `~/.zerker/host-id`) and reused on every later run. It is stable across runs on the same machine and, unlike a hash of the hostname, carries no information that could be recovered by guessing plausible hostnames: it discloses nothing about the machine itself. The readable hostname is omitted by default; pass `--include-hostname` to add `host.hostname` to the report. A hostname often contains a person's name (`alexs-macbook-pro.local`), so only opt in when you intend to identify the machine, not just distinguish it.
+`host.host_id` is a SHA-256 digest, never a raw identifier. It is taken over the most stable value the platform exposes — `/etc/machine-id` (or `/var/lib/dbus/machine-id`) on Linux, the `IOPlatformUUID` hardware UUID on macOS — so the same machine produces the same id across runs, and across a wiped or restored home directory. Where the platform exposes neither, the digest falls back to 256 random bits generated once and persisted under `~/.zerker/host-id`.
+
+The hostname is deliberately not a source: it is low-entropy and follows predictable patterns, so a digest of it could be reversed by hashing a dictionary of plausible names. Every source above carries at least 122 bits of entropy, which puts that attack out of reach. What `host_id` discloses is therefore *whether two enrollments came from the same machine*, and nothing else about it — it is not a secret, and it is not an attestation that the machine is what it claims to be.
+
+The readable hostname is omitted by default; pass `--include-hostname` to add `host.hostname` to the report. A hostname often contains a person's name (`alexs-macbook-pro.local`), so only opt in when you intend to identify the machine, not just distinguish it.
 
 This version reports only discovery evidence. It does not claim a cryptographic identity binding or authority relationship.
 
