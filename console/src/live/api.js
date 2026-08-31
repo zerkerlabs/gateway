@@ -96,6 +96,12 @@ export const api = {
   getInvocation: (id) => request(`/invocations/${encodeURIComponent(id)}`),
   getAnalytics: (params) => request(`/analytics${query(params)}`),
 
+  // Metadata-only agent activity. There is no GET that lists individual
+  // events — this is the one read the gateway offers, a per-agent aggregate
+  // over a window of at most 31 days. agent_id is required by the endpoint.
+  summarizeAgentEvents: (agentId, params) =>
+    request(`/agent-events/summary${query({ agent_id: agentId, ...params })}`),
+
   // --- governance
   getPolicy: () => request('/policy'),
   listPolicyDecisions: (params) => request(`/policy/decisions${query(params)}`),
