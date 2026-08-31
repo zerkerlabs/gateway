@@ -10,6 +10,8 @@ import {
   liveInvocationsState,
   liveInvocationsView,
   normalizeInvocation,
+  policyActionLabel,
+  policyMatchLabel,
   rangeSince,
   retryabilityGuess,
 } from './invocations-view.js';
@@ -68,24 +70,41 @@ test('a null error_class stays null rather than becoming a string', () => {
   assert.equal(item.errorClass, null);
 });
 
+test('a null policy_action stays null rather than becoming a string', () => {
+  const item = invocation({ policy_action: null, policy_matched_rule: null });
+  assert.equal(item.policyAction, null);
+  assert.equal(item.policyMatchedRule, null);
+});
+
+test('an empty-string policy_matched_rule (tenant default matched) survives distinctly from null', () => {
+  const item = invocation({ policy_action: 'allow', policy_matched_rule: '' });
+  assert.equal(item.policyMatchedRule, '');
+});
+
 // --- buildQueryParams / rangeSince -------------------------------------------
 
 test('buildQueryParams omits "all" filters rather than sending them literally', () => {
-  const filters = { status: 'all', mode: 'all', agentId: 'all', errorClass: 'all', settlement: 'all', range: 'all' };
+  const filters = { status: 'all', mode: 'all', agentId: 'all', errorClass: 'all', settlement: 'all', policy: 'all', range: 'all' };
   assert.deepEqual(buildQueryParams(filters, 20, 0), { limit: 20, offset: 0 });
 });
 
 test('buildQueryParams maps every filter to its gateway query param', () => {
-  const filters = { status: 'failed', mode: 'streaming', agentId: 'agt_9', errorClass: 'timeout', settlement: 'settled', range: 'all' };
+  const filters = { status: 'failed', mode: 'streaming', agentId: 'agt_9', errorClass: 'timeout', settlement: 'settled', policy: 'warn', range: 'all' };
   const params = buildQueryParams(filters, 20, 40);
   assert.equal(params.status, 'failed');
   assert.equal(params.mode, 'streaming');
   assert.equal(params.agent_id, 'agt_9');
   assert.equal(params.error_class, 'timeout');
   assert.equal(params.settlement, 'settled');
+  assert.equal(params.policy, 'warn');
   assert.equal(params.since, undefined);
   assert.equal(params.limit, 20);
   assert.equal(params.offset, 40);
+});
+
+test('buildQueryParams passes the allow policy filter through to the policy query parameter', () => {
+  const filters = { status: 'all', mode: 'all', agentId: 'all', errorClass: 'all', settlement: 'all', policy: 'allow', range: 'all' };
+  assert.equal(buildQueryParams(filters, 20, 0).policy, 'allow');
 });
 
 test('a time range becomes a since bound relative to now', () => {
@@ -172,9 +191,23 @@ test('deriveTrace reports settlement only when a settlement sub-record exists', 
   assert.equal(gateOnly.find((s) => s.label === 'Settlement').state, 'unknown');
 });
 
-test('deriveTrace never invents a Policy stage', () => {
-  const stages = deriveTrace(invocation());
-  assert.equal(stages.some((s) => s.label === 'Policy'), false);
+test('deriveTrace reports the real policy_action, not a placeholder allow', () => {
+  const allowed = deriveTrace(invocation({ policy_action: 'allow', policy_matched_rule: '2' }));
+  const allowStage = allowed.find((s) => s.label === 'Policy');
+  assert.equal(allowStage.state, 'completed');
+  assert.match(allowStage.detail, /Allow/);
+  assert.match(allowStage.detail, /Rule 2/);
+
+  const warned = deriveTrace(invocation({ policy_action: 'warn', policy_matched_rule: '' }));
+  const warnStage = warned.find((s) => s.label === 'Policy');
+  assert.equal(warnStage.state, 'warning');
+  assert.match(warnStage.detail, /Warn/);
+  assert.match(warnStage.detail, /Tenant default/);
+
+  const noPolicy = deriveTrace(invocation({ policy_action: null, policy_matched_rule: null }));
+  const unconfiguredStage = noPolicy.find((s) => s.label === 'Policy');
+  assert.equal(unconfiguredStage.state, 'unknown');
+  assert.match(unconfiguredStage.detail, /No policy configured/);
 });
 
 // --- rendering ---------------------------------------------------------------
@@ -216,11 +249,43 @@ test('the page states plainly that denied and unpaid requests never appear here'
   });
 });
 
-test('there is no Policy column and no policy filter', () => {
-  withState({ invocations: [invocation()], total: 1 }, (html) => {
-    assert.doesNotMatch(html, />Policy</);
-    assert.doesNotMatch(html, /data-live-invocation-filter="policy"/);
+test('the Policy filter offers only allow and warn, never deny', () => {
+  withState({}, (html) => {
+    assert.match(html, /data-live-invocation-filter="policy"/);
+    assert.match(html, /<option value="allow">Allow<\/option>/);
+    assert.match(html, /<option value="warn">Warn<\/option>/);
+    assert.doesNotMatch(html, /<option value="deny"/);
+    assert.doesNotMatch(html, />Deny</);
   });
+});
+
+test('allow, warn, and no-policy rows render distinctly rather than collapsing into one state', () => {
+  withState(
+    {
+      invocations: [
+        invocation({ id: 'inv_allow', policy_action: 'allow', policy_matched_rule: '1' }),
+        invocation({ id: 'inv_warn', policy_action: 'warn', policy_matched_rule: '' }),
+        invocation({ id: 'inv_none', policy_action: null, policy_matched_rule: null }),
+      ],
+      total: 3,
+    },
+    (html) => {
+      assert.match(html, /<span class="status allow">Allow<\/span>/);
+      assert.match(html, /<span class="status warn">Warn<\/span>/);
+      assert.match(html, /<span class="status empty">No policy configured<\/span>/);
+    }
+  );
+});
+
+test('a null policy_action reads as "No policy configured", never as Allow', () => {
+  assert.equal(policyActionLabel(null), 'No policy configured');
+  assert.notEqual(policyActionLabel(null), policyActionLabel('allow'));
+});
+
+test('policyMatchLabel reports the matched rule position, the tenant default, or not applicable', () => {
+  assert.equal(policyMatchLabel(invocation({ policy_action: 'allow', policy_matched_rule: '3' })), 'Rule 3');
+  assert.equal(policyMatchLabel(invocation({ policy_action: 'warn', policy_matched_rule: '' })), 'Tenant default · no rule matched');
+  assert.equal(policyMatchLabel(invocation({ policy_action: null, policy_matched_rule: null })), 'Not applicable');
 });
 
 test('the search box is labelled as filtering only the loaded page', () => {

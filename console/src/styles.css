@@ -1043,11 +1043,11 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
   .live-agent-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* Nine columns: Time, Invocation, Agent/operation, Mode, Result, Latency,
-   Sizes, Error class, Action. No Policy column — invocations carry no policy
-   field to render one from. The row is a .catalog-row too, so it inherits
-   that element's base styling and its [data-label] responsive treatment. */
-.live-invocation-row { grid-template-columns: .85fr .8fr 1.2fr .6fr .6fr .6fr .8fr .85fr 84px; align-items: start; }
+/* Ten columns: Time, Invocation, Agent/operation, Mode, Result, Policy,
+   Latency, Sizes, Error class, Action. The row is a .catalog-row too, so it
+   inherits that element's base styling and its [data-label] responsive
+   treatment. */
+.live-invocation-row { grid-template-columns: .85fr .8fr 1.2fr .6fr .6fr .6fr .6fr .8fr .85fr 84px; align-items: start; }
 .live-invocation-row.is-failed { border-left: 4px solid var(--red); }
 .live-invocation-row .mono { font-family: "Geist Mono", monospace; word-break: break-all; }
 .live-invocation-row .catalog-inspect { display: flex; justify-content: flex-end; }
@@ -1060,7 +1060,7 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 .pagination-actions { display: flex; gap: 8px; }
 
 @media (max-width: 1120px) {
-  .live-invocation-row { grid-template-columns: .8fr .75fr 1.1fr .55fr .8fr .8fr 76px; }
+  .live-invocation-row { grid-template-columns: .8fr .75fr 1.1fr .55fr .55fr .8fr .8fr 76px; }
   .live-invocation-row > span[data-label="Sizes"],
   .live-invocation-row > span[data-label="Mode"] { display: none; }
 }
