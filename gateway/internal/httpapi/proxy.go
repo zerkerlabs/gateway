@@ -329,7 +329,7 @@ func (h *Handler) handleTransact(w http.ResponseWriter, r *http.Request) {
 		MCPTool:    mcpTool,
 		BodyBytes:  bodySize,
 		RatePerMin: ratePerMin,
-	})
+	}, a.EmitReceipts)
 	if !proceed {
 		return
 	}
@@ -701,7 +701,7 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 		MCPTool:    mcpTool,
 		BodyBytes:  bodyBytes,
 		RatePerMin: ratePerMin,
-	})
+	}, a.EmitReceipts)
 	if !proceed {
 		return
 	}

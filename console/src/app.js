@@ -3,6 +3,7 @@ import { liveAgentsView, loadAgents, bindLiveAgents } from "./live/agents-view.j
 import { liveInvocationsView } from "./live/invocations-view.js";
 import { ensureAttentionLoaded, liveAttentionView } from "./live/attention-view.js";
 import { liveOverviewView } from "./live/overview-view.js";
+import { liveAnalyticsView } from "./live/analytics-view.js";
 import { liveCredentialsView } from "./live/credentials-view.js";
 import { livePoliciesView } from "./live/policies-view.js";
 import { currentSession, renderSignIn, signOut } from "./live/gate.js";
@@ -481,11 +482,11 @@ function stackView() {
   </section>`;
 }
 
-// `overview`, `attention`, `invocations`, `agents`, `credentials`, and
-// `policies` are live surfaces, reading (and for `agents`, writing) real
+// `overview`, `attention`, `invocations`, `analytics`, `agents`, `credentials`,
+// and `policies` are live surfaces, reading (and for `agents`, writing) real
 // tenant state through the BFF. Every other view here is still fixture-backed
 // and labelled as such — see console/README.md.
-const views = { overview: liveOverviewView, attention: liveAttentionView, activity: activityView, invocations: liveInvocationsView, analytics: analyticsView, agents: liveAgentsView, environments: environmentsView, policies: livePoliciesView, credentials: liveCredentialsView, products: productsView, payments: paymentsView, stack: stackView };
+const views = { overview: liveOverviewView, attention: liveAttentionView, activity: activityView, invocations: liveInvocationsView, analytics: liveAnalyticsView, agents: liveAgentsView, environments: environmentsView, policies: livePoliciesView, credentials: liveCredentialsView, products: productsView, payments: paymentsView, stack: stackView };
 
 const mobilePrimaryViews = new Set(["overview", "invocations", "agents", "stack"]);
 

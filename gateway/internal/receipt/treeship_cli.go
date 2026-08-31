@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -181,7 +182,15 @@ func (e *TreeshipCLIEmitter) Emit(ctx context.Context, r Receipt) error {
 		return ErrTreeshipBusy
 	}
 
-	out, err := e.runner(ctx, e.binaryPath, e.Args(r))
+	return e.run(ctx, e.Args(r), actionLabel)
+}
+
+// run invokes the CLI and validates its response against wantAction. Shared by
+// Emit and EmitDenial so the two cannot drift on what counts as a successful
+// attestation — the check that matters most here is the one that is easiest to
+// forget to copy.
+func (e *TreeshipCLIEmitter) run(ctx context.Context, args []string, wantAction string) error {
+	out, err := e.runner(ctx, e.binaryPath, args)
 	if err != nil {
 		return err
 	}
@@ -197,9 +206,9 @@ func (e *TreeshipCLIEmitter) Emit(ctx context.Context, r Receipt) error {
 	if resp.Status != "ok" || resp.ID == "" {
 		return fmt.Errorf("%w: CLI reported status %q", ErrTreeshipUnavailable, resp.Status)
 	}
-	if resp.Action != actionLabel {
+	if resp.Action != wantAction {
 		return fmt.Errorf("%w: CLI attested action %q, expected %q",
-			ErrTreeshipUnavailable, resp.Action, actionLabel)
+			ErrTreeshipUnavailable, resp.Action, wantAction)
 	}
 	return nil
 }
@@ -262,3 +271,87 @@ func sha256Hex(s string) string {
 
 // Actor returns the actor URI this emitter signs as.
 func (e *TreeshipCLIEmitter) Actor() string { return e.actor }
+
+// denialActionLabel is the action every denial artifact is attested under.
+// Distinct from actionLabel so a verifier can ask "what did this gateway
+// refuse" without first fetching and filtering every invocation it allowed.
+const denialActionLabel = "gateway.denied"
+
+// DenialArgs returns the CLI arguments for d. Exported for the same reason as
+// Args: tests assert on the constructed command, not on a spawned process.
+func (e *TreeshipCLIEmitter) DenialArgs(d Denial) []string {
+	return []string{
+		"attest", "action",
+		"--actor", e.actor,
+		"--action", denialActionLabel,
+		"--input-digest", denialDigest(d),
+		"--meta", denialMetaJSON(d),
+		"--format", "json",
+	}
+}
+
+// EmitDenial attests d as a Treeship action.v1 artifact.
+//
+// Shares the concurrency pool with Emit deliberately. The bound exists to stop
+// the gateway forking unboundedly under load, and a burst of denials is
+// exactly the load where that matters most — a separate pool would double the
+// ceiling the bound was chosen to hold.
+func (e *TreeshipCLIEmitter) EmitDenial(ctx context.Context, d Denial) error {
+	select {
+	case e.slots <- struct{}{}:
+		defer func() { <-e.slots }()
+	default:
+		return ErrTreeshipBusy
+	}
+	return e.run(ctx, e.DenialArgs(d), denialActionLabel)
+}
+
+// denialDigest binds the artifact to one denied call.
+//
+// A denial has no invocation ID to bind to — that is the whole reason this
+// path exists — so the digest is taken over the call's identifying fields.
+// Two identical denials of the same call shape therefore share a digest, which
+// is correct: the digest identifies what was refused, not how many times.
+func denialDigest(d Denial) string {
+	return "sha256:" + sha256Hex(strings.Join([]string{
+		d.TenantID, d.AgentID, d.Protocol,
+		derefOr(d.MCPMethod), derefOr(d.MCPTool),
+		d.MatchedRule,
+	}, "\x00"))
+}
+
+func derefOr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func denialMetaJSON(d Denial) string {
+	m := map[string]string{
+		"tenant_id": d.TenantID,
+		"agent_id":  d.AgentID,
+		"protocol":  d.Protocol,
+		"action":    "deny",
+		"reason":    d.Reason,
+	}
+	// Empty MatchedRule means the policy default denied, not that rule "" did.
+	// Emitting an empty string would sign an ambiguous claim.
+	if d.MatchedRule != "" {
+		m["matched_rule"] = d.MatchedRule
+	}
+	if d.MCPMethod != nil {
+		m["mcp_method"] = *d.MCPMethod
+	}
+	if d.MCPTool != nil {
+		m["mcp_tool"] = *d.MCPTool
+	}
+	if !d.DeniedAt.IsZero() {
+		m["denied_at"] = d.DeniedAt.UTC().Format(time.RFC3339)
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}

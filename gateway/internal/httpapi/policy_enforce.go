@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/zerkerlabs/gateway/gateway/internal/policy"
+	"github.com/zerkerlabs/gateway/gateway/internal/receipt"
 )
 
 // maxClassifierReasonLen bounds how much of an external classifier's
@@ -52,7 +54,12 @@ const policyWarningHeader = "X-Zerker-Policy-Warning"
 // store-read failure in this handler already is (see the agent store Get in
 // handleTransact/handleStream): logged and a 500, never guessed as a coarse
 // policy denial.
-func (h *Handler) enforcePolicy(w http.ResponseWriter, r *http.Request, reqCtx policy.RequestContext) (proceed bool, warnHeader string, decision *policy.Decision) {
+// emitReceipts is the calling agent's per-agent receipt toggle. A denial is
+// attested only when that agent has receipts enabled — the same condition its
+// completed invocations are attested under. An operator who turned receipts
+// off for an agent should not start getting artifacts for it merely because a
+// call was refused rather than allowed.
+func (h *Handler) enforcePolicy(w http.ResponseWriter, r *http.Request, reqCtx policy.RequestContext, emitReceipts bool) (proceed bool, warnHeader string, decision *policy.Decision) {
 	if h.policyStore == nil {
 		return true, "", nil
 	}
@@ -87,6 +94,15 @@ func (h *Handler) enforcePolicy(w http.ResponseWriter, r *http.Request, reqCtx p
 		// Coarse denial (invariant #3): a single reason, never internal match
 		// conditions. d.Reason is already coarse — a rule's 1-based position
 		// and a fixed explanation, never rule content (policy.Decision doc).
+		//
+		// Attest before writing the 403. The call returns immediately (the
+		// emission itself is a goroutine), and doing it here rather than after
+		// the write keeps the attestation on the same branch as the decision it
+		// describes — a later refactor that adds an early return between the
+		// two cannot silently drop it.
+		if emitReceipts {
+			h.emitDenial(reqCtx, d)
+		}
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "denied by policy", "reason": d.Reason})
 		return false, "", nil
 	case policy.ActionWarn:
@@ -190,4 +206,36 @@ func sanitizeClassifierReason(reason string) string {
 		n++
 	}
 	return b.String()
+}
+
+// emitDenial attests a policy denial, when the configured emitter can.
+//
+// Off the request path and fail-open, exactly like emitReceipt: the 403 is
+// written immediately after this returns, and a gateway that cannot attest a
+// denial must still deny. Capability is discovered by type assertion, so an
+// Emitter that only handles completed invocations remains valid and simply
+// contributes no denial artifacts.
+func (h *Handler) emitDenial(reqCtx policy.RequestContext, d policy.Decision) {
+	de, ok := h.emitter.(receipt.DenialEmitter)
+	if !ok {
+		return
+	}
+	den := receipt.Denial{
+		TenantID:    reqCtx.TenantID,
+		AgentID:     reqCtx.AgentID,
+		Protocol:    reqCtx.Protocol,
+		MCPMethod:   reqCtx.MCPMethod,
+		MCPTool:     reqCtx.MCPTool,
+		MatchedRule: d.MatchedRule,
+		Reason:      d.Reason,
+		DeniedAt:    time.Now().UTC(),
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), receiptEmitTimeout)
+		defer cancel()
+		if err := de.EmitDenial(ctx, den); err != nil {
+			h.logger.Warn("denial attestation failed (fail-open)",
+				"tenant", den.TenantID, "agent", den.AgentID, "err", err)
+		}
+	}()
 }

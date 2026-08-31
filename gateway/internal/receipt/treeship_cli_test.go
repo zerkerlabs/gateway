@@ -201,3 +201,121 @@ func TestFromEnvReturnsANilConcretePointerWhenDisabled(t *testing.T) {
 		t.Fatalf("disabled emitter = %#v, want a nil *TreeshipCLIEmitter", e)
 	}
 }
+
+func sampleDenial() Denial {
+	method, tool := "tools/call", "write_file"
+	return Denial{
+		TenantID:    "tnt_1",
+		AgentID:     "agt_1",
+		Protocol:    "mcp",
+		MCPMethod:   &method,
+		MCPTool:     &tool,
+		MatchedRule: "3",
+		Reason:      "denied by rule 3",
+		DeniedAt:    time.Date(2026, 8, 31, 2, 0, 0, 0, time.UTC),
+	}
+}
+
+func TestDenialArgsUseADistinctActionLabel(t *testing.T) {
+	// A verifier must be able to ask "what did this gateway refuse" without
+	// fetching every invocation it allowed and filtering.
+	e := NewTreeshipCLIEmitter("/bin/treeship", "", func(context.Context, string, []string) ([]byte, error) {
+		return nil, nil
+	})
+	got := argValue(e.DenialArgs(sampleDenial()), "--action")
+	if got != denialActionLabel {
+		t.Fatalf("--action = %q, want %q", got, denialActionLabel)
+	}
+	if got == actionLabel {
+		t.Fatal("denials and completed invocations share an action label")
+	}
+}
+
+func TestDenialMetaCarriesTheCallButNotTheRuleset(t *testing.T) {
+	e := NewTreeshipCLIEmitter("/bin/treeship", "", nil)
+	var meta map[string]string
+	if err := json.Unmarshal([]byte(argValue(e.DenialArgs(sampleDenial()), "--meta")), &meta); err != nil {
+		t.Fatalf("--meta is not valid JSON: %v", err)
+	}
+	if meta["action"] != "deny" {
+		t.Fatalf("meta[action] = %q, want \"deny\"", meta["action"])
+	}
+	for k, want := range map[string]string{
+		"mcp_tool": "write_file", "mcp_method": "tools/call", "matched_rule": "3",
+	} {
+		if meta[k] != want {
+			t.Fatalf("meta[%q] = %q, want %q", k, meta[k], want)
+		}
+	}
+}
+
+func TestDenialByDefaultOmitsMatchedRule(t *testing.T) {
+	// "the policy default refused this" and "rule 3 refused this" are different
+	// facts. Signing matched_rule:"" would collapse them into an ambiguous one.
+	d := sampleDenial()
+	d.MatchedRule = ""
+	e := NewTreeshipCLIEmitter("/bin/treeship", "", nil)
+	var meta map[string]string
+	if err := json.Unmarshal([]byte(argValue(e.DenialArgs(d), "--meta")), &meta); err != nil {
+		t.Fatalf("--meta is not valid JSON: %v", err)
+	}
+	if _, present := meta["matched_rule"]; present {
+		t.Fatalf("matched_rule present for a default denial: %#v", meta)
+	}
+}
+
+func TestDenialDigestDistinguishesDifferentCalls(t *testing.T) {
+	a := sampleDenial()
+	b := sampleDenial()
+	other := "read_file"
+	b.MCPTool = &other
+	if denialDigest(a) == denialDigest(b) {
+		t.Fatal("denials of different tools share a digest")
+	}
+	if denialDigest(a) != denialDigest(sampleDenial()) {
+		t.Fatal("denial digest is not deterministic for identical input")
+	}
+}
+
+func TestDenialDigestIsNotFieldConcatenationCollidable(t *testing.T) {
+	// Joining fields without a separator lets ("ab","c") and ("a","bc") collide,
+	// so two different denied calls would share one digest and one artifact.
+	a := Denial{TenantID: "ab", AgentID: "c"}
+	b := Denial{TenantID: "a", AgentID: "bc"}
+	if denialDigest(a) == denialDigest(b) {
+		t.Fatal("digest collides across field boundaries; the separator is missing or weak")
+	}
+}
+
+func TestEmitDenialSharesTheConcurrencyBound(t *testing.T) {
+	// A burst of denials is exactly the load the bound exists for. A separate
+	// pool would double the ceiling that number was chosen to hold.
+	release := make(chan struct{})
+	var running sync.WaitGroup
+	e := NewTreeshipCLIEmitter("/bin/treeship", "", func(context.Context, string, []string) ([]byte, error) {
+		<-release
+		return []byte(`{"status":"ok","id":"art_d","action":"gateway.denied"}`), nil
+	})
+	for i := 0; i < defaultMaxConcurrent; i++ {
+		running.Add(1)
+		go func() { defer running.Done(); _ = e.EmitDenial(context.Background(), sampleDenial()) }()
+	}
+	for len(e.slots) < defaultMaxConcurrent {
+		time.Sleep(time.Millisecond)
+	}
+	// An Emit must also be shed: the pool is shared, not per-method.
+	if err := e.Emit(context.Background(), sampleReceipt()); !errors.Is(err, ErrTreeshipBusy) {
+		t.Fatalf("Emit during a denial burst = %v, want ErrTreeshipBusy (pools are not shared)", err)
+	}
+	close(release)
+	running.Wait()
+}
+
+func TestEmitDenialRejectsAResponseForAnotherAction(t *testing.T) {
+	e := NewTreeshipCLIEmitter("/bin/treeship", "", func(context.Context, string, []string) ([]byte, error) {
+		return []byte(`{"status":"ok","id":"art_x","action":"gateway.invocation"}`), nil
+	})
+	if err := e.EmitDenial(context.Background(), sampleDenial()); !errors.Is(err, ErrTreeshipUnavailable) {
+		t.Fatalf("err = %v, want ErrTreeshipUnavailable when the CLI attests a different action", err)
+	}
+}
