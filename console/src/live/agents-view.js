@@ -51,13 +51,8 @@ function esc(v) {
   );
 }
 
-// --- filtering ---------------------------------------------------------------
+// --- catalog completeness ----------------------------------------------------
 
-// Filtering happens in the browser over the fetched page. The gateway supports
-// `protocol` server-side but not status, suspension or text search, so rather
-// than half the filters querying and half not — which would make "no matches"
-// mean two different things — all four filter the loaded set, and the UI says
-// so. Exported for tests.
 // listAgents() asks for per_page=100 and never follows further pages, so the
 // loaded catalog can be a strict subset of the tenant's agents. Callers that
 // join against liveAgentsState.agents (credential references, policy-rule
@@ -67,6 +62,13 @@ export function catalogComplete() {
   return state.agents.length >= state.agentsTotal;
 }
 
+// --- filtering ---------------------------------------------------------------
+
+// Filtering happens in the browser over the fetched page. The gateway supports
+// `protocol` server-side but not status, suspension or text search, so rather
+// than half the filters querying and half not — which would make "no matches"
+// mean two different things — all four filter the loaded set, and the UI says
+// so. Exported for tests.
 export function filterAgents(agents, filters) {
   const q = (filters.query || '').trim().toLowerCase();
   return agents.filter((a) => {
