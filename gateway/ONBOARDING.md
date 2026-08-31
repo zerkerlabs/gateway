@@ -54,7 +54,7 @@ Output uses `zerker.agent-discovery.v1`:
 }
 ```
 
-`host.host_id` is a SHA-256 hash of the machine's hostname. It is stable across runs on the same machine and discloses nothing about the machine itself. The readable hostname is omitted by default; pass `--include-hostname` to add `host.hostname` to the report. A hostname often contains a person's name (`alexs-macbook-pro.local`), so only opt in when you intend to identify the machine, not just distinguish it.
+`host.host_id` is a randomly generated identifier, persisted the first time the scan runs (under `~/.zerker/host-id`) and reused on every later run. It is stable across runs on the same machine and, unlike a hash of the hostname, carries no information that could be recovered by guessing plausible hostnames: it discloses nothing about the machine itself. The readable hostname is omitted by default; pass `--include-hostname` to add `host.hostname` to the report. A hostname often contains a person's name (`alexs-macbook-pro.local`), so only opt in when you intend to identify the machine, not just distinguish it.
 
 This version reports only discovery evidence. It does not claim a cryptographic identity binding or authority relationship.
 

@@ -3,7 +3,7 @@
 package discovery
 
 import (
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Schema identifies the stable machine-readable discovery contract.
@@ -52,19 +53,26 @@ type Report struct {
 }
 
 // Options provides the operating-system seams used by Scan. Zero values use
-// the real user's home directory, executable path, filesystem, and hostname.
+// the real user's home directory, executable path, filesystem, hostname, and
+// persisted host id location.
 type Options struct {
 	HomeDir  string
 	LookPath func(string) (string, error)
 	FS       fs.FS
 
-	// Hostname overrides the machine hostname used to derive Host. Tests set
-	// this for determinism; production leaves it empty to use os.Hostname().
+	// Hostname overrides the machine hostname included in the report when
+	// IncludeHostname is set. Tests set this for determinism; production
+	// leaves it empty to use os.Hostname().
 	Hostname string
 
 	// IncludeHostname includes the readable hostname in the report. It is
 	// false by default because a hostname is personal information.
 	IncludeHostname bool
+
+	// HostIDPath overrides where the persisted per-machine identifier is
+	// stored. Tests set this for isolation; production leaves it empty to
+	// use "<HomeDir>/.zerker/host-id".
+	HostIDPath string
 }
 
 type candidate struct {
@@ -109,16 +117,23 @@ func Scan(opts Options) (Report, error) {
 		filesystem = os.DirFS(home)
 	}
 
-	hostname := opts.Hostname
-	if hostname == "" {
-		var err error
-		hostname, err = os.Hostname()
-		if err != nil {
-			return Report{}, fmt.Errorf("resolve hostname: %w", err)
-		}
+	hostIDPath := opts.HostIDPath
+	if hostIDPath == "" {
+		hostIDPath = filepath.Join(home, ".zerker", "host-id")
 	}
-	host := Host{HostID: HostID(hostname)}
+	hostID, err := loadOrCreateHostID(hostIDPath)
+	if err != nil {
+		return Report{}, fmt.Errorf("resolve host id: %w", err)
+	}
+	host := Host{HostID: hostID}
 	if opts.IncludeHostname {
+		hostname := opts.Hostname
+		if hostname == "" {
+			hostname, err = os.Hostname()
+			if err != nil {
+				return Report{}, fmt.Errorf("resolve hostname: %w", err)
+			}
+		}
 		host.Hostname = hostname
 	}
 
@@ -172,14 +187,34 @@ func Scan(opts Options) (Report, error) {
 	return report, nil
 }
 
-// HostID derives a stable, non-identifying machine identifier from the given
-// hostname: it is the SHA-256 hash of the hostname, namespaced so it cannot be
-// confused with a hash of the same string computed elsewhere. Hashing means
-// the same machine always produces the same host_id, while the id itself
-// discloses nothing about the machine it names.
-func HostID(hostname string) string {
-	sum := sha256.Sum256([]byte("zerker.host-id.v1|" + hostname))
-	return hex.EncodeToString(sum[:])
+const hostIDLength = 32 // bytes of random identifier, hex-encoded on disk
+
+// loadOrCreateHostID returns the persistent, randomly generated identifier
+// stored at path, creating it on first use. Unlike a hash of the hostname,
+// a random id carries no information about the machine it names: it cannot
+// be recovered by hashing a dictionary of plausible hostnames.
+func loadOrCreateHostID(path string) (string, error) {
+	if existing, err := os.ReadFile(path); err == nil { //nolint:gosec // path is a fixed, non-user-controlled location under the home directory.
+		if id := strings.TrimSpace(string(existing)); id != "" {
+			return id, nil
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("read host id: %w", err)
+	}
+
+	raw := make([]byte, hostIDLength)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate host id: %w", err)
+	}
+	id := hex.EncodeToString(raw)
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", fmt.Errorf("create host id directory: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(id), 0o600); err != nil {
+		return "", fmt.Errorf("write host id: %w", err)
+	}
+	return id, nil
 }
 
 func countMCPServers(filesystem fs.FS, name string) (int, error) {
