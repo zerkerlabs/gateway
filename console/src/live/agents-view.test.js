@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildCreateBody, filterAgents, liveAgentsState, liveAgentsView, windowSince } from './agents-view.js';
+import { buildCreateBody, catalogComplete, filterAgents, liveAgentsState, liveAgentsView, windowSince } from './agents-view.js';
 import { normalizeAgent, summarizeAnalyticsByAgent } from './api.js';
 
 function agent(over = {}) {
@@ -23,6 +23,21 @@ function agent(over = {}) {
 function fields(map) {
   return { get: (k) => (k in map ? map[k] : null) };
 }
+
+test('catalogComplete is false when the loaded page is short of the tenant total', () => {
+  const saved = { agents: liveAgentsState.agents, agentsTotal: liveAgentsState.agentsTotal };
+  try {
+    liveAgentsState.agents = [agent({ id: 'agt_1' })];
+    liveAgentsState.agentsTotal = 150;
+    assert.equal(catalogComplete(), false);
+
+    liveAgentsState.agentsTotal = 1;
+    assert.equal(catalogComplete(), true);
+  } finally {
+    liveAgentsState.agents = saved.agents;
+    liveAgentsState.agentsTotal = saved.agentsTotal;
+  }
+});
 
 test('normalizeAgent keeps the fields the catalog renders', () => {
   const a = normalizeAgent({

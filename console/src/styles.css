@@ -427,6 +427,11 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 .policy-rule-row > span, .policy-rule-row strong, .policy-rule-row small { display: block; min-width: 0; }
 .policy-rule-row strong { font-size: 9px; line-height: 1.35; }
 .policy-rule-row small { margin-top: 4px; color: var(--faint); font-size: 8px; line-height: 1.4; }
+/* The live policy view renders four columns, not the fixture's six: there is no
+   stored per-rule scope, and no row-level write action to put in the trailing
+   column. Re-size the grid so the sample-match caveat sentence gets real width
+   instead of being squeezed into a track meant for a short label. */
+.live-policy-rule-columns, .live-policy-rule-row { grid-template-columns: 28px minmax(220px, 1.5fr) minmax(150px, .9fr) minmax(0, 1.4fr); }
 .rule-order { color: var(--faint); font: 520 9px "Geist Mono", monospace; }
 .compact-heading { margin-bottom: 12px; }
 .compact-heading h2 { font-size: 24px; }
