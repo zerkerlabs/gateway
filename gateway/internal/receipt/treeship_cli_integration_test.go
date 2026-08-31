@@ -39,3 +39,26 @@ func TestE2EAgainstRealTreeshipBinary(t *testing.T) {
 	}
 	t.Logf("attested: %v", e.Args(r))
 }
+
+// TestE2EDenialAgainstRealTreeshipBinary proves the denial path signs a real,
+// distinct artifact. Skipped unless ZERKER_TREESHIP_BIN is set.
+func TestE2EDenialAgainstRealTreeshipBinary(t *testing.T) {
+	bin := os.Getenv("ZERKER_TREESHIP_BIN")
+	if bin == "" {
+		t.Skip("ZERKER_TREESHIP_BIN unset")
+	}
+	e := NewTreeshipCLIEmitter(bin, "agent://zerker-gateway", nil)
+	method, tool := "tools/call", "write_file"
+	d := Denial{
+		TenantID: "tnt_e2e", AgentID: "agt_e2e", Protocol: "mcp",
+		MCPMethod: &method, MCPTool: &tool,
+		MatchedRule: "3", Reason: "denied by rule 3",
+		DeniedAt: time.Now().UTC(),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := e.EmitDenial(ctx, d); err != nil {
+		t.Fatalf("EmitDenial against the real binary failed: %v", err)
+	}
+	t.Logf("attested denial: %v", e.DenialArgs(d))
+}
