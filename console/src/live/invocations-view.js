@@ -295,7 +295,10 @@ export function deriveTrace(item) {
 
 // --- rows ----------------------------------------------------------------
 
-function row(item, names) {
+// Exported so the Overview page's "latest invocation sample" panel can render
+// the exact same row rather than keeping a second copy of this markup — see
+// live/overview-view.js.
+export function row(item, names) {
   const name = names.get(item.agentId);
   return `
     <article class="catalog-row live-invocation-row${item.status === 'failed' ? ' is-failed' : ''}">
