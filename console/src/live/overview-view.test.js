@@ -209,8 +209,11 @@ test('the preview scenario dropdown is gone', () => {
 
 test('policy decisions and payment volume are not presented as live metrics', () => {
   withReady({}, {}, {}, (html) => {
-    assert.doesNotMatch(html, /Policy decisions/);
-    assert.doesNotMatch(html, /Payment volume/);
+    // Scoped to the metric-label markup (metricCard's `<small>`) rather than
+    // the whole page: the static capability map at the bottom legitimately
+    // mentions "Policy decisions" as roadmap copy, not as a live metric.
+    assert.doesNotMatch(html, /<small>Policy decisions<\/small>/);
+    assert.doesNotMatch(html, /<small>Payment volume<\/small>/);
   });
 });
 
@@ -224,6 +227,14 @@ test('the context strip never claims fixture or preview data', () => {
 test('no workspace placeholder is printed when the session carries no tenant', () => {
   withReady({}, {}, {}, (html) => {
     assert.doesNotMatch(html, /Workspace/);
+  });
+});
+
+test('the capability map stays in place at the bottom of the live overview page', () => {
+  withReady({}, {}, {}, (html) => {
+    assert.match(html, /class="capability-section"/);
+    assert.match(html, /Capability delivery status/);
+    assert.match(html, /data-live-overview-nav="agents"/);
   });
 });
 

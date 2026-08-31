@@ -3,6 +3,7 @@ import { liveAgentsView, loadAgents, bindLiveAgents } from "./live/agents-view.j
 import { liveInvocationsView } from "./live/invocations-view.js";
 import { ensureAttentionLoaded, liveAttentionView } from "./live/attention-view.js";
 import { liveOverviewView } from "./live/overview-view.js";
+import { renderCapabilitySection } from "./capability-section.js";
 import { currentSession, renderSignIn, signOut } from "./live/gate.js";
 import { activity, agents, analyticsScenarios, analyticsSnapshot, analyticsWindows, attention, catalogSnapshot, credentialSnapshot, credentials, environmentSnapshot, environments, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, policySnapshot, privacy, products, restOperations, sdkInventory, stack, systemLimitations, systemSnapshot, trafficSnapshot } from "./data.js";
 import { analyticsTTFTLabel, buildAgentResults, buildAnalyticsModel, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, buildRestInventory, buildSDKInventory, buildSystemModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, formatAnalyticsDuration, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizePayments } from "./view-model.js";
@@ -122,17 +123,6 @@ function renderOverviewOperations(model) {
   return `${renderOverviewStateBanner(model)}${renderOverviewMetrics(model)}<div class="overview-grid">${renderOverviewAttention(model)}${renderOverviewRuntime(model)}</div>${renderOverviewTraffic(model)}`;
 }
 
-function renderCapabilitySection() {
-  return `<section class="capability-section"><div class="section-heading"><div><p class="kicker">Capability map</p><h2>Capability delivery status</h2></div><p>Roadmap context follows operational evidence. Available products and future integrations remain labeled separately.</p></div><div class="capability-grid">
-    ${capabilityCard("Discover", "Inventory local agents and runtime environments.", ["Catalog", "Local discovery", "Enrollment evidence"], "agents", [["Available OSS", "available"]])}
-    ${capabilityCard("Control", "Apply identity, credentials, rates and policy before traffic moves.", ["OIDC tenancy", "Policy decisions", "Protected credentials"], "policies", [["Available", "available"]])}
-    ${capabilityCard("Observe", "Inspect request and agent metadata without guessing what happened.", ["Invocations", "Latency & errors", "Metadata-only activity"], "analytics", [["Available OSS", "available"]])}
-    ${capabilityCard("Monetize", "Gate paid routes and settle through a separate facilitator.", ["x402 gate", "USDC on Base", "Settlement records"], "payments", [["Available", "available"]])}
-    ${capabilityCard("Verify", "Bind high-risk actions to deterministic evidence and signed records.", ["Reason certificates", "Treeship evidence", "Guard enforcement"], "stack", [["Standalone", "standalone"], ["Integration path", "integration"], ["Planned", "planned"]])}
-    ${capabilityCard("Publish & work", "Turn agents into products and dispatch bounded missions.", ["Customer portals", "Plans & docs", "Remote missions"], "products", [["Planned", "planned"]])}
-  </div></section>`;
-}
-
 function overviewView() {
   const model = currentOverviewModel();
   const attentionAction = model.attentionItems?.length ? '<button class="button secondary" data-view="attention">Open attention queue →</button>' : "";
@@ -150,10 +140,6 @@ function overviewView() {
     <div id="overview-state-region">${renderOverviewOperations(model)}</div>
     ${renderCapabilitySection()}
   </section>`;
-}
-
-function capabilityCard(title, copy, items, target, deliveryStates) {
-  return `<button class="capability-card" data-view="${target}"><span class="card-top"><strong>${title}</strong><span class="delivery-badges">${deliveryStates.map(([label, tone]) => status(label, tone)).join("")}</span></span><p>${copy}</p><ul>${items.map((item) => `<li>${item}</li>`).join("")}</ul><span class="card-link">Open surface →</span></button>`;
 }
 
 function attentionView() {
@@ -479,9 +465,10 @@ function stackView() {
   </section>`;
 }
 
-// `agents` is the one live surface: it reads and writes the real tenant
-// catalog through the BFF. Every other view here is still fixture-backed and
-// labelled as such — see console/README.md.
+// `overview`, `attention`, `invocations`, and `agents` are live surfaces,
+// reading (and for `agents`, writing) real tenant state through the BFF.
+// Every other view here is still fixture-backed and labelled as such — see
+// console/README.md.
 const views = { overview: liveOverviewView, attention: liveAttentionView, activity: activityView, invocations: liveInvocationsView, analytics: analyticsView, agents: liveAgentsView, environments: environmentsView, policies: policiesView, credentials: credentialsView, products: productsView, payments: paymentsView, stack: stackView };
 
 const mobilePrimaryViews = new Set(["overview", "invocations", "agents", "stack"]);

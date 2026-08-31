@@ -46,6 +46,7 @@ import { normalizeInvocation, row as invocationRow } from './invocations-view.js
 import { ATTENTION_RULES, deriveAttentionQueue, ensureAttentionLoaded, liveAttentionState } from './attention-view.js';
 import { renderSignIn } from './gate.js';
 import { deriveDataState } from '../view-model.js';
+import { renderCapabilitySection } from '../capability-section.js';
 
 const SAMPLE_SIZE = 5;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -385,6 +386,7 @@ export function liveOverviewView() {
   if (state.status === 'idle' || state.status === 'loading') {
     return `<section class="page-enter overview-page" data-live-overview-root>${header}
       ${dataStateBlock('loading', 'Loading live overview', "Reading traffic, attention, and runtime evidence from this tenant's Gateway.")}
+      ${renderCapabilitySection('data-live-overview-nav')}
     </section>`;
   }
 
@@ -394,6 +396,7 @@ export function liveOverviewView() {
     ${renderMetrics(model)}
     <div class="overview-grid">${renderAttentionPanel(model)}${renderRuntimePanel(model)}</div>
     ${renderSamplePanel(model)}
+    ${renderCapabilitySection('data-live-overview-nav')}
   </section>`;
 }
 
