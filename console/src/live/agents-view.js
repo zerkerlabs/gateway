@@ -87,7 +87,7 @@ export function filterAgents(agents, filters) {
 
 function statusChip(a) {
   if (a.status === 'active') return '<span class="status available">Active</span>';
-  if (a.status === 'pending') return '<span class="status planned">Pending upstream</span>';
+  if (a.status === 'pending') return '<span class="status pending">Pending upstream</span>';
   if (a.status === 'inactive') return '<span class="status empty">Inactive</span>';
   return `<span class="status">${esc(a.status || UNKNOWN)}</span>`;
 }

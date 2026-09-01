@@ -50,7 +50,7 @@ main:focus { outline: none; }
 .side-nav { flex: 1; overflow-y: auto; padding: 16px 12px 24px; scrollbar-width: thin; }
 .nav-group { margin-bottom: 18px; }
 .nav-group > p { margin: 0 10px 6px; color: var(--faint); font: 560 9px "Geist Mono", monospace; letter-spacing: .15em; text-transform: uppercase; }
-.nav-item { width: 100%; min-height: 38px; border: 0; border-radius: 7px; padding: 7px 10px; display: grid; grid-template-columns: 23px minmax(0, 1fr) auto; align-items: center; gap: 8px; background: transparent; color: var(--muted); text-align: left; font-size: 12px; }
+.nav-item { width: 100%; min-height: 38px; border: 0; border-radius: 7px; padding: 7px 10px; display: grid; grid-template-columns: 23px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; background: transparent; color: var(--muted); text-align: left; font-size: 12px; }
 .nav-item:hover { background: rgba(255,255,255,.7); color: var(--ink); }
 .nav-item.active { background: var(--ink); color: white; font-weight: 610; }
 .nav-icon { text-align: center; font-size: 15px; }
@@ -58,10 +58,14 @@ main:focus { outline: none; }
 .nav-item.active .nav-badge { background: rgba(255,255,255,.17); color: white; }
 .status-pin { width: 7px; height: 7px; border-radius: 50%; }
 .status-pin.review { background: var(--violet); }
+.status-pin.preview { background: var(--violet); }
 .status-pin.planned { border: 1px solid var(--faint); }
+.nav-item.active .status-pin.preview { background: #b3a9ff; }
+.nav-item.active .status-pin.planned { border-color: rgba(255,255,255,.6); }
 .sidebar-bottom { border-top: 1px solid var(--line); padding: 12px; display: grid; gap: 9px; }
 .preview-notice { display: flex; align-items: center; gap: 10px; padding: 7px 9px; }
 .preview-notice > span { width: 8px; height: 8px; border-radius: 50%; background: var(--violet); box-shadow: 0 0 0 4px var(--violet-soft); }
+.preview-notice[data-wiring="live"] > span { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
 .preview-notice div, .preview-notice div strong, .preview-notice div small { display: block; }
 .preview-notice strong { font-size: 10px; }
 .preview-notice small { margin-top: 2px; color: var(--faint); font-size: 9px; }
@@ -119,7 +123,7 @@ h1 strong { color: var(--violet); font-weight: 650; }
 .status.available i, .status.active i, .status.healthy i, .status.succeeded i, .status.settled i, .status.allow i, .status.managed i, .status.completed i { background: var(--green); }
 .status.review, .status.integration, .status.standalone, .status.loading, .status.commercial { background: var(--violet-soft); color: #4b3dcc; }
 .status.review i, .status.integration i, .status.standalone i, .status.loading i, .status.commercial i { background: var(--violet); }
-.status.planned, .status.direction, .status.vault, .status.empty, .status.unavailable, .status.inactive, .status.enrolled { background: #f1f1ee; color: var(--muted); }
+.status.planned, .status.pending, .status.direction, .status.vault, .status.empty, .status.unavailable, .status.inactive, .status.enrolled { background: #f1f1ee; color: var(--muted); }
 .status.inactive i, .status.enrolled i { background: var(--faint); }
 .status.discovered { background: var(--blue-soft); color: var(--blue); }
 .status.discovered i { background: var(--blue); }
@@ -374,10 +378,10 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 .agent-evidence.available-evidence { border-left-color: var(--green); }
 .agent-evidence b { color: var(--muted); font-size: 8px; line-height: 1.35; }
 .catalog-inspect .inspect-button { width: 100%; }
-.catalog-empty { min-height: 260px; padding: 32px; display: grid; align-content: center; justify-items: start; border: 1px dashed var(--line-dark); border-radius: 10px; background: var(--white); }
+.catalog-empty { min-height: 260px; padding: 32px; display: grid; align-content: center; justify-items: start; border: 1px solid var(--line); border-radius: 10px; background: var(--white); }
 .catalog-empty h2 { margin-bottom: 7px; font-size: 23px; letter-spacing: -.035em; }
 .catalog-empty p:not(.kicker) { max-width: 560px; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.empty-state { padding: 50px 20px; border: 1px dashed var(--line-dark); border-radius: 10px; color: var(--muted); text-align: center; font-size: 11px; }
+.empty-state { padding: 50px 20px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); text-align: center; font-size: 11px; }
 
 .environment-group { margin-bottom: 30px; }
 .environment-group-heading { margin-bottom: 12px; display: flex; justify-content: space-between; align-items: end; gap: 24px; }
@@ -451,7 +455,7 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 .policy-decision-row > span, .policy-decision-row strong, .policy-decision-row small { display: block; min-width: 0; }
 .policy-decision-row strong { font-size: 9px; line-height: 1.4; }
 .policy-decision-row small { margin-top: 4px; color: var(--faint); font-size: 8px; line-height: 1.4; }
-.governance-empty { min-height: 250px; border: 1px dashed var(--line-dark); border-radius: 10px; background: var(--white); padding: 30px; display: grid; align-content: center; justify-items: start; }
+.governance-empty { min-height: 250px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); padding: 30px; display: grid; align-content: center; justify-items: start; }
 .governance-empty h2 { margin-bottom: 7px; font-size: 22px; letter-spacing: -.035em; }
 .governance-empty p:not(.kicker) { max-width: 580px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .policy-limitations { margin-top: 16px; border: 1px solid var(--line-dark); border-left: 4px solid var(--amber); border-radius: 11px; background: var(--white); padding: 18px; display: grid; grid-template-columns: .7fr 1.3fr; gap: 22px; }
@@ -892,9 +896,34 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 .system-limitations b { display: block; margin-bottom: 4px; color: var(--ink); font-size: 9px; }
 .system-posture-grid { margin-bottom: 28px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .system-posture-card { min-width: 0; border: 1px solid var(--line); border-radius: 11px; background: var(--white); padding: 16px; }
+
+/* --- wiring state ----------------------------------------------------------
+   Dashed borders are reserved for wiring state — "this is not reading the live
+   Gateway". Empty, stale and unavailable states use solid hairlines and say
+   what they are in words, so an empty live catalog never reads as preview.
+
+   Preview content is framed, never dimmed: reduced contrast would collide with
+   the stale and unavailable states UX_RUBRIC.md keeps distinct. */
+.wiring-badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 8px; font: 620 9px "Geist Mono", monospace; letter-spacing: .04em; white-space: nowrap; }
+.wiring-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; }
+.wiring-badge.compact { padding: 2px 6px; font-size: 8px; }
+.wiring-badge.preview { background: var(--violet-soft); color: #4b3dcc; }
+.wiring-badge.preview::before { background: var(--violet); }
+.wiring-badge.planned { background: #f1f1ee; color: var(--muted); }
+.wiring-badge.planned::before { border: 1px solid var(--faint); }
+
+/* Frame the container, leave the type inside at full contrast. The accent edge
+   is left alone — a dashed 4px bar reads as a rendering fault, not a signal. */
+[data-wiring="preview"]:not(.preview-notice), [data-wiring="planned"]:not(.preview-notice) { border-top-style: dashed; border-right-style: dashed; border-bottom-style: dashed; border-left-style: dashed; }
+[data-wiring="preview"] { border-color: #b9b1ff; }
+[data-wiring="planned"] { border-color: var(--line-dark); }
+
+.posture-badges { flex: 0 1 auto; max-width: 46%; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+
 .system-posture-top { min-height: 66px; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .system-posture-top h2 { margin: 0; font-size: 17px; letter-spacing: -.03em; }
-.system-posture-top .status { max-width: 50%; line-height: 1.3; white-space: normal; }
+.system-posture-top .status { max-width: 100%; line-height: 1.3; white-space: normal; }
+.system-posture-top > div:first-child { min-width: 0; flex: 1 1 auto; }
 .system-posture-card dl { margin: 7px 0 13px; }
 .system-posture-card dl > div { min-height: 40px; padding: 8px 0; display: grid; grid-template-columns: .42fr .58fr; gap: 10px; border-bottom: 1px solid var(--line); font-size: 8px; line-height: 1.4; }
 .system-posture-card dt { color: var(--faint); }
