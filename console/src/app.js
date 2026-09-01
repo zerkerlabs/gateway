@@ -9,6 +9,7 @@ import { liveCredentialsView } from "./live/credentials-view.js";
 import { livePoliciesView } from "./live/policies-view.js";
 import { livePaymentsView } from "./live/payments-view.js";
 import { currentSession, renderSignIn, signOut } from "./live/gate.js";
+import { LIVE, PREVIEW, wiringAttrs, wiringBadge, wiringLabel, wiringOf, wiringSummary } from "./wiring.js";
 import { activity, agents, analyticsScenarios, analyticsSnapshot, analyticsWindows, attention, catalogSnapshot, credentialSnapshot, credentials, environmentSnapshot, environments, facilitatorPosture, invocations, onboardingEvidence, overviewMetricSources, overviewScenarios, overviewSnapshot, paymentOperations, paymentSnapshot, policies, policySnapshot, privacy, products, restOperations, sdkInventory, stack, systemLimitations, systemSnapshot, trafficSnapshot } from "./data.js";
 import { analyticsTTFTLabel, buildAgentResults, buildAnalyticsModel, buildCredentialResults, buildInvocationResults, buildOverviewModel, buildPaymentResults, buildPolicyDecisionResults, buildPolicyModel, buildRestInventory, buildSDKInventory, buildSystemModel, capabilityCounts, catalogStatusReason, credentialAuthLabel, credentialDeletePosture, credentialHintLabel, credentialReferenceLabel, credentialReferenceState, credentialSourceLabel, defaultAgentFilters, defaultCredentialFilters, defaultInvocationFilters, defaultPaymentFilters, defaultPolicyDecisionFilters, deliveryTruthLabel, deriveCatalogStatus, deriveFailureDiagnosis, deriveInvocationTrace, deriveObserverEvidenceState, derivePaymentDiagnosis, derivePaymentTrace, facilitatorModeLabel, filterAgents, formatAnalyticsDuration, formatCount, formatCurrency, formatPercent, formatTimestamp, invocationModeLabel, invocationPaymentLabel, invocationRelativeLabel, invocationTimestampLabel, observerEvidenceLabel, paymentGateLabel, paymentSettlementLabel, paymentUpstreamLabel, pricingLabel, protocolLabel, protocolTransportLabel, rateBoundaryLabel, safeCredentialMetadata, scrollBehaviorForMotion, stateLabel, summarizeAgents, summarizePayments } from "./view-model.js";
 
@@ -455,8 +456,11 @@ function paymentsView() {
   </section>`;
 }
 
-function systemPostureCard(id, kicker, title, badge, tone, facts) {
-  return `<article class="system-posture-card"><div class="system-posture-top"><div><p class="kicker">${kicker}</p><h2>${title}</h2></div>${status(badge, tone)}</div><dl>${facts.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl><button class="inspect-button" data-system-detail="${id}" aria-label="Inspect ${title} fixture posture">Inspect posture →</button></article>`;
+// `wiring` marks a card that disagrees with its view. Sub-view marking is the
+// case that matters now that most views are live: a per-view label cannot say
+// "this one panel is still a fixture".
+function systemPostureCard(id, kicker, title, badge, tone, facts, wiring = LIVE) {
+  return `<article class="system-posture-card"${wiringAttrs(wiring)}><div class="system-posture-top"><div><p class="kicker">${kicker}</p><h2>${title}</h2></div><div class="posture-badges">${wiringBadge(wiring, { compact: true })}${status(badge, tone)}</div></div><dl>${facts.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl><button class="inspect-button" data-system-detail="${id}" aria-label="Inspect ${title} fixture posture">Inspect posture →</button></article>`;
 }
 
 function restOperationPosture(operation) {
@@ -471,7 +475,7 @@ function stackView() {
     <section class="runtime-strip system-runtime"><div><span class="fixture-health-dot" aria-hidden="true"></span><span><strong>${systemModel.health.label}</strong><small>${formatTimestamp(systemSnapshot.health.capturedAt)} · one captured probe</small></span></div><div><strong>${systemSnapshot.build.version}</strong><small>${systemSnapshot.build.commit}</small></div><div><strong>${systemModel.rollout.label}</strong><small>Replica parity not proved</small></div><div><strong>${restInventory.total} operations</strong><small>${restInventory.counts.probe} probe · ${restInventory.counts.read} read · ${restInventory.counts.proxy} proxy · ${restInventory.counts.write} write</small></div><div><strong>${systemModel.facilitator.label}</strong><small>/supported and gas not probed</small></div></section>
     <section class="system-limitations"><div><p class="kicker">Known limitations · operator verification</p><h2>${systemModel.limitations.length} facts block a stronger readiness claim.</h2><p>Fixture configuration, support, and one captured probe are not continuous health, migration, backup, rollout, signer, or facilitator readiness evidence.</p><button class="inspect-button" data-system-detail="limitations" aria-label="Inspect all known system limitations">Inspect all limitations →</button></div><div>${systemModel.limitations.map((item) => `<span><b>${item.title}</b>${item.detail}</span>`).join("")}</div></section>
     <section class="system-posture-grid" aria-label="Gateway fixture system posture">
-      ${systemPostureCard("runtime", "Captured probes", "Health & build", systemModel.health.label, "available", [["Health", "One fixed /healthz sample"], ["Build", "One deliberate /version sample"], ["Rollout", systemModel.rollout.label]])}
+      ${systemPostureCard("runtime", "Captured probes", "Health & build", systemModel.health.label, "available", [["Health", "One fixed /healthz sample"], ["Build", "One deliberate /version sample"], ["Rollout", systemModel.rollout.label]], PREVIEW)}
       ${systemPostureCard("storage", "Production path", "Storage & migrations", "Contract posture", "review", [["Durable", systemSnapshot.storage.production], ["Migrations", systemSnapshot.storage.migrations], ["Backup", systemSnapshot.storage.backup]])}
       ${systemPostureCard("kms", "Credential protection", "KMS & key rotation", systemModel.kms.label, "review", [["Requirement", systemSnapshot.kms.requirement], ["Fallback", systemSnapshot.kms.fallback], ["Master rotation", systemSnapshot.kms.masterRotation]])}
       ${systemPostureCard("security", "Trust boundary", "Identity & network", "Contract invariants", "available", [["Gateway API", systemSnapshot.security.apiIdentity], ["Console auth", systemSnapshot.security.consoleIdentity], ["Tenant isolation", systemSnapshot.security.tenancy]])}
@@ -484,13 +488,40 @@ function stackView() {
   </section>`;
 }
 
-// `overview`, `attention`, `invocations`, `analytics`, `agents`, `credentials`,
-// and `policies` are live surfaces, reading (and for `agents`, writing) real
-// tenant state through the BFF. Every other view here is still fixture-backed
-// and labelled as such — see console/README.md.
+// Which of these read the real tenant is declared once, in wiring.js — the
+// nav pins, sidebar summary and topbar line all derive from it. Adding a view
+// here means adding it there too; wiring.test.js reads this map and fails if
+// the two disagree.
 const views = { overview: liveOverviewView, attention: liveAttentionView, activity: liveActivityView, invocations: liveInvocationsView, analytics: liveAnalyticsView, agents: liveAgentsView, environments: environmentsView, policies: livePoliciesView, credentials: liveCredentialsView, products: productsView, payments: livePaymentsView, stack: stackView };
 
 const mobilePrimaryViews = new Set(["overview", "invocations", "agents", "stack"]);
+
+// Nav pins, the sidebar summary and the topbar context line, stamped from the
+// wiring map instead of written into index.html. All three were hardcoded, and
+// all three were wrong: the sidebar claimed only the agent catalog was live and
+// the topbar said "Preview fixture" on every view, including the nine that read
+// the real tenant.
+function applyNavWiring() {
+  document.querySelectorAll(".side-nav [data-view], .mobile-nav [data-view]").forEach((button) => {
+    const state = wiringOf(button.dataset.view);
+    button.querySelectorAll(".status-pin, .wiring-sr").forEach((node) => node.remove());
+    if (state === LIVE) return;
+    button.insertAdjacentHTML("beforeend",
+      `<span class="status-pin ${state}" aria-hidden="true"></span><span class="wiring-sr sr-only">${wiringLabel(state)}</span>`);
+  });
+
+  // The topbar names the current view's state; the sidebar names the aggregate.
+  document.querySelectorAll("[data-top-wiring]").forEach((node) => {
+    node.textContent = wiringLabel(wiringOf(activeView));
+  });
+
+  const summary = wiringSummary();
+  const notice = document.querySelector(".preview-notice");
+  if (!notice) return;
+  notice.dataset.wiring = summary.state;
+  notice.querySelector("strong").textContent = summary.label;
+  notice.querySelector("small").textContent = summary.detail;
+}
 
 function syncNavigation() {
   document.querySelectorAll("[data-view]").forEach((button) => {
@@ -509,6 +540,7 @@ function render(view = activeView, { focusMain = false, scroll = true } = {}) {
   main.innerHTML = views[activeView]();
   document.title = `${labels[activeView]} — Zerker Gateway preview`;
   syncNavigation();
+  applyNavWiring();
   bindPageEvents();
   history.replaceState(null, "", `#${activeView}`);
   if (scroll) {
