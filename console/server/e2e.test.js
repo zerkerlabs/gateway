@@ -134,7 +134,11 @@ describe('end to end against a real issuer', () => {
     const res = await fetch(`${base}/some/deep/link`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-type'), /html/);
-    assert.match(await res.text(), /ZERKER/);
+    // The shell's own title, not brand markup: the sidebar brand is rendered
+    // by the app at runtime, so asserting on it would test the bundle rather
+    // than the thing this test is about — that an unknown path is answered
+    // with the console document instead of a 404.
+    assert.match(await res.text(), /<title>Zerker Console<\/title>/);
   });
 
   test('security headers are set on every response', async () => {
