@@ -209,9 +209,9 @@ func (s *MemoryStore) ListFiltered(ctx context.Context, tenantID string, filter 
 }
 
 // Aggregate implements Store.
-func (s *MemoryStore) Aggregate(ctx context.Context, tenantID string, q AggregateQuery) ([]AggregateGroup, error) {
+func (s *MemoryStore) Aggregate(ctx context.Context, tenantID string, q AggregateQuery) (AggregateResult, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return AggregateResult{}, err
 	}
 
 	// Hold the read lock through aggregation: rows are live record pointers, and
@@ -313,6 +313,14 @@ func (s *MemoryStore) Update(ctx context.Context, tenantID, id string, fields Up
 	if fields.PaymentNonce != nil {
 		pn := *fields.PaymentNonce
 		rec.PaymentNonce = &pn
+	}
+	if fields.ReceiptArtifactID != nil {
+		v := *fields.ReceiptArtifactID
+		rec.ReceiptArtifactID = &v
+	}
+	if fields.ReceiptSignedAt != nil {
+		t := *fields.ReceiptSignedAt
+		rec.ReceiptSignedAt = &t
 	}
 	if fields.SettlementStatus != nil {
 		ss := *fields.SettlementStatus

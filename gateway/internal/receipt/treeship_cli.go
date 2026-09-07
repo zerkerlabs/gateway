@@ -175,11 +175,18 @@ func (e *TreeshipCLIEmitter) Args(r Receipt) []string {
 // It is logged by the caller through the returned error on failure, and is
 // recoverable from the local Treeship store on success.
 func (e *TreeshipCLIEmitter) Emit(ctx context.Context, r Receipt) error {
+	_, err := e.EmitAttested(ctx, r)
+	return err
+}
+
+// EmitAttested implements AttestingEmitter: it emits r and reports the
+// artifact the CLI signed, so the caller can record a reference to it.
+func (e *TreeshipCLIEmitter) EmitAttested(ctx context.Context, r Receipt) (Attestation, error) {
 	select {
 	case e.slots <- struct{}{}:
 		defer func() { <-e.slots }()
 	default:
-		return ErrTreeshipBusy
+		return Attestation{}, ErrTreeshipBusy
 	}
 
 	return e.run(ctx, e.Args(r), actionLabel)
@@ -189,28 +196,32 @@ func (e *TreeshipCLIEmitter) Emit(ctx context.Context, r Receipt) error {
 // Emit and EmitDenial so the two cannot drift on what counts as a successful
 // attestation — the check that matters most here is the one that is easiest to
 // forget to copy.
-func (e *TreeshipCLIEmitter) run(ctx context.Context, args []string, wantAction string) error {
+func (e *TreeshipCLIEmitter) run(ctx context.Context, args []string, wantAction string) (Attestation, error) {
 	out, err := e.runner(ctx, e.binaryPath, args)
 	if err != nil {
-		return err
+		return Attestation{}, err
 	}
 
 	var resp cliResponse
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return fmt.Errorf("%w: unparseable CLI response", ErrTreeshipUnavailable)
+		return Attestation{}, fmt.Errorf("%w: unparseable CLI response", ErrTreeshipUnavailable)
 	}
 	// Trust the bytes, not the exit code. A zero exit with a non-ok status, or
 	// with no artifact ID, means nothing was signed — reporting that as a
 	// successful attestation would put a receipt in the log for an artifact
 	// that does not exist.
 	if resp.Status != "ok" || resp.ID == "" {
-		return fmt.Errorf("%w: CLI reported status %q", ErrTreeshipUnavailable, resp.Status)
+		return Attestation{}, fmt.Errorf("%w: CLI reported status %q", ErrTreeshipUnavailable, resp.Status)
 	}
 	if resp.Action != wantAction {
-		return fmt.Errorf("%w: CLI attested action %q, expected %q",
+		return Attestation{}, fmt.Errorf("%w: CLI attested action %q, expected %q",
 			ErrTreeshipUnavailable, resp.Action, wantAction)
 	}
-	return nil
+	// resp.Actor is the CLI's own report of what it signed as, not e.actor:
+	// if the two ever disagree, the artifact carries the CLI's value, and a
+	// stored reference that says otherwise would be wrong about the one field
+	// an auditor uses to find the signing key.
+	return Attestation{ArtifactID: resp.ID, Actor: resp.Actor, SignedAt: time.Now().UTC()}, nil
 }
 
 // invocationDigest binds the artifact to one invocation.
@@ -297,11 +308,17 @@ func (e *TreeshipCLIEmitter) DenialArgs(d Denial) []string {
 // exactly the load where that matters most — a separate pool would double the
 // ceiling the bound was chosen to hold.
 func (e *TreeshipCLIEmitter) EmitDenial(ctx context.Context, d Denial) error {
+	_, err := e.EmitDenialAttested(ctx, d)
+	return err
+}
+
+// EmitDenialAttested implements AttestingDenialEmitter.
+func (e *TreeshipCLIEmitter) EmitDenialAttested(ctx context.Context, d Denial) (Attestation, error) {
 	select {
 	case e.slots <- struct{}{}:
 		defer func() { <-e.slots }()
 	default:
-		return ErrTreeshipBusy
+		return Attestation{}, ErrTreeshipBusy
 	}
 	return e.run(ctx, e.DenialArgs(d), denialActionLabel)
 }

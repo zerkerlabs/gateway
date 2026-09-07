@@ -107,6 +107,19 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.CredentialRef != nil && *req.CredentialRef != "" {
+		ok, err := h.checkCredentialRef(r.Context(), tenant, *req.CredentialRef)
+		if err != nil {
+			h.logger.Error("create agent: credential lookup error", "err", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusBadRequest, "credential_ref does not resolve to a credential owned by this tenant")
+			return
+		}
+	}
+
 	protocol := req.Protocol
 	if protocol == "" {
 		protocol = "http"

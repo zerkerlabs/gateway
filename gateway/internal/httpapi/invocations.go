@@ -61,29 +61,34 @@ func toInvocationSettlement(inv *invocation.Invocation) *invocationSettlement {
 // invocationListItem is the per-row shape returned by GET /v1/invocations.
 // Bodies are never included on the list endpoint (spec 0003).
 type invocationListItem struct {
-	ID             string                `json:"id"`
-	AgentID        string                `json:"agent_id"`
-	Mode           string                `json:"mode"`
-	Status         string                `json:"status"`
-	ErrorClass     *string               `json:"error_class"`
-	Model          *string               `json:"model"`
-	MCPMethod      *string               `json:"mcp_method"`
-	MCPTool        *string               `json:"mcp_tool"`
-	PaymentNetwork *string               `json:"payment_network"`
-	PaymentAsset   *string               `json:"payment_asset"`
-	PaymentAmount  *string               `json:"payment_amount"`
-	PaymentPayer   *string               `json:"payment_payer"`
-	PaymentNonce   *string               `json:"payment_nonce"`
-	PolicyAction   *string               `json:"policy_action"`
-	PolicyRule     *string               `json:"policy_matched_rule"`
-	Settlement     *invocationSettlement `json:"settlement,omitempty"`
-	UpstreamStatus *int                  `json:"upstream_status"`
-	LatencyMS      *int64                `json:"latency_ms"`
-	TTFTMS         *int64                `json:"ttft_ms"`
-	ReqSize        *int64                `json:"req_size"`
-	RespSize       *int64                `json:"resp_size"`
-	CreatedAt      time.Time             `json:"created_at"`
-	CompletedAt    *time.Time            `json:"completed_at"`
+	ID             string  `json:"id"`
+	AgentID        string  `json:"agent_id"`
+	Mode           string  `json:"mode"`
+	Status         string  `json:"status"`
+	ErrorClass     *string `json:"error_class"`
+	Model          *string `json:"model"`
+	MCPMethod      *string `json:"mcp_method"`
+	MCPTool        *string `json:"mcp_tool"`
+	PaymentNetwork *string `json:"payment_network"`
+	PaymentAsset   *string `json:"payment_asset"`
+	PaymentAmount  *string `json:"payment_amount"`
+	PaymentPayer   *string `json:"payment_payer"`
+	PaymentNonce   *string `json:"payment_nonce"`
+	PolicyAction   *string `json:"policy_action"`
+	PolicyRule     *string `json:"policy_matched_rule"`
+	// ReceiptArtifactID is the Treeship artifact signed for this invocation,
+	// null when none was recorded. Present on the list so an operator can see
+	// which calls carry evidence without opening each one; the receipt itself
+	// is at GET /v1/invocations/{id}/receipt.
+	ReceiptArtifactID *string               `json:"receipt_artifact_id"`
+	Settlement        *invocationSettlement `json:"settlement,omitempty"`
+	UpstreamStatus    *int                  `json:"upstream_status"`
+	LatencyMS         *int64                `json:"latency_ms"`
+	TTFTMS            *int64                `json:"ttft_ms"`
+	ReqSize           *int64                `json:"req_size"`
+	RespSize          *int64                `json:"resp_size"`
+	CreatedAt         time.Time             `json:"created_at"`
+	CompletedAt       *time.Time            `json:"completed_at"`
 }
 
 type invocationListResponse struct {
@@ -95,28 +100,29 @@ type invocationListResponse struct {
 
 func toInvocationListItem(inv *invocation.Invocation) invocationListItem {
 	item := invocationListItem{
-		ID:             inv.ID,
-		AgentID:        inv.AgentID,
-		Mode:           string(inv.Mode),
-		Status:         string(inv.Status),
-		UpstreamStatus: inv.UpstreamStatus,
-		LatencyMS:      inv.LatencyMS,
-		TTFTMS:         inv.TTFTMS,
-		ReqSize:        inv.RequestSize,
-		RespSize:       inv.ResponseSize,
-		CreatedAt:      inv.CreatedAt,
-		CompletedAt:    inv.CompletedAt,
-		Model:          inv.Model,
-		MCPMethod:      inv.MCPMethod,
-		MCPTool:        inv.MCPTool,
-		PolicyAction:   inv.PolicyAction,
-		PolicyRule:     inv.PolicyMatchedRule,
-		PaymentNetwork: inv.PaymentNetwork,
-		PaymentAsset:   inv.PaymentAsset,
-		PaymentAmount:  inv.PaymentAmount,
-		PaymentPayer:   inv.PaymentPayer,
-		PaymentNonce:   inv.PaymentNonce,
-		Settlement:     toInvocationSettlement(inv),
+		ID:                inv.ID,
+		AgentID:           inv.AgentID,
+		Mode:              string(inv.Mode),
+		Status:            string(inv.Status),
+		UpstreamStatus:    inv.UpstreamStatus,
+		LatencyMS:         inv.LatencyMS,
+		TTFTMS:            inv.TTFTMS,
+		ReqSize:           inv.RequestSize,
+		RespSize:          inv.ResponseSize,
+		CreatedAt:         inv.CreatedAt,
+		CompletedAt:       inv.CompletedAt,
+		Model:             inv.Model,
+		MCPMethod:         inv.MCPMethod,
+		MCPTool:           inv.MCPTool,
+		PolicyAction:      inv.PolicyAction,
+		PolicyRule:        inv.PolicyMatchedRule,
+		ReceiptArtifactID: inv.ReceiptArtifactID,
+		PaymentNetwork:    inv.PaymentNetwork,
+		PaymentAsset:      inv.PaymentAsset,
+		PaymentAmount:     inv.PaymentAmount,
+		PaymentPayer:      inv.PaymentPayer,
+		PaymentNonce:      inv.PaymentNonce,
+		Settlement:        toInvocationSettlement(inv),
 	}
 	if inv.ErrorClass != nil {
 		ec := string(*inv.ErrorClass)
@@ -279,32 +285,37 @@ func (h *Handler) handleListInvocations(w http.ResponseWriter, r *http.Request) 
 // both capture was on for the row AND the caller holds the
 // invocations:read_body scope (spec 0003 §4, §5).
 type invocationDetailResponse struct {
-	ID             string                `json:"id"`
-	AgentID        string                `json:"agent_id"`
-	Mode           string                `json:"mode"`
-	Status         string                `json:"status"`
-	ErrorClass     *string               `json:"error_class"`
-	Model          *string               `json:"model"`
-	MCPMethod      *string               `json:"mcp_method"`
-	MCPTool        *string               `json:"mcp_tool"`
-	PaymentNetwork *string               `json:"payment_network"`
-	PaymentAsset   *string               `json:"payment_asset"`
-	PaymentAmount  *string               `json:"payment_amount"`
-	PaymentPayer   *string               `json:"payment_payer"`
-	PaymentNonce   *string               `json:"payment_nonce"`
-	PolicyAction   *string               `json:"policy_action"`
-	PolicyRule     *string               `json:"policy_matched_rule"`
-	Settlement     *invocationSettlement `json:"settlement,omitempty"`
-	UpstreamStatus *int                  `json:"upstream_status"`
-	LatencyMS      *int64                `json:"latency_ms"`
-	TTFTMS         *int64                `json:"ttft_ms"`
-	ReqSize        *int64                `json:"req_size"`
-	RespSize       *int64                `json:"resp_size"`
-	BodyCaptured   bool                  `json:"body_captured"`
-	ReqBody        *string               `json:"req_body,omitempty"`
-	RespBody       *string               `json:"resp_body,omitempty"`
-	CreatedAt      time.Time             `json:"created_at"`
-	CompletedAt    *time.Time            `json:"completed_at"`
+	ID             string  `json:"id"`
+	AgentID        string  `json:"agent_id"`
+	Mode           string  `json:"mode"`
+	Status         string  `json:"status"`
+	ErrorClass     *string `json:"error_class"`
+	Model          *string `json:"model"`
+	MCPMethod      *string `json:"mcp_method"`
+	MCPTool        *string `json:"mcp_tool"`
+	PaymentNetwork *string `json:"payment_network"`
+	PaymentAsset   *string `json:"payment_asset"`
+	PaymentAmount  *string `json:"payment_amount"`
+	PaymentPayer   *string `json:"payment_payer"`
+	PaymentNonce   *string `json:"payment_nonce"`
+	PolicyAction   *string `json:"policy_action"`
+	PolicyRule     *string `json:"policy_matched_rule"`
+	// ReceiptArtifactID is the Treeship artifact signed for this invocation,
+	// null when none was recorded. Present on the list so an operator can see
+	// which calls carry evidence without opening each one; the receipt itself
+	// is at GET /v1/invocations/{id}/receipt.
+	ReceiptArtifactID *string               `json:"receipt_artifact_id"`
+	Settlement        *invocationSettlement `json:"settlement,omitempty"`
+	UpstreamStatus    *int                  `json:"upstream_status"`
+	LatencyMS         *int64                `json:"latency_ms"`
+	TTFTMS            *int64                `json:"ttft_ms"`
+	ReqSize           *int64                `json:"req_size"`
+	RespSize          *int64                `json:"resp_size"`
+	BodyCaptured      bool                  `json:"body_captured"`
+	ReqBody           *string               `json:"req_body,omitempty"`
+	RespBody          *string               `json:"resp_body,omitempty"`
+	CreatedAt         time.Time             `json:"created_at"`
+	CompletedAt       *time.Time            `json:"completed_at"`
 }
 
 // handleGetInvocation handles GET /v1/invocations/{id}. It returns full
@@ -344,29 +355,30 @@ func toInvocationDetailResponse(inv *invocation.Invocation, hasReadBody bool) in
 	bodyCaptured := inv.RequestBody != nil || inv.ResponseBody != nil
 
 	resp := invocationDetailResponse{
-		ID:             inv.ID,
-		AgentID:        inv.AgentID,
-		Mode:           string(inv.Mode),
-		Status:         string(inv.Status),
-		UpstreamStatus: inv.UpstreamStatus,
-		LatencyMS:      inv.LatencyMS,
-		TTFTMS:         inv.TTFTMS,
-		ReqSize:        inv.RequestSize,
-		RespSize:       inv.ResponseSize,
-		BodyCaptured:   bodyCaptured,
-		CreatedAt:      inv.CreatedAt,
-		CompletedAt:    inv.CompletedAt,
-		Model:          inv.Model,
-		MCPMethod:      inv.MCPMethod,
-		MCPTool:        inv.MCPTool,
-		PolicyAction:   inv.PolicyAction,
-		PolicyRule:     inv.PolicyMatchedRule,
-		PaymentNetwork: inv.PaymentNetwork,
-		PaymentAsset:   inv.PaymentAsset,
-		PaymentAmount:  inv.PaymentAmount,
-		PaymentPayer:   inv.PaymentPayer,
-		PaymentNonce:   inv.PaymentNonce,
-		Settlement:     toInvocationSettlement(inv),
+		ID:                inv.ID,
+		AgentID:           inv.AgentID,
+		Mode:              string(inv.Mode),
+		Status:            string(inv.Status),
+		UpstreamStatus:    inv.UpstreamStatus,
+		LatencyMS:         inv.LatencyMS,
+		TTFTMS:            inv.TTFTMS,
+		ReqSize:           inv.RequestSize,
+		RespSize:          inv.ResponseSize,
+		BodyCaptured:      bodyCaptured,
+		CreatedAt:         inv.CreatedAt,
+		CompletedAt:       inv.CompletedAt,
+		Model:             inv.Model,
+		MCPMethod:         inv.MCPMethod,
+		MCPTool:           inv.MCPTool,
+		PolicyAction:      inv.PolicyAction,
+		PolicyRule:        inv.PolicyMatchedRule,
+		ReceiptArtifactID: inv.ReceiptArtifactID,
+		PaymentNetwork:    inv.PaymentNetwork,
+		PaymentAsset:      inv.PaymentAsset,
+		PaymentAmount:     inv.PaymentAmount,
+		PaymentPayer:      inv.PaymentPayer,
+		PaymentNonce:      inv.PaymentNonce,
+		Settlement:        toInvocationSettlement(inv),
 	}
 
 	if inv.ErrorClass != nil {

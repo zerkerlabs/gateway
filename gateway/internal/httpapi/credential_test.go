@@ -649,3 +649,83 @@ func TestHandleDeleteCredential(t *testing.T) {
 		})
 	}
 }
+
+// An unresolvable credential_ref is caller input, and invariant #3 requires a
+// 4xx for it. Without the check the agents_credential_ref_fk constraint turns
+// a typo into a 500 — a server fault reported for a client mistake.
+func TestAgentWrite_UnknownCredentialRefIs400(t *testing.T) {
+	t.Parallel()
+
+	t.Run("create", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newCredHandler(t)
+		req := authedCredReq(t, http.MethodPost, "/v1/agents",
+			[]byte(`{"name":"with-bad-cred","upstream_url":"https://upstream.example.com","credential_ref":"cred_does_not_exist"}`),
+			testTenant, testUser)
+		rec := serve(t, h, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newCredHandler(t)
+		created := serve(t, h, authedCredReq(t, http.MethodPost, "/v1/agents",
+			[]byte(`{"name":"patch-target","upstream_url":"https://upstream.example.com"}`), testTenant, testUser))
+		if created.Code != http.StatusCreated {
+			t.Fatalf("create = %d; body = %s", created.Code, created.Body.String())
+		}
+		var agentResp map[string]any
+		if err := json.Unmarshal(created.Body.Bytes(), &agentResp); err != nil {
+			t.Fatalf("decode created agent: %v", err)
+		}
+		id, _ := agentResp["id"].(string)
+
+		rec := serve(t, h, authedCredReq(t, http.MethodPatch, "/v1/agents/"+id,
+			[]byte(`{"credential_ref":"cred_does_not_exist"}`), testTenant, testUser))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	// Clearing the reference resolves nothing and must stay allowed.
+	t.Run("clear is allowed", func(t *testing.T) {
+		t.Parallel()
+		h, _ := newCredHandler(t)
+		created := serve(t, h, authedCredReq(t, http.MethodPost, "/v1/agents",
+			[]byte(`{"name":"clear-target","upstream_url":"https://upstream.example.com"}`), testTenant, testUser))
+		var agentResp map[string]any
+		if err := json.Unmarshal(created.Body.Bytes(), &agentResp); err != nil {
+			t.Fatalf("decode created agent: %v", err)
+		}
+		id, _ := agentResp["id"].(string)
+
+		rec := serve(t, h, authedCredReq(t, http.MethodPatch, "/v1/agents/"+id,
+			[]byte(`{"credential_ref":null}`), testTenant, testUser))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("clearing credential_ref = %d, want 200; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// A ref that does resolve must still work, so the guard cannot be passing by
+// rejecting everything.
+func TestAgentWrite_ResolvableCredentialRefIsAccepted(t *testing.T) {
+	t.Parallel()
+	h, svc := newCredHandler(t)
+	cred, err := svc.Create(context.Background(), testTenant, credential.CreateParams{
+		Name: "upstream-key", AuthType: credential.AuthTypeBearer,
+		Source: credential.SourceManaged, Plaintext: []byte("s3cret"),
+	})
+	if err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+
+	rec := serve(t, h, authedCredReq(t, http.MethodPost, "/v1/agents",
+		[]byte(`{"name":"with-good-cred","upstream_url":"https://upstream.example.com","credential_ref":"`+cred.ID+`"}`),
+		testTenant, testUser))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
+	}
+}

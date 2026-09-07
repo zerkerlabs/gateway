@@ -52,12 +52,44 @@ type AggregateGroup struct {
 	TTFTMS       Percentiles
 }
 
-// aggregateRows groups rows by (AgentID, bucket-start) and computes per-group
-// metrics. rows must already be tenant-scoped and time-filtered by the caller;
-// this is the single aggregation code path shared by every Store implementation
-// so memory and Postgres produce identical results. The returned slice is
-// sorted by agent_id, then bucket-start, for deterministic output.
-func aggregateRows(rows []*Invocation, bucket Bucket) []AggregateGroup {
+// AggregateTotals is one window-level aggregate over the whole [Since, Until]
+// range: every row, in one cell, independent of bucketing.
+//
+// It exists because percentiles do not add up. A client holding per-bucket
+// groups can sum counts across them, but it cannot merge a p95 — the merge is
+// not defined without the underlying samples, which it does not have. So a
+// seven-day p95 latency is not a number a client can compute from a bucketed
+// response at all, however it aggregates: it has to be measured here, over the
+// same rows, at the same time. Counting is the easy half; the percentiles are
+// the reason this type exists.
+//
+// RequestBytes and ResponseBytes sum only rows that recorded a size, which is
+// the same rule the percentiles follow: an in-flight row contributes to Count
+// and to nothing else.
+type AggregateTotals struct {
+	Count         int
+	ErrorCount    int
+	ByErrorClass  map[ErrorClass]int
+	LatencyMS     Percentiles
+	TTFTMS        Percentiles
+	RequestBytes  int64
+	ResponseBytes int64
+}
+
+// AggregateResult is the complete answer to one analytics query: the bucketed
+// cells, plus the window total computed over the same rows in the same pass.
+type AggregateResult struct {
+	Groups []AggregateGroup
+	Totals AggregateTotals
+}
+
+// aggregateRows groups rows by (AgentID, bucket-start), computes per-group
+// metrics, and computes the window totals over every row in one pass. rows must
+// already be tenant-scoped and time-filtered by the caller; this is the single
+// aggregation code path shared by every Store implementation so memory and
+// Postgres produce identical results. Groups are sorted by agent_id, then
+// bucket-start, for deterministic output.
+func aggregateRows(rows []*Invocation, bucket Bucket) AggregateResult {
 	type key struct {
 		agentID string
 		bucket  time.Time
@@ -65,6 +97,9 @@ func aggregateRows(rows []*Invocation, bucket Bucket) []AggregateGroup {
 	groups := make(map[key]*AggregateGroup)
 	latencies := make(map[key][]int64)
 	ttfts := make(map[key][]int64)
+
+	totals := AggregateTotals{ByErrorClass: make(map[ErrorClass]int)}
+	var allLatencies, allTTFTs []int64
 
 	for _, r := range rows {
 		k := key{agentID: r.AgentID, bucket: truncateToBucket(r.CreatedAt, bucket)}
@@ -78,22 +113,38 @@ func aggregateRows(rows []*Invocation, bucket Bucket) []AggregateGroup {
 			groups[k] = g
 		}
 		g.Count++
+		totals.Count++
 		if r.Status == StatusFailed {
 			g.ErrorCount++
+			totals.ErrorCount++
 			if r.ErrorClass != nil {
 				g.ByErrorClass[*r.ErrorClass]++
+				totals.ByErrorClass[*r.ErrorClass]++
 			}
+		}
+		if r.RequestSize != nil {
+			totals.RequestBytes += *r.RequestSize
+		}
+		if r.ResponseSize != nil {
+			totals.ResponseBytes += *r.ResponseSize
 		}
 		// Percentiles are computed only over rows that recorded the metric.
 		// In-flight rows (pending/running) have nil latency, so they are counted
 		// above but excluded here (spec 0003).
 		if r.LatencyMS != nil {
 			latencies[k] = append(latencies[k], *r.LatencyMS)
+			allLatencies = append(allLatencies, *r.LatencyMS)
 		}
 		if r.TTFTMS != nil {
 			ttfts[k] = append(ttfts[k], *r.TTFTMS)
+			allTTFTs = append(allTTFTs, *r.TTFTMS)
 		}
 	}
+
+	// Window percentiles come from every sample in the range, not from the
+	// per-bucket ones: that is the whole reason they are computed here.
+	totals.LatencyMS = percentiles(allLatencies)
+	totals.TTFTMS = percentiles(allTTFTs)
 
 	out := make([]AggregateGroup, 0, len(groups))
 	for k, g := range groups {
@@ -107,7 +158,7 @@ func aggregateRows(rows []*Invocation, bucket Bucket) []AggregateGroup {
 		}
 		return out[i].BucketStart.Before(out[j].BucketStart)
 	})
-	return out
+	return AggregateResult{Groups: out, Totals: totals}
 }
 
 // truncateToBucket returns the UTC start of the bucket containing t.

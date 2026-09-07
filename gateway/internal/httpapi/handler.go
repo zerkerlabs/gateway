@@ -112,7 +112,12 @@ type Handler struct {
 	// AuthType and decrypted plaintext for the settle call. Required alongside
 	// settler for settle-then-forward to run; see WithSettler.
 	facilitatorCreds FacilitatorCredentialResolver
-	logger           *slog.Logger
+	// posture is boot-time deployment configuration reported by
+	// GET /v1/capabilities: which store, whether the KMS key was supplied.
+	// Modes only, never values (invariant #9). Zero value means "not reported",
+	// which is what a handler built without WithPosture honestly knows.
+	posture Posture
+	logger  *slog.Logger
 
 	// invocWG tracks in-flight transactional invocation goroutines so Shutdown
 	// can drain them before the process exits (issue #53).
@@ -312,10 +317,27 @@ func (h *Handler) WithAnalyticsLimiter(lim CallerRateLimiter) *Handler {
 	return h
 }
 
+// WithPosture records boot-time deployment configuration for
+// GET /v1/capabilities: which store backs this gateway, and whether the KMS
+// master key was supplied rather than generated. The handler cannot observe
+// either for itself — both are decided in main before it is built. Returns h
+// for method chaining.
+func (h *Handler) WithPosture(p Posture) *Handler {
+	h.posture = p
+	return h
+}
+
 // RegisterRoutes mounts all routes onto mux. Agent Catalog routes are always
 // registered; credential routes are registered only when a credential service
 // has been attached via WithCredentials.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	// Identity and capability discovery are unconditional: they describe the
+	// caller and the deployment, and both answers exist however little else is
+	// mounted. A client that cannot ask "what is here" before asking for it
+	// has to read 404s as guesses.
+	mux.HandleFunc("GET /v1/me", h.handleMe)
+	mux.HandleFunc("GET /v1/capabilities", h.handleCapabilities)
+
 	mux.HandleFunc("POST /v1/agents", h.handleCreate)
 	mux.HandleFunc("GET /v1/agents", h.handleList)
 	mux.HandleFunc("GET /v1/agents/{id}", h.handleGet)
@@ -338,6 +360,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	if h.invocations != nil {
 		mux.HandleFunc("GET /v1/invocations", h.handleListInvocations)
 		mux.HandleFunc("GET /v1/invocations/{id}", h.handleGetInvocation)
+		mux.HandleFunc("GET /v1/invocations/{id}/receipt", h.handleGetInvocationReceipt)
 		mux.HandleFunc("GET /v1/analytics", h.handleAnalytics)
 	}
 

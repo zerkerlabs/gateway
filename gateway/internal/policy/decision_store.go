@@ -11,7 +11,7 @@ const (
 	// "<prefix>_<uuidv7>" ID (ADR-0009).
 	decisionIDPrefix = "pdec"
 
-	// decisionDefaultLimit is the ListRecent page size when the caller passes a
+	// decisionDefaultLimit is the List page size when the caller passes a
 	// non-positive limit. Mirrors the invocations list default.
 	decisionDefaultLimit = 20
 )
@@ -56,6 +56,42 @@ type StoredDecision struct {
 	Reason      string
 	// CreatedAt is when the decision was recorded, assigned by the store.
 	CreatedAt time.Time
+
+	// ReceiptArtifactID is the Treeship artifact signed for this decision, and
+	// ReceiptSignedAt is when the emitter reported signing it. Both nil when
+	// receipts are off, when the agent has emit_receipts off, or when emission
+	// failed — never proof that no artifact exists, since emission is
+	// fail-open and its reference is written after the fact.
+	ReceiptArtifactID *string
+	ReceiptSignedAt   *time.Time
+}
+
+// DecisionFilter narrows a decision listing.
+//
+// A denied call returns before an invocation is created, so this store is the
+// only place a denial is ever visible. A limit-only feed therefore hides every
+// denial older than the most recent page — which is exactly the history an
+// operator asks for after an incident, and exactly what a denials-over-time
+// chart needs. Hence a time range, an offset, and the two filters that make
+// "what did this agent get refused, and why" answerable.
+//
+// The zero value selects everything, newest first, at the store's default page
+// size.
+type DecisionFilter struct {
+	// Since and Until bound CreatedAt inclusively. A zero time is unbounded.
+	Since time.Time
+	Until time.Time
+
+	// Action, when set, selects one decision action. Empty selects all.
+	Action Action
+
+	// AgentID, when set, selects one agent's decisions. Empty selects all.
+	AgentID string
+
+	// Limit is the page size; zero or negative means the store default.
+	// Offset is the number of matching rows to skip, newest first.
+	Limit  int
+	Offset int
 }
 
 // DecisionStore persists policy decisions and reads them back for a tenant
@@ -72,9 +108,26 @@ type DecisionStore interface {
 	// stored record.
 	Insert(ctx context.Context, d RecordedDecision) (*StoredDecision, error)
 
-	// ListRecent returns the tenant's most-recent decisions first, capped at
-	// limit. A tenant with no decisions yields an empty slice, not an error.
-	ListRecent(ctx context.Context, tenantID string, limit int) ([]*StoredDecision, error)
+	// List returns the tenant's decisions matching f, newest first, together
+	// with the total number matching before Limit and Offset are applied. A
+	// tenant with no decisions yields an empty slice and a zero total, not an
+	// error.
+	//
+	// The total is what makes the denial history navigable: without it a
+	// caller paging backwards cannot tell "no more rows" from "the page size
+	// happened to land exactly on the end", and cannot say how many denials a
+	// window holds without walking every page of it.
+	List(ctx context.Context, tenantID string, f DecisionFilter) ([]*StoredDecision, int, error)
+
+	// AttachReceipt records which Treeship artifact was signed for a decision
+	// already stored. It is a second write because attestation happens after
+	// the decision is recorded and must not delay it: the decision is the
+	// operational fact, the artifact reference is evidence about it.
+	//
+	// A decision that no longer exists, or belongs to another tenant, is not
+	// an error worth propagating — the caller is a fail-open goroutine with
+	// nothing useful to do about it — but it must not write, either.
+	AttachReceipt(ctx context.Context, tenantID, id, artifactID string, signedAt time.Time) error
 }
 
 // StoreRecorder adapts a DecisionStore to the DecisionRecorder seam the

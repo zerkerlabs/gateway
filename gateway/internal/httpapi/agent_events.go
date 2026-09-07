@@ -16,6 +16,12 @@ import (
 	"github.com/zerkerlabs/gateway/gateway/internal/auth"
 )
 
+// maxAgentEventRange bounds both halves of this surface: how far back an
+// event's occurred_at may be at ingestion, and how wide a summary window may
+// be. One constant because they are one promise — a summary cannot span a
+// range the ingest path would have refused to fill.
+const maxAgentEventRange = 31 * 24 * time.Hour
+
 var sessionRefPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type agentEventRequest struct {
@@ -122,7 +128,7 @@ func validateAgentEvent(req agentEventRequest) error {
 		return errors.New("occurred_at is required")
 	}
 	now := time.Now().UTC()
-	if req.OccurredAt.Before(now.Add(-31*24*time.Hour)) || req.OccurredAt.After(now.Add(5*time.Minute)) {
+	if req.OccurredAt.Before(now.Add(-maxAgentEventRange)) || req.OccurredAt.After(now.Add(5*time.Minute)) {
 		return errors.New("occurred_at must be within the accepted 31-day ingestion window")
 	}
 	if !validShortValue(req.Source, 64) || !validShortValue(req.SourceVersion, 64) {
@@ -198,7 +204,7 @@ func (h *Handler) handleAgentEventSummary(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	if !since.Before(until) || until.Sub(since) > 31*24*time.Hour {
+	if !since.Before(until) || until.Sub(since) > maxAgentEventRange {
 		writeError(w, http.StatusBadRequest, "summary window must be positive and at most 31 days")
 		return
 	}
