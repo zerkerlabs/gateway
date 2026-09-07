@@ -39,8 +39,8 @@
 // use the sidebar's own nav buttons (bound once, never replaced) via a
 // synthetic click instead of the `data-view` convention — see navigateTo().
 
-import { api, ApiError } from './api.js';
-import { count, percent, timestamp, UNKNOWN } from './format.js';
+import { analyticsTotals, api, ApiError } from './api.js';
+import { count, duration, percent, timestamp, UNKNOWN } from './format.js';
 import { liveAgentsState } from './agents-view.js';
 import { normalizeInvocation, row as invocationRow } from './invocations-view.js';
 import { ATTENTION_RULES, deriveAttentionQueue, ensureAttentionLoaded, liveAttentionState } from './attention-view.js';
@@ -88,6 +88,14 @@ const state = {
   failedCalls: { phase: 'loading', total: null },
   sample: { phase: 'loading', items: [] },
   runtime: { phase: 'loading', healthz: null, version: null },
+  // The executive band's four reads. Each carries its own phase because they
+  // fail independently: a gateway that cannot aggregate can still report its
+  // denials, and a page that blanks all four because one read failed tells an
+  // operator less than it knows.
+  latency: { phase: 'loading', totals: null },
+  denials: { phase: 'loading', total: null },
+  capabilities: { phase: 'loading', value: null },
+  identity: { phase: 'loading', value: null },
 };
 
 async function loadOverview() {
@@ -99,8 +107,17 @@ async function loadOverview() {
     api.listInvocations({ limit: SAMPLE_SIZE, offset: 0 }),
     api.healthz(),
     api.version(),
+    // Window totals: the only place a multi-bucket p95 exists, because
+    // percentiles do not merge across buckets (see analyticsTotals).
+    api.getAnalytics({ since, bucket: 'day' }),
+    // Denials in the same window. This read is the only record a refused call
+    // leaves — it never became an invocation — and it only became answerable
+    // when the decisions feed gained a time range and a total.
+    api.listPolicyDecisions({ since, action: 'deny', limit: 1, offset: 0 }),
+    api.getCapabilities(),
+    api.me(),
   ]);
-  const [total, failed, sample, healthz, version] = results;
+  const [total, failed, sample, healthz, version, analytics, denials, capabilities, identity] = results;
 
   if (results.some((r) => r.status === 'rejected' && r.reason instanceof ApiError && r.reason.status === 401)) {
     unauthenticated();
@@ -120,7 +137,40 @@ async function loadOverview() {
   state.runtime = healthz.status === 'fulfilled' && version.status === 'fulfilled'
     ? { phase: 'ready', healthz: healthz.value, version: version.value }
     : { phase: 'error', healthz: null, version: null };
+
+  // A gateway that predates window totals answers 200 with no `totals` key.
+  // That is 'unavailable', not zero: the deployment cannot tell us, which is
+  // not the same fact as no traffic.
+  const totals = analytics.status === 'fulfilled' ? analyticsTotals(analytics.value) : null;
+  state.latency = totals?.available
+    ? { phase: 'ready', totals }
+    : { phase: analytics.status === 'fulfilled' ? 'unavailable' : 'error', totals: null };
+
+  state.denials = denials.status === 'fulfilled' && Number.isFinite(denials.value?.total)
+    ? { phase: 'ready', total: denials.value.total }
+    : { phase: denialsUnsupported(denials) ? 'unavailable' : 'error', total: null };
+
+  state.capabilities = capabilities.status === 'fulfilled'
+    ? { phase: 'ready', value: capabilities.value }
+    : { phase: capabilities.reason instanceof ApiError && capabilities.reason.status === 404 ? 'unavailable' : 'error', value: null };
+
+  state.identity = identity.status === 'fulfilled'
+    ? { phase: 'ready', value: identity.value }
+    : { phase: identity.reason instanceof ApiError && identity.reason.status === 404 ? 'unavailable' : 'error', value: null };
+
   state.status = 'ready';
+}
+
+// A decisions read can fail two ways that mean different things. A 404 is a
+// gateway with no policy surface mounted — nothing is being denied because
+// nothing is being decided — while a 400 is this console asking for a filter
+// the deployment does not support. Both are 'unavailable' rather than 'error':
+// neither is a fault an operator can act on, and neither is a denial count of
+// zero.
+function denialsUnsupported(result) {
+  return result.status === 'rejected'
+    && result.reason instanceof ApiError
+    && [400, 404].includes(result.reason.status);
 }
 
 // --- attention -----------------------------------------------------------------
@@ -212,6 +262,106 @@ export function metricDisplay(availability, value, formatValue) {
   return formatValue(value);
 }
 
+// --- the executive band --------------------------------------------------------
+//
+// Five answers, in the order an operator who is not debugging asks them:
+// where am I, is anything wrong, what did the agents do, what was refused,
+// what can I prove. Everything below the band is the same builder-grade detail
+// this page always had; the band exists so the first screen answers the
+// questions without a table.
+//
+// Every answer carries its own availability, because these reads fail
+// independently and the rubric's load-bearing rule applies hardest here: an
+// unknown is never rendered as a zero. "No denials in this window" and "this
+// gateway cannot tell me about denials" are different sentences.
+function executiveModel(model) {
+  const cap = state.capabilities.value;
+  const posture = cap?.posture || null;
+  const identity = state.identity.value;
+
+  const tenant = state.identity.phase === 'ready' && identity?.tenant_id
+    ? identity.tenant_id
+    : state.identity.phase === 'loading' ? 'Loading…' : UNKNOWN;
+
+  const latencyReady = state.latency.phase === 'ready' && state.latency.totals;
+  const p95 = latencyReady ? state.latency.totals.latencyP95Ms : null;
+
+  return {
+    tenant,
+    // Posture is what makes an empty console legible: a memory-backed gateway
+    // with an ephemeral key is not misconfigured, it is a demo, and saying so
+    // is kinder than leaving an operator to infer it from a catalog that
+    // empties itself on restart.
+    posture: {
+      availability: state.capabilities.phase === 'ready' ? 'available' : state.capabilities.phase === 'loading' ? 'unknown' : 'unavailable',
+      store: posture?.store || null,
+      durable: posture ? posture.store === 'postgres' : null,
+      kmsConfigured: posture ? Boolean(posture.kms_key_configured) : null,
+      receipts: posture ? Boolean(posture.receipts_enabled) : null,
+      receiptActor: posture?.receipt_actor || null,
+      reason: cap?.surfaces ? Boolean(cap.surfaces.reason_enforcement) : null,
+    },
+    answers: [
+      {
+        id: 'attention',
+        question: 'Is anything wrong?',
+        target: 'attention',
+        tone: metricTone(model.attention.availability),
+        display: metricDisplay(model.attention.availability, model.attention.count, count),
+        unit: model.attention.count === 1 ? 'item needs attention' : 'items need attention',
+        detail: attentionDetail(model.attention),
+      },
+      {
+        id: 'calls',
+        question: 'What did the agents do?',
+        target: 'invocations',
+        tone: latencyReady ? 'available' : state.latency.phase === 'loading' ? 'unknown' : 'unavailable',
+        display: latencyReady ? count(state.latency.totals.calls) : state.latency.phase === 'loading' ? 'Loading…' : UNKNOWN,
+        unit: `calls · ${WINDOW_LABEL.toLowerCase()}`,
+        detail: latencyReady
+          ? state.latency.totals.calls === 0
+            // A window with no traffic is a known zero, and must not read the
+            // same as a window this gateway could not aggregate.
+            ? `Known zero · ${WINDOW_LABEL}`
+            : `${percent(Math.round((state.latency.totals.errorRate || 0) * state.latency.totals.calls), state.latency.totals.calls)} failed · p95 ${p95 == null ? UNKNOWN : duration(p95)}`
+          : state.latency.phase === 'unavailable'
+            ? 'This Gateway does not report window totals.'
+            : 'The traffic aggregate could not be read from Gateway.',
+      },
+      {
+        id: 'denials',
+        question: 'What was refused?',
+        target: 'policies',
+        tone: state.denials.phase === 'ready' ? (state.denials.total > 0 ? 'attention' : 'available') : state.denials.phase === 'loading' ? 'unknown' : 'unavailable',
+        display: state.denials.phase === 'ready' ? count(state.denials.total) : state.denials.phase === 'loading' ? 'Loading…' : UNKNOWN,
+        unit: state.denials.total === 1 ? 'call denied by policy' : 'calls denied by policy',
+        detail: state.denials.phase === 'ready'
+          ? `${WINDOW_LABEL} · a denied call never becomes an invocation, so this is the only record of it`
+          : state.denials.phase === 'unavailable'
+            ? 'No policy surface on this Gateway.'
+            : 'The decision log could not be read from Gateway.',
+      },
+      {
+        id: 'proof',
+        question: 'What can I prove?',
+        target: 'invocations',
+        tone: posture?.receipts_enabled ? 'available' : state.capabilities.phase === 'ready' ? 'unavailable' : 'unknown',
+        display: posture?.receipts_enabled ? 'Signed' : state.capabilities.phase === 'ready' ? 'Off' : 'Loading…',
+        unit: 'trust receipts',
+        // Deliberately not a count. The gateway records an artifact per call
+        // but exposes no window total of attested ones, and a page-scoped
+        // tally rendered as a window figure would be exactly the kind of
+        // plausible-looking number this console refuses to invent.
+        detail: posture?.receipts_enabled
+          ? `Every completed and refused call is signed as ${posture.receipt_actor || 'this gateway'}`
+          : state.capabilities.phase === 'ready'
+            ? 'Receipts are not enabled on this deployment.'
+            : 'Checking whether this Gateway signs receipts…',
+      },
+    ],
+  };
+}
+
 function buildModel() {
   const totalAvailability = readAvailability(state.totalCalls.phase, state.totalCalls.total ?? 0);
   const failedAvailability = readAvailability(state.failedCalls.phase, state.failedCalls.total ?? 0);
@@ -265,12 +415,14 @@ function buildModel() {
     },
   ];
 
-  return {
+  const model = {
     metrics,
     attention,
     sample: { availability: sampleAvailability, items: state.sample.items },
     runtime: { availability: runtimeAvailability, healthz: state.runtime.healthz, version: state.runtime.version },
   };
+  model.executive = executiveModel(model);
+  return model;
 }
 
 // --- rendering -----------------------------------------------------------------
@@ -281,16 +433,6 @@ function dataStateBlock(kind, title, message, compact = false) {
   const label = kind === 'loading' ? 'Loading' : kind === 'error' ? 'Error' : kind === 'unavailable' ? 'Unavailable' : 'Empty';
   const skeleton = kind === 'loading' && !compact ? '<div class="state-skeleton" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>' : '';
   return `<div class="data-state ${kind}${compact ? ' compact' : ''}" role="${role}"${busy}>${statusChip(label, kind)}<div><h2>${esc(title)}</h2><p>${esc(message)}</p></div>${skeleton}</div>`;
-}
-
-function metricCard(m) {
-  const classes = `metric-${m.tone}${m.id === 'failures' ? ' failure-metric' : ''}`;
-  const content = `<span>${esc(m.display)}</span><small>${esc(m.label)}</small><em>${esc(m.detail)}</em>`;
-  return `<button class="${classes}" data-live-overview-nav="${esc(m.target)}">${content}</button>`;
-}
-
-function renderMetrics(model) {
-  return `<section class="metric-strip operational-metrics compact" aria-label="Live operational summary">${model.metrics.map(metricCard).join('')}</section>`;
 }
 
 function renderAttentionPanel(model) {
@@ -318,6 +460,57 @@ function renderAttentionPanel(model) {
 
   const action = a.items.length ? `<button class="text-button" data-live-overview-nav="attention">View queue →</button>` : '';
   return `<section class="panel attention-panel"><div class="panel-heading"><div><p class="kicker">Needs attention</p><h2>${esc(heading)}</h2></div>${action}</div>${body}</section>`;
+}
+
+// The executive band. Four answers, one deployment line, no table.
+//
+// The tone classes are the same ones the metric strip uses, so an unavailable
+// answer here looks like an unavailable answer everywhere else in the console
+// rather than like a styling accident.
+function renderExecutiveBand(model) {
+  const x = model.executive;
+
+  const answers = x.answers.map((a) => `
+    <button class="exec-answer exec-${esc(a.tone)}" data-live-overview-nav="${esc(a.target)}">
+      <p class="exec-question">${esc(a.question)}</p>
+      <strong class="exec-value">${esc(a.display)}</strong>
+      <span class="exec-unit">${esc(a.unit)}</span>
+      <em class="exec-detail">${esc(a.detail)}</em>
+    </button>`).join('');
+
+  return `<section class="exec-band" aria-label="Executive summary">
+    <div class="exec-answers">${answers}</div>
+    ${renderPostureLine(x)}
+  </section>`;
+}
+
+// One line of deployment truth under the answers. It exists because an empty
+// console on a memory-backed gateway is not a broken console, and an operator
+// should not have to deduce that from a catalog that empties itself.
+function renderPostureLine(x) {
+  const p = x.posture;
+  if (p.availability !== 'available') {
+    const message = p.availability === 'unknown'
+      ? 'Reading this deployment’s capabilities…'
+      : 'This Gateway does not report its capabilities, so posture is unknown.';
+    return `<p class="exec-posture unknown">${esc(`Tenant ${x.tenant}`)} · ${esc(message)}</p>`;
+  }
+
+  const facts = [
+    p.durable === null ? null : p.durable
+      ? { tone: 'ok', text: 'Durable store' }
+      : { tone: 'warn', text: 'In-memory store · not durable' },
+    p.kmsConfigured === null ? null : p.kmsConfigured
+      ? { tone: 'ok', text: 'KMS key configured' }
+      : { tone: 'warn', text: 'Ephemeral KMS key · credentials break on restart' },
+    p.receipts ? { tone: 'ok', text: 'Trust receipts on' } : { tone: 'off', text: 'Trust receipts off' },
+    p.reason ? { tone: 'ok', text: 'Reason enforcement on' } : null,
+  ].filter(Boolean);
+
+  return `<p class="exec-posture">
+    <span class="exec-tenant">Tenant ${esc(x.tenant)}</span>
+    ${facts.map((f) => `<span class="exec-fact ${esc(f.tone)}">${esc(f.text)}</span>`).join('')}
+  </p>`;
 }
 
 function renderRuntimePanel(model) {
@@ -397,7 +590,7 @@ export function liveOverviewView() {
   const model = buildModel();
   return `<section class="page-enter overview-page" data-live-overview-root>
     ${header}
-    ${renderMetrics(model)}
+    ${renderExecutiveBand(model)}
     <div class="overview-grid">${renderAttentionPanel(model)}${renderRuntimePanel(model)}</div>
     ${renderSamplePanel(model)}
     ${renderCapabilitySection('data-live-overview-nav')}

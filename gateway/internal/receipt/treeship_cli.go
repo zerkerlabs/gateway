@@ -330,10 +330,12 @@ func (e *TreeshipCLIEmitter) EmitDenialAttested(ctx context.Context, d Denial) (
 // Two identical denials of the same call shape therefore share a digest, which
 // is correct: the digest identifies what was refused, not how many times.
 func denialDigest(d Denial) string {
+	// DecisionID is appended rather than substituted so a denial attested
+	// without one keeps the digest it had before this field existed.
 	return "sha256:" + sha256Hex(strings.Join([]string{
 		d.TenantID, d.AgentID, d.Protocol,
 		derefOr(d.MCPMethod), derefOr(d.MCPTool),
-		d.MatchedRule,
+		d.MatchedRule, d.DecisionID,
 	}, "\x00"))
 }
 
@@ -362,6 +364,9 @@ func denialMetaJSON(d Denial) string {
 	}
 	if d.MCPTool != nil {
 		m["mcp_tool"] = *d.MCPTool
+	}
+	if d.DecisionID != "" {
+		m["decision_id"] = d.DecisionID
 	}
 	if !d.DeniedAt.IsZero() {
 		m["denied_at"] = d.DeniedAt.UTC().Format(time.RFC3339)

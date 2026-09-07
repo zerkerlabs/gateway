@@ -66,6 +66,10 @@ function defaultFilters() {
 const state = {
   status: 'idle', // idle | loading | ready | error
   error: null,
+  // The open detail's receipt reference, loaded alongside the record. Its own
+  // state because it fails separately: an invocation that reads fine while its
+  // receipt read fails should still render, saying so.
+  receipt: { status: 'idle', value: null },
   invocations: [],
   total: 0,
   limit: PAGE_SIZE,
@@ -107,6 +111,7 @@ export function normalizeInvocation(raw) {
     // tenant default matched, no explicit rule) is a meaningful, distinct
     // value from null and must survive.
     policyAction: raw.policy_action ?? null,
+    receiptArtifactId: raw.receipt_artifact_id ?? null,
     policyMatchedRule: raw.policy_matched_rule ?? null,
     model: raw.model || null,
     mcpMethod: raw.mcp_method || null,
@@ -241,6 +246,15 @@ export function policyActionLabel(action) {
 // `allow` and `warn` reuse the shared .status colour classes; a null action
 // gets the same neutral "empty" treatment as an unrecognized status chip
 // elsewhere in this file, never the green used for an actual allow.
+// A call that carries a signed artifact says so on the row. Absence is left
+// blank rather than marked "unsigned": receipts are fail-open and off the
+// request path, so a missing reference means this gateway recorded none — not
+// that nothing was signed, and certainly not that the call was unverified.
+function proofChip(item) {
+  if (!item.receiptArtifactId) return '';
+  return `<span class="status proof" title="Trust receipt ${esc(item.receiptArtifactId)}">Signed</span>`;
+}
+
 function policyChip(action) {
   if (action === null) return `<span class="status empty">${esc(policyActionLabel(action))}</span>`;
   return `<span class="status ${esc(action)}">${esc(policyActionLabel(action))}</span>`;
@@ -360,7 +374,7 @@ export function row(item, names) {
         <small>${mcpLabel(item)}</small>
       </span>
       <span data-label="Mode"><strong>${modeLabel(item.mode)}</strong></span>
-      <span data-label="Result">${statusChip(item.status)}</span>
+      <span data-label="Result">${statusChip(item.status)}${proofChip(item)}</span>
       <span data-label="Policy">${policyChip(item.policyAction)}</span>
       <span data-label="Latency"><strong>${duration(item.latencyMs)}</strong></span>
       <span data-label="Sizes"><small>Req ${sizeLabel(item.reqSize)}</small><small>Resp ${sizeLabel(item.respSize)}</small></span>
@@ -517,6 +531,44 @@ function captureBoundaryPanel(item) {
   </section>`;
 }
 
+// The trust receipt for this invocation.
+//
+// The gateway hands back an artifact id, the actor it signed as, and the
+// command that checks it — and deliberately no verdict, because a gateway that
+// vouched for its own receipts would be asserting the thing the receipt exists
+// to prove independently. So this panel shows what was signed and how to check
+// it, and stops there.
+function receiptPanel() {
+  const r = state.receipt;
+  if (!r || r.status === 'idle') return '';
+  if (r.status === 'loading') {
+    return `<section class="receipt-panel" aria-busy="true"><p class="kicker">Trust receipt</p><p>Reading the receipt reference…</p></section>`;
+  }
+  if (r.status === 'error') {
+    return `<section class="receipt-panel"><p class="kicker">Trust receipt</p><p>The receipt reference could not be read from Gateway.</p></section>`;
+  }
+
+  const v = r.value;
+  if (!v?.attested) {
+    const why = v?.reason === 'receipts_disabled'
+      ? 'This Gateway is not configured to sign trust receipts.'
+      : 'No artifact reference is recorded for this call. Emission is fail-open and off the request path, so this is not proof that nothing was signed.';
+    return `<section class="receipt-panel"><p class="kicker">Trust receipt</p><h3>Not recorded</h3><p>${esc(why)}</p></section>`;
+  }
+
+  return `<section class="receipt-panel attested">
+    <p class="kicker">Trust receipt</p>
+    <h3>Signed by ${esc(v.actor || 'this Gateway')}</h3>
+    <dl class="detail-rows">
+      <div><dt>Artifact</dt><dd class="mono">${esc(v.artifact_id)}</dd></div>
+      <div><dt>Signed</dt><dd>${esc(timestamp(v.signed_at))}</dd></div>
+    </dl>
+    <p class="receipt-verify"><span>Verify it yourself</span><code>${esc(v.verify)}</code></p>
+    <small>Gateway reports what it signed, never whether the signature holds — that is checked against the artifact,
+    by whoever is relying on it.</small>
+  </section>`;
+}
+
 function detailPanel() {
   const d = state.detail;
   if (!d.id) return '';
@@ -565,6 +617,7 @@ function detailPanel() {
       ['Created', timestamp(item.createdAt)],
       ['Completed', item.completedAt ? timestamp(item.completedAt) : 'Not yet completed'],
     ])}
+    ${receiptPanel()}
     ${captureBoundaryPanel(item)}
     </div>
   </section>`;
@@ -660,7 +713,23 @@ async function loadInvocations() {
 // result, so a slow response to a stale id can never clobber a newer one.
 async function openDetail(id) {
   state.detail = { id, status: 'loading', error: null, record: null };
+  state.receipt = { status: 'loading', value: null };
   rerenderIfMounted();
+
+  // Fetched in parallel with the record, and never allowed to fail the detail:
+  // the receipt is evidence about the call, not part of it.
+  api.getInvocationReceipt(id)
+    .then((value) => {
+      if (state.detail.id !== id) return;
+      state.receipt = { status: 'ready', value };
+      rerenderIfMounted();
+    })
+    .catch(() => {
+      if (state.detail.id !== id) return;
+      state.receipt = { status: 'error', value: null };
+      rerenderIfMounted();
+    });
+
   try {
     const record = normalizeInvocation(await api.getInvocation(id));
     if (state.detail.id !== id) return;
@@ -727,6 +796,7 @@ if (typeof document !== 'undefined') {
       await openDetail(el.dataset.invocationId);
     } else if (action === 'close-detail') {
       state.detail = { id: null, status: 'idle', error: null, record: null };
+      state.receipt = { status: 'idle', value: null };
       rerenderIfMounted();
     }
   });

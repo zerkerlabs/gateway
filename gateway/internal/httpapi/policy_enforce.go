@@ -188,6 +188,13 @@ func (h *Handler) recordDeniedDecision(reqCtx policy.RequestContext, d policy.De
 			stored = nil
 		}
 
+		// Bind the artifact to the row it proves, so repeated refusals of the
+		// same call are separate receipts rather than one artifact Treeship
+		// stored once.
+		if stored != nil {
+			den.DecisionID = stored.ID
+		}
+
 		att, err := de.EmitDenialAttested(ctx, den)
 		if err != nil {
 			h.logger.Warn("denial attestation failed (fail-open)",

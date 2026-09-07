@@ -119,6 +119,22 @@ export const api = {
     }
   },
 
+  // The receipt reference for one invocation: which Treeship artifact this
+  // gateway signed, and the command that verifies it. It answers with
+  // `attested: false` and a reason rather than a 404 when nothing is recorded,
+  // so a caller never has to read an error as an absence.
+  getInvocationReceipt: (id) => request(`/invocations/${encodeURIComponent(id)}/receipt`),
+
+  // --- deployment and identity
+  //
+  // These two are why the console can stop guessing. `capabilities` says which
+  // surfaces this gateway actually mounted, so an unmounted one reads as "not
+  // enabled here" instead of as a 404 the page has to invent a story for; `me`
+  // names the tenant the BFF is administering, which the browser cannot learn
+  // from a token it deliberately never receives.
+  getCapabilities: () => request('/capabilities'),
+  me: () => request('/me'),
+
   // --- unauthenticated gateway routes, reached through the session anyway
   healthz: () => request('/healthz', { base: ROOT }),
   version: () => request('/version', { base: ROOT }),
@@ -154,6 +170,36 @@ export function normalizeAgent(a) {
     pricing: a.pricing || null,
     createdAt: a.created_at,
     updatedAt: a.updated_at,
+  };
+}
+
+// Read the window-level totals off an analytics response.
+//
+// These are computed server-side over every row in the range, which is the
+// only place they can be computed: counts add across buckets but percentiles
+// do not merge without the samples behind them. Before the gateway returned
+// them, a multi-day p95 was not a number this console could show at all — see
+// summarizeAnalyticsByAgent below, which still (correctly) refuses to invent
+// one per agent.
+//
+// A response from a gateway that predates window totals has no `totals` key.
+// That is reported as unknown, not as zero: "this deployment cannot tell me"
+// and "there was no traffic" are different facts and the rubric forbids
+// collapsing them.
+export function analyticsTotals(response) {
+  const t = response?.totals;
+  if (!t) return { available: false };
+  return {
+    available: true,
+    calls: t.count ?? 0,
+    errorRate: typeof t.error_rate === 'number' ? t.error_rate : null,
+    byErrorClass: t.by_error_class || {},
+    latencyP50Ms: t.latency_ms?.p50 ?? null,
+    latencyP95Ms: t.latency_ms?.p95 ?? null,
+    latencyP99Ms: t.latency_ms?.p99 ?? null,
+    ttftP95Ms: t.ttft_ms?.p95 ?? null,
+    requestBytes: t.request_bytes ?? null,
+    responseBytes: t.response_bytes ?? null,
   };
 }
 

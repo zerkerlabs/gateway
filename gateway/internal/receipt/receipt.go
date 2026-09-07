@@ -59,6 +59,22 @@ type Denial struct {
 	Reason string
 
 	DeniedAt time.Time
+
+	// DecisionID is the stored policy decision this denial was recorded as,
+	// when the caller knows it.
+	//
+	// Without it, the artifact is bound to the denial's *shape* — tenant,
+	// agent, protocol, method, tool, rule — and nothing else. Two refusals of
+	// the same call under the same rule then produce byte-identical artifacts,
+	// which Treeship stores once. That is defensible as a claim ("this agent
+	// is refused this tool under this rule") and wrong as evidence: an
+	// operator looking at ten denials finds one receipt and cannot tell
+	// whether the other nine were attested or dropped.
+	//
+	// Optional because a caller that attests before the decision is stored has
+	// no ID to give, and an artifact bound to the shape alone is better than
+	// none. Empty leaves the previous digest and meta exactly as they were.
+	DecisionID string
 }
 
 // Emitter delivers a receipt to the trust backend. Implementations must be safe

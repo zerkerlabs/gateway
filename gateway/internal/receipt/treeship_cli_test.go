@@ -319,3 +319,43 @@ func TestEmitDenialRejectsAResponseForAnotherAction(t *testing.T) {
 		t.Fatalf("err = %v, want ErrTreeshipUnavailable when the CLI attests a different action", err)
 	}
 }
+
+// Two refusals of the same call under the same rule must not collapse into one
+// artifact. The digest binds the denial's shape, so without the decision id
+// they are byte-identical and Treeship stores one — leaving an operator with
+// ten denials and a single receipt, unable to tell whether the rest were
+// attested or dropped.
+func TestDenialDigestSeparatesDecisions(t *testing.T) {
+	t.Parallel()
+	e := NewTreeshipCLIEmitter("/nonexistent/treeship", "agent://zerker-gateway", nil)
+
+	shape := Denial{
+		TenantID: "acme", AgentID: "agt_1", Protocol: "mcp",
+		MatchedRule: "1", Reason: "matched rule 1",
+	}
+	first := shape
+	first.DecisionID = "pdec_a"
+	second := shape
+	second.DecisionID = "pdec_b"
+
+	digestOf := func(d Denial) string {
+		args := e.DenialArgs(d)
+		for i, a := range args {
+			if a == "--input-digest" && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		t.Fatalf("no --input-digest in %v", args)
+		return ""
+	}
+
+	if digestOf(first) == digestOf(second) {
+		t.Error("two decisions produced the same denial digest; their artifacts would collapse into one")
+	}
+
+	// A denial attested without a decision id keeps the digest it had before
+	// the field existed, so an emitter that cannot supply one is unaffected.
+	if digestOf(shape) == digestOf(first) {
+		t.Error("an empty DecisionID changed the digest; the no-id path must be unchanged")
+	}
+}

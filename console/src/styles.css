@@ -202,6 +202,39 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 .metric-strip em { margin-top: 12px; color: var(--faint); font-size: 9px; font-style: normal; }
 .metric-strip.compact { grid-template-columns: repeat(4, 1fr); }
 
+/* --- executive band -----------------------------------------------------------
+   The first thing on the Overview: four answers in the words an operator who
+   is not debugging would use, above the builder-grade detail that follows.
+   Bigger type than the metric strip because these are the questions, not the
+   readouts — but the same surface, border and violet hover, so the page still
+   reads as one product rather than a summary bolted onto a console. */
+.exec-band { border: 1px solid var(--line); border-radius: 14px; background: var(--white); overflow: hidden; margin-bottom: 20px; }
+.exec-answers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.exec-answer { min-width: 0; border: 0; border-right: 1px solid var(--line); background: transparent; padding: 22px 22px 20px; display: grid; align-content: start; gap: 0; text-align: left; }
+.exec-answer:last-child { border-right: 0; }
+.exec-answer:hover { background: var(--violet-soft); }
+.exec-question { margin: 0 0 14px; color: var(--muted); font: 560 10px "Geist Mono", monospace; letter-spacing: .14em; text-transform: uppercase; }
+.exec-value { font-size: 44px; line-height: .95; letter-spacing: -.05em; font-weight: 620; font-variant-numeric: tabular-nums; }
+.exec-unit { margin-top: 9px; color: var(--muted); font-size: 12px; }
+.exec-detail { margin-top: 13px; color: var(--faint); font-size: 10px; font-style: normal; line-height: 1.5; }
+
+/* Tone carries the same meaning as it does in the metric strip: an answer the
+   gateway could not give is grey and smaller, never a confident zero. */
+.exec-unknown .exec-value, .exec-unavailable .exec-value { color: var(--faint); font-size: 26px; letter-spacing: -.02em; }
+.exec-attention .exec-value { color: var(--red); }
+
+/* The deployment line. Facts, not decoration: a memory store and an ephemeral
+   key are the two that quietly ruin an evaluation, so they are amber here
+   rather than a footnote somewhere else. */
+.exec-posture { margin: 0; border-top: 1px solid var(--line); padding: 12px 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; background: rgba(16,16,18,.015); font-size: 11px; }
+.exec-posture.unknown { color: var(--faint); }
+.exec-tenant { font-weight: 620; letter-spacing: -.01em; }
+.exec-fact { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.exec-fact::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.exec-fact.ok { color: var(--green); }
+.exec-fact.warn { color: var(--amber); }
+.exec-fact.off { color: var(--faint); }
+
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .55fr); gap: 16px; margin-bottom: 16px; }
 .attention-panel .panel-heading h2 { font-size: 21px; }
 .attention-list { display: grid; }
@@ -693,6 +726,10 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
   .metric-strip > button:nth-child(3), .metric-strip > div:nth-child(3) { border-right: 0; }
   .metric-strip > button:nth-child(n+4), .metric-strip > div:nth-child(n+4) { border-top: 1px solid var(--line); }
   .metric-strip.compact { grid-template-columns: repeat(2, 1fr); }
+  .exec-answers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .exec-answer:nth-child(2) { border-right: 0; }
+  .exec-answer:nth-child(n+3) { border-top: 1px solid var(--line); }
+  .exec-value { font-size: 34px; }
   .metric-strip.compact > div:nth-child(2) { border-right: 0; }
   .metric-strip.compact > div:nth-child(3) { border-right: 1px solid var(--line); border-top: 1px solid var(--line); }
   .overview-grid, .two-column, .analytics-grid, .policy-layout { grid-template-columns: 1fr; }
@@ -1079,8 +1116,31 @@ button.snapshot-fact:hover { background: var(--violet-soft); }
 .live-invocation-row { grid-template-columns: .85fr .8fr 1.2fr .6fr .6fr .6fr .6fr .8fr .85fr 84px; align-items: start; }
 .live-invocation-row.is-failed { border-left: 4px solid var(--red); }
 .live-invocation-row .mono { font-family: "Geist Mono", monospace; word-break: break-all; }
+/* Chips default to nowrap, which overflows a .6fr column: "No policy
+   configured" ran straight through the latency beside it. The label is
+   deliberately that long — it must not be mistaken for "Allow" — so the column
+   wraps instead of the words being cut. */
+/* overflow-wrap:anywhere on the row cells breaks inside words, which turned
+   "SUCCEEDED" into "SUCCEEDE D". Chips wrap between words and never inside
+   one. */
+.live-invocation-row .status { max-width: 100%; white-space: normal; overflow-wrap: normal; word-break: keep-all; line-height: 1.35; }
+.live-invocation-row [data-label="Result"] { display: flex !important; flex-wrap: wrap; gap: 4px; }
+.status.proof { background: var(--violet-soft); color: #4b3dcc; }
 .live-invocation-row .catalog-inspect { display: flex; justify-content: flex-end; }
 .live-invocation-row .catalog-inspect .button { min-height: 28px; padding: 0 10px; font-size: 9px; white-space: nowrap; }
+
+/* The trust receipt for one call. Violet, because it is the same "evidence"
+   signal the console uses elsewhere, and bordered rather than filled so it
+   reads as a fact about the invocation rather than another status card. */
+.receipt-panel { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; }
+.receipt-panel.attested { border-color: #cfc9ff; background: rgba(102,87,255,.035); }
+.receipt-panel h3 { margin: 0; font-size: 13px; }
+.receipt-panel p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.receipt-panel small { color: var(--faint); font-size: 9px; line-height: 1.5; }
+.receipt-panel .detail-rows { margin: 0; }
+.receipt-verify { display: grid !important; gap: 6px; }
+.receipt-verify span { color: var(--faint); font: 560 9px "Geist Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
+.receipt-verify code { display: block; overflow-x: auto; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: var(--paper); font-family: "Geist Mono", monospace; font-size: 10px; white-space: nowrap; }
 
 .invocation-detail .panel-body { padding: 18px 20px; display: grid; gap: 16px; }
 .invocation-detail h3 { margin: 0; font-size: 13px; }

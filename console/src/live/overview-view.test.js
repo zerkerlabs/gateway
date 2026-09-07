@@ -181,22 +181,25 @@ test('an idle/loading overview never claims to have data', () => {
   assert.doesNotMatch(html, /Calls ·/);
 });
 
-test('the window is stated on the calls metric', () => {
-  withReady({}, {}, {}, (html) => {
-    assert.match(html, /Calls · Last 24 hours/);
+test('the window is stated on the calls answer', () => {
+  withReady({ latency: { phase: 'ready', totals: { available: true, calls: 10, errorRate: 0.2, latencyP95Ms: 120 } } }, {}, {}, (html) => {
+    assert.match(html, /calls · last 24 hours/);
   });
 });
 
-test('a failed calls read renders Unknown, never a zero call count', () => {
-  withReady({ totalCalls: { phase: 'error', total: null } }, {}, {}, (html) => {
-    const card = html.slice(html.indexOf('Calls · Last 24 hours') - 200, html.indexOf('Calls · Last 24 hours'));
-    assert.match(card, /Unknown/);
+test('a failed traffic read renders Unknown, never a zero call count', () => {
+  withReady({ latency: { phase: 'error', totals: null } }, {}, {}, (html) => {
+    const answer = html.slice(html.indexOf('What did the agents do?'), html.indexOf('What was refused?'));
+    assert.match(answer, /Unknown/);
+    assert.doesNotMatch(answer, /class="exec-value">0</);
   });
 });
 
 test('a genuine zero-call window renders as a known zero, not Unknown', () => {
-  withReady({ totalCalls: { phase: 'ready', total: 0 }, failedCalls: { phase: 'ready', total: 0 } }, {}, {}, (html) => {
-    assert.match(html, /Known zero · Last 24 hours/);
+  withReady({ latency: { phase: 'ready', totals: { available: true, calls: 0, errorRate: 0, latencyP95Ms: null } } }, {}, {}, (html) => {
+    const answer = html.slice(html.indexOf('What did the agents do?'), html.indexOf('What was refused?'));
+    assert.match(answer, /Known zero · Last 24 hours/);
+    assert.doesNotMatch(answer, /Unknown/);
   });
 });
 
@@ -287,8 +290,84 @@ test('an attention queue with an unavailable rule shows a lower bound, not a fal
 });
 
 test('attention still loading independently of the rest of the page renders its own loading state', () => {
-  withReady({}, { status: 'loading' }, {}, (html) => {
-    assert.match(html, /Evaluating tenant rules/);
-    assert.match(html, /Calls · Last 24 hours/);
+  withReady(
+    { latency: { phase: 'ready', totals: { available: true, calls: 10, errorRate: 0.2, latencyP95Ms: 120 } } },
+    { status: 'loading' },
+    {},
+    (html) => {
+      assert.match(html, /Evaluating tenant rules/);
+      assert.match(html, /calls · last 24 hours/);
+    }
+  );
+});
+
+// --- the executive band --------------------------------------------------------
+
+test('an unreadable denial count renders Unknown, never a confident zero', () => {
+  withReady({ denials: { phase: 'unavailable', total: null } }, {}, {}, (html) => {
+    const answer = html.slice(html.indexOf('What was refused?'), html.indexOf('What can I prove?'));
+    assert.match(answer, /Unknown/);
+    assert.doesNotMatch(answer, /class="exec-value">0</);
+  });
+});
+
+test('a real zero denials window is stated as zero', () => {
+  withReady({ denials: { phase: 'ready', total: 0 } }, {}, {}, (html) => {
+    const answer = html.slice(html.indexOf('What was refused?'), html.indexOf('What can I prove?'));
+    assert.match(answer, /class="exec-value">0</);
+    assert.doesNotMatch(answer, /Unknown/);
+  });
+});
+
+test('a non-durable store and an ephemeral key are surfaced as warnings, not hidden', () => {
+  withReady(
+    {
+      capabilities: {
+        phase: 'ready',
+        value: { surfaces: {}, limits: {}, posture: { store: 'memory', kms_key_configured: false, receipts_enabled: false } },
+      },
+    },
+    {},
+    {},
+    (html) => {
+      assert.match(html, /In-memory store · not durable/);
+      assert.match(html, /Ephemeral KMS key/);
+      assert.match(html, /Trust receipts off/);
+    }
+  );
+});
+
+test('a gateway that signs names the actor it signs as', () => {
+  withReady(
+    {
+      capabilities: {
+        phase: 'ready',
+        value: {
+          surfaces: { reason_enforcement: true },
+          limits: {},
+          posture: { store: 'postgres', kms_key_configured: true, receipts_enabled: true, receipt_actor: 'agent://zerker-gateway' },
+        },
+      },
+    },
+    {},
+    {},
+    (html) => {
+      assert.match(html, /agent:\/\/zerker-gateway/);
+      assert.match(html, /Trust receipts on/);
+      assert.match(html, /Reason enforcement on/);
+    }
+  );
+});
+
+test('a gateway that cannot report capabilities says posture is unknown rather than claiming a posture', () => {
+  withReady({ capabilities: { phase: 'unavailable', value: null } }, {}, {}, (html) => {
+    assert.match(html, /does not report its capabilities/);
+    assert.doesNotMatch(html, /Durable store/);
+  });
+});
+
+test('the tenant being administered is named', () => {
+  withReady({ identity: { phase: 'ready', value: { tenant_id: 'acme', user_id: 'op@example.com', scopes: [] } } }, {}, {}, (html) => {
+    assert.match(html, /Tenant acme/);
   });
 });
