@@ -1,58 +1,78 @@
-# Zerker Gateway console preview
+# Zerker Gateway console
 
-A static, fixture-backed product prototype for the future Zerker Gateway operator console. It maps the current catalog, proxy, MCP, policy, credential, invocation, analytics, payment, settlement, identity, deployment, health/build, facilitator-readiness, SDK, and REST contract surfaces, plus separately labeled Zerker integration paths.
+The operator console for one live Gateway tenant. Eight pages, every number read
+from the gateway at page load, no fixtures.
 
-Analytics uses fixed 1-hour, 24-hour, 7-day, and 31-day fixture windows with count, safe error taxonomy, latency percentiles, streaming TTFT, MCP method/tool aggregates, and explicit empty/partial/unavailable/error scenarios. Stack & health separates one captured fixture probe from configuration, support, readiness, rollout, KMS, migration, backup, replica, and signer posture. All 25 REST operation IDs are inventory only; the console does not call most of them today.
+```
+src/
+  app.js         router, window control, session gate wiring
+  shell.js       shell state and the detail panel (importable without a DOM)
+  ui.js          rendering primitives: status vocabulary, charts, the three absent states
+  styles.css     the design system
+  live/          api.js (the BFF client), format.js, gate.js (sign-in)
+  pages/         overview, agents, traffic, policy, payments, receipts, activity, system
+server/          the backend-for-frontend: OIDC login, server-side session, /api proxy
+```
 
-It is intentionally separate from:
+## What each page reads
 
-- the Gateway API;
-- the Gateway documentation website in `www/`;
-- the Treeship product preview;
-- any live agent or customer environment.
+| Page | Reads |
+|---|---|
+| Overview | `/v1/me`, `/v1/capabilities`, `/v1/analytics`, `/v1/invocations`, `/v1/policy/decisions`, `/v1/settlement/config` |
+| Agents | `/v1/agents`, `/v1/analytics`, `/v1/credentials` |
+| Traffic | `/v1/invocations`, `/v1/invocations/{id}`, `/v1/invocations/{id}/receipt`, `/v1/analytics` |
+| Policy | `/v1/policy`, `/v1/policy/decisions` |
+| Payments | `/v1/invocations`, `/v1/agents`, `/v1/settlement/config` |
+| Receipts | `/v1/invocations`, `/v1/policy/decisions`, `/v1/agents` |
+| Activity | `/v1/agent-events/summary` per agent |
+| System | `/v1/capabilities`, `/v1/credentials`, `/v1/agents`, `/healthz`, `/version` |
 
-## Run locally
+Identity and capabilities are read once per session; everything else is read per
+page, per window.
+
+## The rule the code is built around
+
+**An unknown is never rendered as a zero, and neither is a value still being
+read.** They are three different statements:
+
+- a skeleton means the read is in flight;
+- `Unknown` in grey means the gateway could not answer;
+- a plain `0` means the gateway answered zero.
+
+`ui.js` exposes those three as `skeleton()`, `big(..., { state: 'unknown' })`
+and an ordinary value, and `src/ui.test.js` holds the line. The same rule
+governs prose: a page says "this Gateway does not report window totals" rather
+than showing a total of nothing.
+
+Two consequences worth knowing:
+
+- **Percentiles are never merged.** A p95 cannot be combined across buckets, so
+  a per-agent p95 is shown only when the window is a single bucket. The
+  window-wide figure comes from the gateway's own `totals`.
+- **Coverage figures name their sample.** There is no server-side count of
+  attested invocations, so receipt coverage is computed over the rows actually
+  fetched and labelled that way rather than presented as a window figure.
+
+## Constraints
+
+- **No inline styles.** The BFF serves a CSP without `unsafe-inline` for
+  `style-src`, so every size and colour lives in `styles.css`; dynamic bar
+  widths are SVG presentation attributes, not style attributes.
+- **No token in the browser.** Every call is same-origin to `/api/*`, which the
+  BFF proxies with a bearer this code never sees. See `server/` and
+  `AUTH_ARCHITECTURE.md`.
+- **Reads only.** Nothing in the console writes to the gateway yet.
+
+## Run it
 
 ```bash
 npm install
-npm run dev
+npm run dev          # Vite, fixture-free — needs a BFF at /api
+npm run check        # unit tests + build; the gate CI runs
 ```
 
-Vite serves the preview at `http://127.0.0.1:5173` by default.
-
-## Quality gate
+The BFF has its own suite:
 
 ```bash
-npm run check
+cd server && npm ci && npm test
 ```
-
-## Bounded improvement loop
-
-The repository includes a resumable Pi RPC campaign runner. It plans one safe backlog slice, implements it, runs deterministic checks, performs browser QA and rubric review, then creates a local checkpoint commit.
-
-```bash
-npm run improve:check
-npm run improve -- --cycles 6 --minutes 240 --repairs 2 --max-cost 25
-npm run improve:status
-npm run improve:stop
-```
-
-The durable contract lives in `PRODUCT_GOAL.md`, `CAPABILITY_COVERAGE.md`, `BACKLOG.md`, and `UX_RUBRIC.md`. The completed Safe campaign maps every ledger row and all 25 Gateway REST operations to an honest operator destination or explicit non-console rationale. `AUTH_ARCHITECTURE.md` compares browser-auth approaches and keeps implementation blocked on its human approval checklist. Runtime state and logs stay under ignored `.loop/`. The runner is restricted to `console/`, cancels extension dialogs, stops on out-of-scope changes or repeated verification failures, and never pushes, merges, deploys, or accesses production.
-
-For an unattended terminal on macOS, keep the process awake:
-
-```bash
-caffeinate -dimsu npm run improve -- --cycles 6 --minutes 240 --max-cost 25
-```
-
-The console has `noindex,nofollow` metadata. Delivery states are part of the product contract:
-
-- **Available** for current OSS Gateway and facilitator capabilities;
-- **Available** for local discovery, observe-only enrollment, agent events, and evidence-based status now on Gateway main;
-- **Commercial** for managed-tier capabilities;
-- **Standalone** for Reason;
-- **Integration path** for ZMem, Rooms, Treeship, and Guard work;
-- **Docs/repository discrepancy · not evidenced** for the absent TypeScript SDK;
-- **Planned** for portals, hosted billing, remote pairing, and missions.
-
-No fixture row implies a live connection. Every write, pairing, product, or mission interaction is explicitly non-operational.

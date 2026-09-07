@@ -24,21 +24,18 @@ export function renderSignIn(root, { reason } = {}) {
       : 'This console administers a live Gateway tenant.';
 
   root.innerHTML = `
-    <main class="signin-shell">
-      <div class="signin-card">
-        <div class="brand-row">
-          <span class="mark-glyph" aria-hidden="true"><i></i><i></i></span>
-          <span>ZERKER</span><span class="product-name">Gateway</span>
-        </div>
+    <div class="signin">
+      <div class="card">
+        <div class="brand"><i></i>Zerker</div>
         <h1>Operator sign-in</h1>
         <p>${message}</p>
-        <a class="button primary" href="/auth/login" data-signin>Sign in</a>
-        <p class="signin-note">
-          You will be redirected to the identity provider. The console never receives
-          or stores your Gateway token.
+        <a class="btn" href="/auth/login" data-signin>Sign in</a>
+        <p class="src">
+          You will be redirected to your identity provider. The console's server holds the
+          Gateway token; this browser never receives one.
         </p>
       </div>
-    </main>`;
+    </div>`;
 }
 
 // Sign-out is a POST so it cannot be triggered by a link, an image, or a
