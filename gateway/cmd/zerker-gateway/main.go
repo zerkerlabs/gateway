@@ -37,6 +37,14 @@ import (
 	"github.com/zerkerlabs/gateway/gateway/internal/version"
 )
 
+// storeKind names the store backing this process, for the capability report.
+func storeKind() string {
+	if databaseURL() != "" {
+		return "postgres"
+	}
+	return "memory"
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -116,7 +124,11 @@ func run(logger *slog.Logger, addr string) error {
 		WithSettlement(settlementStore).
 		WithSettler(httpapi.NewFacilitatorSettler(nil), credSvc).
 		WithPolicy(policyStore).
-		WithPolicyDecisions(decisionStore)
+		WithPolicyDecisions(decisionStore).
+		WithPosture(httpapi.Posture{
+			Store:            storeKind(),
+			KMSKeyConfigured: os.Getenv("ZERKER_KMS_KEY") != "",
+		})
 
 	// Trust receipts are opt-in: unset ZERKER_TREESHIP_BIN leaves the emitter
 	// off and proxy behavior byte-identical to before.
@@ -181,11 +193,19 @@ func run(logger *slog.Logger, addr string) error {
 // Returns the agent store, event store, credential service, invocation store,
 // settlement config store, policy stores, and a cleanup function. The caller
 // must call the cleanup function when done.
-func openStore(logger *slog.Logger) (agent.AgentStore, agentevent.Store, *credential.Service, invocation.Store, settlement.Store, policy.PolicyStore, policy.DecisionStore, func(), error) {
-	dbURL := os.Getenv("ZERKER_DATABASE_URL")
-	if dbURL == "" {
-		dbURL = os.Getenv("DATABASE_URL")
+// databaseURL returns the configured Postgres DSN, or "" when the gateway is
+// running on the non-durable in-memory store. It is the single place that
+// decision is read from the environment, so what openStore opens and what
+// /v1/capabilities reports as the posture cannot disagree.
+func databaseURL() string {
+	if u := os.Getenv("ZERKER_DATABASE_URL"); u != "" {
+		return u
 	}
+	return os.Getenv("DATABASE_URL")
+}
+
+func openStore(logger *slog.Logger) (agent.AgentStore, agentevent.Store, *credential.Service, invocation.Store, settlement.Store, policy.PolicyStore, policy.DecisionStore, func(), error) {
+	dbURL := databaseURL()
 
 	if dbURL != "" {
 		pool, err := pgxpool.New(context.Background(), dbURL)

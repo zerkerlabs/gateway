@@ -289,3 +289,30 @@ func (h *Handler) handleDeleteCredential(w http.ResponseWriter, r *http.Request)
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// checkCredentialRef reports whether ref names a credential owned by tenant.
+//
+// Both agent write paths need this before handing a credential_ref to the
+// store. Migration 005 wired agents_credential_ref_fk, so an unresolvable ref
+// otherwise surfaces a Postgres foreign-key violation as a 500 — caller input
+// reported as a server fault, which invariant #3 forbids (validation failures
+// return 4xx). PATCH /v1/settlement/config already runs the same check on
+// facilitator_credential_ref; this is that check, for agents.
+//
+// ok=false means "no such credential in this tenant" and belongs in a 400. A
+// non-nil error is a store failure and belongs in a 500. A gateway with no
+// credential service mounted can resolve nothing, so every ref is unresolvable
+// there — reported as ok=false, since the caller's ref is equally unusable
+// either way and the reason is not the caller's business.
+func (h *Handler) checkCredentialRef(ctx context.Context, tenant, ref string) (ok bool, err error) {
+	if h.credSvc == nil {
+		return false, nil
+	}
+	if _, err := h.credSvc.Get(ctx, tenant, ref); err != nil {
+		if errors.Is(err, credential.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}

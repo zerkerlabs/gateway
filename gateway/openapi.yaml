@@ -81,6 +81,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
 
+  /v1/me:
+    get:
+      tags: [Identity]
+      operationId: getMe
+      summary: Read the caller's own identity and scopes
+      description: >-
+        Echoes the identity the gateway derived from the caller's token: the
+        tenant it will scope every request to, the acting user, and the
+        effective OAuth scopes. Nothing here is new authority — every field
+        comes from the validated token the caller presented — and no lookup is
+        performed, so no other tenant's data can reach the response.
+
+
+        It exists for clients that legitimately cannot read their own token: a
+        console whose backend-for-frontend holds the bearer server-side has no
+        other way to name the tenant it is administering, or to know whether
+        the operator may read invocation bodies.
+      responses:
+        "200":
+          description: The caller's identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/capabilities:
+    get:
+      tags: [Identity]
+      operationId: getCapabilities
+      summary: Read which surfaces, limits, and posture this gateway has
+      description: >-
+        Reports which route families this deployment mounted, the limits it
+        enforces, and the mode it is running in.
+
+
+        `RegisterRoutes` mounts whole families conditionally, so a gateway with
+        no credential service answers `GET /v1/credentials` with 404 — the same
+        status as a mistyped path and as a missing resource. Without this
+        endpoint a client cannot tell those apart, and either renders an
+        affordance that cannot work or invents an explanation for the 404.
+
+
+        Posture reports modes, never values (invariant #9): which kind of store,
+        whether a KMS key was supplied — never the DSN, never the key.
+        Authenticated like every route that is not `/healthz` or `/version`:
+        the answer is the same for every caller, but an unauthenticated
+        deployment inventory is a reconnaissance gift.
+      responses:
+        "200":
+          description: This gateway's capabilities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Capabilities"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /v1/agents:
     post:
       tags: [Agents]
@@ -795,6 +854,52 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/invocations/{id}/receipt:
+    get:
+      tags: [Invocations]
+      operationId: getInvocationReceipt
+      summary: Read the trust receipt reference for an invocation
+      description: >-
+        Reports which Treeship artifact this gateway signed for one invocation,
+        and the command that verifies it.
+
+
+        It deliberately returns no verdict. The gateway signed the artifact; a
+        gateway that also reported it as valid would be asserting exactly what
+        invariant #6 forbids. Verification is performed against the artifact by
+        the party relying on it.
+
+
+        `attested: false` is not proof that no receipt exists. Emission is
+        fail-open and runs off the request path, so an artifact can be signed
+        and its reference lost; `reason` distinguishes `receipts_disabled` from
+        `not_recorded`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          description: The `inv_<uuidv7>` invocation ID.
+      responses:
+        "200":
+          description: The receipt reference, or an explicit statement that none is recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvocationReceipt"
+        "400":
+          description: The invocation id is missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /v1/analytics:
     get:
       tags: [Analytics]
@@ -978,7 +1083,44 @@ paths:
           required: false
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
           description: Maximum decisions to return, newest first. Clamped to [1, 100]; defaults to 20.
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: >-
+            Matching decisions to skip, newest first. With `total`, this is what
+            makes denials older than one page reachable at all — a denied call
+            creates no invocation, so this feed is the only record of it.
+        - name: since
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: RFC 3339 inclusive lower bound on `created_at`.
+        - name: until
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: RFC 3339 inclusive upper bound on `created_at`.
+        - name: action
+          in: query
+          required: false
+          schema: { type: string, enum: [allow, warn, deny] }
+          description: >-
+            Filter by decision action. Unlike `GET /v1/invocations`, `deny` is
+            accepted and is the most useful value: this is the store that has
+            denials.
+        - name: agent_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter to one agent's decisions.
       responses:
+        "400":
+          description: An invalid `since`, `until`, or `action` value, or `since` after `until`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "200":
           description: The tenant's recent policy decisions.
           content:
@@ -1454,6 +1596,13 @@ components:
             `deny` never appears: a denied call returns before the invocation
             is created, so the absence of denials here is not evidence that
             nothing is being denied. Read the policy decision log for those.
+        receipt_artifact_id:
+          type: string
+          nullable: true
+          description: >-
+            The Treeship artifact signed for this invocation, or null when none
+            was recorded. Null is not proof none exists — emission is fail-open.
+            The receipt itself is at `GET /v1/invocations/{id}/receipt`.
         policy_matched_rule:
           type: string
           nullable: true
@@ -1544,6 +1693,13 @@ components:
             `deny` never appears: a denied call returns before the invocation
             is created, so the absence of denials here is not evidence that
             nothing is being denied. Read the policy decision log for those.
+        receipt_artifact_id:
+          type: string
+          nullable: true
+          description: >-
+            The Treeship artifact signed for this invocation, or null when none
+            was recorded. Null is not proof none exists — emission is fail-open.
+            The receipt itself is at `GET /v1/invocations/{id}/receipt`.
         policy_matched_rule:
           type: string
           nullable: true
@@ -1662,9 +1818,41 @@ components:
         latency_ms: { $ref: "#/components/schemas/Percentiles" }
         ttft_ms: { $ref: "#/components/schemas/Percentiles" }
 
+    AnalyticsTotals:
+      type: object
+      description: >-
+        The whole window in one cell, over every row in `[since, until]`.
+
+
+        It is not the sum of `groups` and must not be derived from them: counts
+        would add up, but percentiles do not merge without the samples behind
+        them. A multi-bucket p95 is only available here — which is why a 7-day
+        p95 latency was previously not a number any client could render.
+      required: [count, error_rate, by_error_class, latency_ms, ttft_ms, request_bytes, response_bytes]
+      properties:
+        count: { type: integer }
+        error_rate:
+          type: number
+          format: double
+          description: Failed rows over total rows, in [0,1].
+        by_error_class:
+          type: object
+          additionalProperties: { type: integer }
+        latency_ms:
+          $ref: "#/components/schemas/Percentiles"
+        ttft_ms:
+          $ref: "#/components/schemas/Percentiles"
+        request_bytes:
+          type: integer
+          format: int64
+          description: Sum over rows that recorded a size; in-flight rows contribute nothing.
+        response_bytes:
+          type: integer
+          format: int64
+
     AnalyticsResponse:
       type: object
-      required: [range, bucket, groups]
+      required: [range, bucket, groups, totals]
       properties:
         range:
           type: object
@@ -1678,6 +1866,8 @@ components:
         groups:
           type: array
           items: { $ref: "#/components/schemas/AnalyticsGroup" }
+        totals:
+          $ref: "#/components/schemas/AnalyticsTotals"
 
     SettlementConfigRequest:
       type: object
@@ -1821,11 +2011,18 @@ components:
         created_at:
           type: string
           format: date-time
+        receipt_artifact_id:
+          type: string
+          nullable: true
+          description: >-
+            The Treeship artifact signed for this decision, or null. A denial
+            has no invocation to carry evidence, so this is the only place the
+            proof of a refusal is reachable.
 
     PolicyDecisionsResponse:
       type: object
       description: The GET /v1/policy/decisions response — recent decisions, newest first.
-      required: [data, limit]
+      required: [data, limit, offset, total]
       properties:
         data:
           type: array
@@ -1834,6 +2031,134 @@ components:
         limit:
           type: integer
           description: The effective limit applied to this response.
+        offset:
+          type: integer
+          description: The offset applied to this response.
+        total:
+          type: integer
+          description: >-
+            Decisions matching the filter before `limit`/`offset`. Without it a
+            caller cannot tell "no more rows" from "the page ended exactly here",
+            and cannot count a window's denials without walking every page.
+
+    Me:
+      type: object
+      description: The caller's own identity, derived from its validated token.
+      required: [tenant_id, user_id, scopes, can_read_invocation_bodies]
+      properties:
+        tenant_id:
+          type: string
+          description: The tenant every request from this caller is scoped to.
+        user_id:
+          type: string
+          description: The acting user (the token's subject claim).
+        scopes:
+          type: array
+          items: { type: string }
+          description: Effective OAuth scopes. Empty when the token carries none.
+        can_read_invocation_bodies:
+          type: boolean
+          description: >-
+            Whether the token carries `invocations:read_body`. Named rather than
+            left to be re-derived from `scopes`, because it gates one specific
+            high-risk surface and a client that string-matches a scope name will
+            eventually match the wrong one.
+
+    Capabilities:
+      type: object
+      description: Which surfaces this gateway mounted, the limits it enforces, and its posture.
+      required: [surfaces, limits, posture]
+      properties:
+        surfaces:
+          type: object
+          description: >-
+            Which route families are mounted. Agents are unconditional and have
+            no field. A false here is why a route answers 404.
+          required: [credentials, invocations, analytics, proxy, agent_events, settlement, policy, policy_decisions, receipts, reason_enforcement]
+          properties:
+            credentials: { type: boolean }
+            invocations: { type: boolean }
+            analytics: { type: boolean }
+            proxy: { type: boolean }
+            agent_events: { type: boolean }
+            settlement: { type: boolean }
+            policy: { type: boolean }
+            policy_decisions: { type: boolean }
+            receipts: { type: boolean }
+            reason_enforcement:
+              type: boolean
+              description: Whether MCP `tools/call` requires a verified Reason authorization envelope.
+        limits:
+          type: object
+          description: The server-side bounds a client must respect, from the same constants the handlers enforce.
+          required: [analytics_max_range_days, invocations_max_limit, policy_decision_max_limit, agent_event_max_range_days, transact_max_body_bytes, captured_body_max_bytes, model_header_max_bytes]
+          properties:
+            analytics_max_range_days: { type: integer }
+            invocations_max_limit: { type: integer }
+            policy_decision_max_limit: { type: integer }
+            agent_event_max_range_days: { type: integer }
+            transact_max_body_bytes: { type: integer, format: int64 }
+            captured_body_max_bytes: { type: integer, format: int64 }
+            model_header_max_bytes: { type: integer }
+        posture:
+          type: object
+          description: How this deployment is running. Modes only — never a DSN, a key, or an address.
+          required: [store, kms_key_configured, receipts_enabled, receipt_actor, settlement_orchestration]
+          properties:
+            store:
+              type: string
+              enum: [postgres, memory]
+              description: >-
+                `memory` is the non-durable dev-only store: everything registered
+                is lost on restart.
+            kms_key_configured:
+              type: boolean
+              description: >-
+                False when `ZERKER_KMS_KEY` was unset and an ephemeral key was
+                generated at boot — every credential stored under it stops
+                decrypting at the next restart.
+            receipts_enabled:
+              type: boolean
+              description: Whether a Treeship emitter is attached to this deployment.
+            receipt_actor:
+              type: string
+              description: The actor URI receipts are signed as; empty when receipts are off.
+            settlement_orchestration:
+              type: boolean
+              description: >-
+                Whether settle-then-forward is wired. A tenant with a facilitator
+                configured still cannot settle without it.
+
+    InvocationReceipt:
+      type: object
+      description: >-
+        Which Treeship artifact was signed for an invocation, and how to verify
+        it. Carries no verdict: the gateway signed this artifact and does not
+        also vouch for it (invariant #6).
+      required: [invocation_id, attested]
+      properties:
+        invocation_id: { type: string }
+        attested:
+          type: boolean
+          description: >-
+            Whether an artifact reference is recorded. False is not proof that
+            no receipt exists — emission is fail-open and off the request path.
+        reason:
+          type: string
+          enum: [receipts_disabled, not_recorded]
+          description: Why no reference is recorded. Absent when `attested` is true.
+        artifact_id:
+          type: string
+          description: The Treeship artifact identifier.
+        actor:
+          type: string
+          description: The actor URI the artifact was signed as.
+        signed_at:
+          type: string
+          format: date-time
+        verify:
+          type: string
+          description: The command that verifies the artifact against its signing key.
 
     X402Challenge:
       type: object

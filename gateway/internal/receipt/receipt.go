@@ -59,6 +59,22 @@ type Denial struct {
 	Reason string
 
 	DeniedAt time.Time
+
+	// DecisionID is the stored policy decision this denial was recorded as,
+	// when the caller knows it.
+	//
+	// Without it, the artifact is bound to the denial's *shape* — tenant,
+	// agent, protocol, method, tool, rule — and nothing else. Two refusals of
+	// the same call under the same rule then produce byte-identical artifacts,
+	// which Treeship stores once. That is defensible as a claim ("this agent
+	// is refused this tool under this rule") and wrong as evidence: an
+	// operator looking at ten denials finds one receipt and cannot tell
+	// whether the other nine were attested or dropped.
+	//
+	// Optional because a caller that attests before the decision is stored has
+	// no ID to give, and an artifact bound to the shape alone is better than
+	// none. Empty leaves the previous digest and meta exactly as they were.
+	DecisionID string
 }
 
 // Emitter delivers a receipt to the trust backend. Implementations must be safe
@@ -82,4 +98,46 @@ type Emitter interface {
 // that never sees them.
 type DenialEmitter interface {
 	EmitDenial(ctx context.Context, d Denial) error
+}
+
+// Attestation identifies the artifact an emitter actually signed.
+//
+// Emit reports only success or failure, which is enough to keep the proxy
+// fail-open but not enough to ever find the artifact again: the gateway was
+// signing receipts and keeping no reference to them, so "every call leaves a
+// trusted receipt" was a claim its own API could not substantiate. This is the
+// pointer that makes it checkable.
+//
+// It carries an identifier and a signing time, never the artifact and never
+// key material. Verification is Treeship's job and is done against the
+// artifact itself; a gateway that reported its own receipts as verified would
+// be asserting exactly what invariant #6 says it must not.
+type Attestation struct {
+	// ArtifactID is the Treeship artifact identifier ("art_<hex>").
+	ArtifactID string
+	// Actor is the URI the artifact was signed as.
+	Actor string
+	// SignedAt is when the emitter reported the signature, in UTC.
+	SignedAt time.Time
+}
+
+// AttestingEmitter is an Emitter that can also report what it signed.
+//
+// Separate from Emitter, and discovered by type assertion at the call site,
+// for the same reason DenialEmitter is: an emitter that delivers receipts but
+// cannot name them is a coherent thing to have, and folding this into Emitter
+// would force every implementation to claim a capability it may not have.
+type AttestingEmitter interface {
+	Emitter
+	// EmitAttested emits r and returns the artifact it signed. The error
+	// contract is Emit's: advisory only, never a reason to fail the
+	// invocation the receipt describes.
+	EmitAttested(ctx context.Context, r Receipt) (Attestation, error)
+}
+
+// AttestingDenialEmitter is a DenialEmitter that can also report what it
+// signed. Same rationale as AttestingEmitter.
+type AttestingDenialEmitter interface {
+	DenialEmitter
+	EmitDenialAttested(ctx context.Context, d Denial) (Attestation, error)
 }

@@ -146,6 +146,16 @@ type Invocation struct {
 	SettlementAttempts *int              // bounded-retry attempt count
 	SettlementReason   *string           // coarse failure reason, on failure only
 	SettledAt          *time.Time        // when the facilitator settle succeeded
+
+	// ReceiptArtifactID is the Treeship artifact the gateway signed for this
+	// invocation, and ReceiptSignedAt is when the emitter reported it signed.
+	//
+	// Both nil is not proof that nothing was signed. Emission is fail-open and
+	// runs off the request path, so a receipt can exist while its reference
+	// here does not — the artifact is the record of truth, this is the pointer
+	// to it. Nil means "no artifact recorded here" and nothing stronger.
+	ReceiptArtifactID *string
+	ReceiptSignedAt   *time.Time
 }
 
 // UpdateFields carries the fields that change over the lifetime of an
@@ -182,6 +192,9 @@ type UpdateFields struct {
 	SettlementAttempts *int
 	SettlementReason   *string
 	SettledAt          *time.Time
+
+	ReceiptArtifactID *string
+	ReceiptSignedAt   *time.Time
 }
 
 // ListFilter specifies the optional predicates and pagination parameters for
@@ -235,7 +248,7 @@ type Store interface {
 	// range (inclusive), grouped by agent_id and time bucket (spec 0003). The
 	// result is sorted by agent_id then bucket-start; an empty range yields an
 	// empty slice (not an error).
-	Aggregate(ctx context.Context, tenantID string, q AggregateQuery) ([]AggregateGroup, error)
+	Aggregate(ctx context.Context, tenantID string, q AggregateQuery) (AggregateResult, error)
 
 	// Update applies the non-nil fields from UpdateFields to the identified
 	// invocation and returns the updated record. Returns ErrNotFound if the ID

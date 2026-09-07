@@ -20,6 +20,12 @@ type analyticsResponse struct {
 	Range  analyticsRange   `json:"range"`
 	Bucket string           `json:"bucket"`
 	Groups []analyticsGroup `json:"groups"`
+
+	// Totals aggregates the whole window in one cell. It is not the sum of
+	// Groups and a client must not try to derive it from them: counts would
+	// add up, but percentiles do not merge without the samples behind them, so
+	// a multi-bucket p95 is only available here.
+	Totals analyticsTotals `json:"totals"`
 }
 
 type analyticsRange struct {
@@ -38,6 +44,23 @@ type analyticsGroup struct {
 	ByErrorClass map[string]int         `json:"by_error_class"`
 	LatencyMS    invocation.Percentiles `json:"latency_ms"`
 	TTFTMS       invocation.Percentiles `json:"ttft_ms"`
+}
+
+// analyticsTotals is the window-level aggregate: every invocation in
+// [since, until], regardless of bucket. Percentiles are computed over every
+// sample in the range, which is what makes a 7-day p95 a number the caller can
+// render rather than one it has to refuse to guess at.
+//
+// Bytes sum only rows that recorded a size, matching the percentile rule: an
+// in-flight invocation counts once in Count and contributes to nothing else.
+type analyticsTotals struct {
+	Count         int                    `json:"count"`
+	ErrorRate     float64                `json:"error_rate"`
+	ByErrorClass  map[string]int         `json:"by_error_class"`
+	LatencyMS     invocation.Percentiles `json:"latency_ms"`
+	TTFTMS        invocation.Percentiles `json:"ttft_ms"`
+	RequestBytes  int64                  `json:"request_bytes"`
+	ResponseBytes int64                  `json:"response_bytes"`
 }
 
 // handleAnalytics handles GET /v1/analytics. It returns aggregate metrics over
@@ -118,7 +141,7 @@ func (h *Handler) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groups, err := h.invocations.Aggregate(r.Context(), tenant, invocation.AggregateQuery{
+	result, err := h.invocations.Aggregate(r.Context(), tenant, invocation.AggregateQuery{
 		Bucket: bucket,
 		Since:  since,
 		Until:  until,
@@ -129,12 +152,30 @@ func (h *Handler) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	totalsByErrorClass := make(map[string]int, len(result.Totals.ByErrorClass))
+	for ec, n := range result.Totals.ByErrorClass {
+		totalsByErrorClass[string(ec)] = n
+	}
+	var totalsErrorRate float64
+	if result.Totals.Count > 0 {
+		totalsErrorRate = float64(result.Totals.ErrorCount) / float64(result.Totals.Count)
+	}
+
 	resp := analyticsResponse{
 		Range:  analyticsRange{Since: since, Until: until},
 		Bucket: string(bucket),
-		Groups: make([]analyticsGroup, 0, len(groups)),
+		Groups: make([]analyticsGroup, 0, len(result.Groups)),
+		Totals: analyticsTotals{
+			Count:         result.Totals.Count,
+			ErrorRate:     totalsErrorRate,
+			ByErrorClass:  totalsByErrorClass,
+			LatencyMS:     result.Totals.LatencyMS,
+			TTFTMS:        result.Totals.TTFTMS,
+			RequestBytes:  result.Totals.RequestBytes,
+			ResponseBytes: result.Totals.ResponseBytes,
+		},
 	}
-	for _, g := range groups {
+	for _, g := range result.Groups {
 		byErrorClass := make(map[string]int, len(g.ByErrorClass))
 		for ec, n := range g.ByErrorClass {
 			byErrorClass[string(ec)] = n

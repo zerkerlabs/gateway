@@ -563,12 +563,39 @@ func (h *Handler) emitReceipt(inv *invocation.Invocation) {
 	if inv.CompletedAt != nil {
 		r.CompletedAt = *inv.CompletedAt
 	}
+	attesting, canAttest := h.emitter.(receipt.AttestingEmitter)
+
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), receiptEmitTimeout)
 		defer cancel()
-		if err := h.emitter.Emit(ctx, r); err != nil {
+
+		if !canAttest {
+			if err := h.emitter.Emit(ctx, r); err != nil {
+				h.logger.Warn("receipt emission failed (fail-open)",
+					"invocation_id", r.InvocationID, "err", err)
+			}
+			return
+		}
+
+		att, err := attesting.EmitAttested(ctx, r)
+		if err != nil {
 			h.logger.Warn("receipt emission failed (fail-open)",
 				"invocation_id", r.InvocationID, "err", err)
+			return
+		}
+		if att.ArtifactID == "" {
+			return
+		}
+		// Record which artifact was signed, so the receipt is reachable from
+		// the invocation instead of only from the gateway's Treeship store.
+		// Still fail-open: a lost reference is a lost pointer to evidence, not
+		// a lost invocation, and the call it describes finished long ago.
+		if _, err := h.invocations.Update(ctx, r.TenantID, r.InvocationID, invocation.UpdateFields{
+			ReceiptArtifactID: &att.ArtifactID,
+			ReceiptSignedAt:   &att.SignedAt,
+		}); err != nil {
+			h.logger.Warn("recording receipt reference failed (fail-open)",
+				"invocation_id", r.InvocationID, "artifact_id", att.ArtifactID, "err", err)
 		}
 	}()
 }

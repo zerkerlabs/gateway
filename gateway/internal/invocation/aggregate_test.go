@@ -101,7 +101,8 @@ func TestAggregateRows(t *testing.T) {
 		mkRow("agt_b", h10, StatusSucceeded, nil, i64(50), i64(5)),
 	}
 
-	got := aggregateRows(rows, BucketHour)
+	result := aggregateRows(rows, BucketHour)
+	got := result.Groups
 
 	if len(got) != 3 {
 		t.Fatalf("group count = %d, want 3; groups = %+v", len(got), got)
@@ -159,7 +160,7 @@ func TestAggregateRows_DayBucketMergesHours(t *testing.T) {
 		mkRow("agt_a", time.Date(2026, 6, 30, 1, 0, 0, 0, time.UTC), StatusSucceeded, nil, i64(10), nil),
 		mkRow("agt_a", time.Date(2026, 6, 30, 23, 0, 0, 0, time.UTC), StatusSucceeded, nil, i64(20), nil),
 	}
-	got := aggregateRows(rows, BucketDay)
+	got := aggregateRows(rows, BucketDay).Groups
 	if len(got) != 1 {
 		t.Fatalf("day-bucket group count = %d, want 1 (both hours collapse to one day)", len(got))
 	}
@@ -170,7 +171,7 @@ func TestAggregateRows_DayBucketMergesHours(t *testing.T) {
 
 func TestAggregateRows_Empty(t *testing.T) {
 	t.Parallel()
-	if got := aggregateRows(nil, BucketHour); len(got) != 0 {
+	if got := aggregateRows(nil, BucketHour).Groups; len(got) != 0 {
 		t.Errorf("aggregateRows(nil) = %+v, want empty", got)
 	}
 }

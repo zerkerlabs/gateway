@@ -87,8 +87,6 @@ func (h *Handler) enforcePolicy(w http.ResponseWriter, r *http.Request, reqCtx p
 		d = h.invokeClassifier(r.Context(), reqCtx, p.OnError, *rule.Classifier, d)
 	}
 
-	h.recordPolicyDecision(reqCtx, d)
-
 	switch d.Action {
 	case policy.ActionDeny:
 		// Coarse denial (invariant #3): a single reason, never internal match
@@ -100,14 +98,14 @@ func (h *Handler) enforcePolicy(w http.ResponseWriter, r *http.Request, reqCtx p
 		// the write keeps the attestation on the same branch as the decision it
 		// describes — a later refactor that adds an early return between the
 		// two cannot silently drop it.
-		if emitReceipts {
-			h.emitDenial(reqCtx, d)
-		}
+		h.recordDeniedDecision(reqCtx, d, emitReceipts)
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "denied by policy", "reason": d.Reason})
 		return false, "", nil
 	case policy.ActionWarn:
+		h.recordPolicyDecision(reqCtx, d)
 		return true, d.Reason, &d
 	default: // policy.ActionAllow
+		h.recordPolicyDecision(reqCtx, d)
 		return true, "", &d
 	}
 }
@@ -128,6 +126,89 @@ func (h *Handler) recordPolicyDecision(reqCtx policy.RequestContext, d policy.De
 		Decision: d,
 	}
 	go h.decisionRecorder.Record(context.Background(), rec)
+}
+
+// recordDeniedDecision records a denial and, when receipts are on, ties the
+// artifact it signs back to the row it recorded.
+//
+// A denial is the only decision with no invocation to hang evidence on: the
+// call returns before invocations.Create, so this row is the only place the
+// refusal exists. Recording it and attesting it as two independent goroutines
+// would leave the artifact unfindable from the API — an auditor could be told
+// a denial was attested and never shown which artifact proves it.
+//
+// So the two are ordered here rather than raced: insert (which assigns the ID),
+// emit (which returns the artifact), attach (which links them). All of it in
+// one goroutine, off the request path, fail-open at every step — the 403 has
+// already been written by the time this runs, and nothing here can change it.
+//
+// The fallbacks matter as much as the happy path. No decision store, no
+// attesting emitter, a failed insert, a failed emit: each degrades to exactly
+// what happened before, never to a half-written link.
+func (h *Handler) recordDeniedDecision(reqCtx policy.RequestContext, d policy.Decision, emitReceipts bool) {
+	de, attesting := h.emitter.(receipt.AttestingDenialEmitter)
+	if h.decisionStore == nil || !emitReceipts || !attesting {
+		// Nothing to link, or nothing to link it to: keep both halves exactly
+		// as they were.
+		h.recordPolicyDecision(reqCtx, d)
+		if emitReceipts {
+			h.emitDenial(reqCtx, d)
+		}
+		return
+	}
+
+	rec := policy.RecordedDecision{
+		TenantID: reqCtx.TenantID,
+		AgentID:  reqCtx.AgentID,
+		Protocol: reqCtx.Protocol,
+		MCPTool:  reqCtx.MCPTool,
+		Decision: d,
+	}
+	den := receipt.Denial{
+		TenantID:    reqCtx.TenantID,
+		AgentID:     reqCtx.AgentID,
+		Protocol:    reqCtx.Protocol,
+		MCPMethod:   reqCtx.MCPMethod,
+		MCPTool:     reqCtx.MCPTool,
+		MatchedRule: d.MatchedRule,
+		Reason:      d.Reason,
+		DeniedAt:    time.Now().UTC(),
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), receiptEmitTimeout)
+		defer cancel()
+
+		stored, err := h.decisionStore.Insert(ctx, rec)
+		if err != nil {
+			h.logger.Error("policy decision capture failed (fail-open)",
+				"tenant", rec.TenantID, "agent", rec.AgentID, "err", err)
+			// The decision is lost, but the denial still deserves an artifact:
+			// the attestation is the stronger record of the two.
+			stored = nil
+		}
+
+		// Bind the artifact to the row it proves, so repeated refusals of the
+		// same call are separate receipts rather than one artifact Treeship
+		// stored once.
+		if stored != nil {
+			den.DecisionID = stored.ID
+		}
+
+		att, err := de.EmitDenialAttested(ctx, den)
+		if err != nil {
+			h.logger.Warn("denial attestation failed (fail-open)",
+				"tenant", den.TenantID, "agent", den.AgentID, "err", err)
+			return
+		}
+		if stored == nil || att.ArtifactID == "" {
+			return
+		}
+		if err := h.decisionStore.AttachReceipt(ctx, rec.TenantID, stored.ID, att.ArtifactID, att.SignedAt); err != nil {
+			h.logger.Warn("attaching denial receipt failed (fail-open)",
+				"decision_id", stored.ID, "err", err)
+		}
+	}()
 }
 
 // matchedClassifierRule returns the Rule d.MatchedRule identifies, if that

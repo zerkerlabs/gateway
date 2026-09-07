@@ -79,6 +79,20 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Only when the ref is being set to a value: clearing it (present + null)
+	// or leaving it (absent) has nothing to resolve.
+	if req.CredentialRef.Present && req.CredentialRef.Value != nil && *req.CredentialRef.Value != "" {
+		ok, err := h.checkCredentialRef(r.Context(), tenant, *req.CredentialRef.Value)
+		if err != nil {
+			h.logger.Error("update agent: credential lookup error", "err", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusBadRequest, "credential_ref does not resolve to a credential owned by this tenant")
+			return
+		}
+	}
 	if req.InvocationRateLimit.Present && req.InvocationRateLimit.Value != nil && *req.InvocationRateLimit.Value <= 0 {
 		writeError(w, http.StatusBadRequest, "invocation_rate_limit must be greater than zero")
 		return

@@ -44,20 +44,20 @@ func TestMemoryDecisionStore_InsertAssignsIDAndTimestamp(t *testing.T) {
 	}
 }
 
-func TestMemoryDecisionStore_ListRecentEmpty(t *testing.T) {
+func TestMemoryDecisionStore_ListEmpty(t *testing.T) {
 	t.Parallel()
 
 	s := policy.NewMemoryDecisionStore()
-	got, err := s.ListRecent(context.Background(), tenantA, 20)
+	got, _, err := s.List(context.Background(), tenantA, policy.DecisionFilter{Limit: 20})
 	if err != nil {
-		t.Fatalf("ListRecent: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("ListRecent on empty store = %d rows, want 0", len(got))
+		t.Errorf("List on empty store = %d rows, want 0", len(got))
 	}
 }
 
-func TestMemoryDecisionStore_ListRecentNewestFirst(t *testing.T) {
+func TestMemoryDecisionStore_ListNewestFirst(t *testing.T) {
 	t.Parallel()
 
 	s := policy.NewMemoryDecisionStore()
@@ -68,13 +68,13 @@ func TestMemoryDecisionStore_ListRecentNewestFirst(t *testing.T) {
 		}
 	}
 
-	got, err := s.ListRecent(ctx, tenantA, 20)
+	got, _, err := s.List(ctx, tenantA, policy.DecisionFilter{Limit: 20})
 	if err != nil {
-		t.Fatalf("ListRecent: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	wantOrder := []string{"third", "second", "first"} // newest first
 	if len(got) != len(wantOrder) {
-		t.Fatalf("ListRecent = %d rows, want %d", len(got), len(wantOrder))
+		t.Fatalf("List = %d rows, want %d", len(got), len(wantOrder))
 	}
 	for i, want := range wantOrder {
 		if got[i].MCPTool == nil || *got[i].MCPTool != want {
@@ -83,7 +83,7 @@ func TestMemoryDecisionStore_ListRecentNewestFirst(t *testing.T) {
 	}
 }
 
-func TestMemoryDecisionStore_ListRecentRespectsLimit(t *testing.T) {
+func TestMemoryDecisionStore_ListRespectsLimit(t *testing.T) {
 	t.Parallel()
 
 	s := policy.NewMemoryDecisionStore()
@@ -93,9 +93,9 @@ func TestMemoryDecisionStore_ListRecentRespectsLimit(t *testing.T) {
 			t.Fatalf("Insert: %v", err)
 		}
 	}
-	got, err := s.ListRecent(ctx, tenantA, 2)
+	got, _, err := s.List(ctx, tenantA, policy.DecisionFilter{Limit: 2})
 	if err != nil {
-		t.Fatalf("ListRecent: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(got) != 2 {
 		t.Errorf("ListRecent(limit=2) = %d rows, want 2", len(got))
@@ -111,7 +111,7 @@ func TestMemoryDecisionStore_TenantIsolation(t *testing.T) {
 		t.Fatalf("Insert tenantB: %v", err)
 	}
 
-	got, err := s.ListRecent(ctx, tenantA, 20)
+	got, _, err := s.List(ctx, tenantA, policy.DecisionFilter{Limit: 20})
 	if err != nil {
 		t.Fatalf("ListRecent tenantA: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestMemoryDecisionStore_TenantIsolation(t *testing.T) {
 	}
 }
 
-func TestMemoryDecisionStore_ListRecentDoesNotAlias(t *testing.T) {
+func TestMemoryDecisionStore_ListDoesNotAlias(t *testing.T) {
 	t.Parallel()
 
 	s := policy.NewMemoryDecisionStore()
@@ -128,15 +128,15 @@ func TestMemoryDecisionStore_ListRecentDoesNotAlias(t *testing.T) {
 	if _, err := s.Insert(ctx, recorded(tenantA, "agt_1", "tool", policy.ActionWarn, "1", "warned")); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	got, err := s.ListRecent(ctx, tenantA, 20)
+	got, _, err := s.List(ctx, tenantA, policy.DecisionFilter{Limit: 20})
 	if err != nil {
-		t.Fatalf("ListRecent: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	// Mutating a returned record must not corrupt the store's copy.
 	*got[0].MCPTool = "mutated"
 	got[0].Reason = "mutated"
 
-	again, err := s.ListRecent(ctx, tenantA, 20)
+	again, _, err := s.List(ctx, tenantA, policy.DecisionFilter{Limit: 20})
 	if err != nil {
 		t.Fatalf("ListRecent (second): %v", err)
 	}

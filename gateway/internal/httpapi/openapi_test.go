@@ -32,6 +32,8 @@ const openapiPath = "../../openapi.yaml"
 // openapi.yaml honest against the handlers" the ticket asks for (spec 0008
 // T5). A route added to one and not the other fails TestOpenAPIMatchesRoutes.
 var registeredRoutes = []string{
+	"GET /v1/me",
+	"GET /v1/capabilities",
 	"POST /v1/agents",
 	"GET /v1/agents",
 	"GET /v1/agents/{id}",
@@ -49,6 +51,7 @@ var registeredRoutes = []string{
 
 	"GET /v1/invocations",
 	"GET /v1/invocations/{id}",
+	"GET /v1/invocations/{id}/receipt",
 	"GET /v1/analytics",
 
 	"PATCH /v1/settlement/config",

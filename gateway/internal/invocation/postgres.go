@@ -35,7 +35,8 @@ const selectCols = `id, tenant_id, agent_id, mode, status,
 	reason_request_digest, reasoning_result_digest,
 	policy_action, policy_matched_rule,
 	settlement_status, settlement_tx_hash, settled_amount, operator_amount,
-	facilitator_fee, settlement_attempts, settlement_reason, settled_at`
+	facilitator_fee, settlement_attempts, settlement_reason, settled_at,
+	receipt_artifact_id, receipt_signed_at`
 
 // rowScanner abstracts pgx.Row and pgx.Rows so scanInvocation can be used in
 // both QueryRow and rows.Next contexts without duplicating scan logic.
@@ -78,6 +79,8 @@ func scanInvocation(row rowScanner) (*Invocation, error) {
 		settlementAttempts    *int
 		settlementReason      *string
 		settledAt             *time.Time
+		receiptArtifactID     *string
+		receiptSignedAt       *time.Time
 	)
 	if err := row.Scan(
 		&inv.ID, &inv.TenantID, &inv.AgentID, &mode, &status,
@@ -89,6 +92,7 @@ func scanInvocation(row rowScanner) (*Invocation, error) {
 		&policyAction, &policyMatchedRule,
 		&settlementStatus, &settlementTxHash, &settledAmount, &operatorAmount,
 		&facilitatorFee, &settlementAttempts, &settlementReason, &settledAt,
+		&receiptArtifactID, &receiptSignedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -129,6 +133,8 @@ func scanInvocation(row rowScanner) (*Invocation, error) {
 	inv.SettlementAttempts = settlementAttempts
 	inv.SettlementReason = settlementReason
 	inv.SettledAt = settledAt
+	inv.ReceiptArtifactID = receiptArtifactID
+	inv.ReceiptSignedAt = receiptSignedAt
 	return &inv, nil
 }
 
@@ -381,16 +387,16 @@ func (s *PostgresStore) ListFiltered(ctx context.Context, tenantID string, filte
 // filtered in SQL; the bucketing and percentile math run through the shared
 // aggregateRows helper, so this backend produces results identical to
 // MemoryStore. Only the columns the aggregator needs are selected.
-func (s *PostgresStore) Aggregate(ctx context.Context, tenantID string, q AggregateQuery) ([]AggregateGroup, error) {
+func (s *PostgresStore) Aggregate(ctx context.Context, tenantID string, q AggregateQuery) (AggregateResult, error) {
 	rows, err := s.pool.Query(
 		ctx,
-		`SELECT agent_id, created_at, status, error_class, latency_ms, ttft_ms
+		`SELECT agent_id, created_at, status, error_class, latency_ms, ttft_ms, req_size, resp_size
 		   FROM invocations
 		  WHERE tenant_id=$1 AND created_at>=$2 AND created_at<=$3`,
 		tenantID, q.Since, q.Until,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("aggregate invocations: %w", err)
+		return AggregateResult{}, fmt.Errorf("aggregate invocations: %w", err)
 	}
 	defer rows.Close()
 
@@ -402,11 +408,13 @@ func (s *PostgresStore) Aggregate(ctx context.Context, tenantID string, q Aggreg
 			errorClass *string
 			latencyMS  *int64
 			ttftMS     *int64
+			reqSize    *int64
+			respSize   *int64
 		)
 		if err := rows.Scan(
-			&inv.AgentID, &inv.CreatedAt, &status, &errorClass, &latencyMS, &ttftMS,
+			&inv.AgentID, &inv.CreatedAt, &status, &errorClass, &latencyMS, &ttftMS, &reqSize, &respSize,
 		); err != nil {
-			return nil, fmt.Errorf("scan aggregate row: %w", err)
+			return AggregateResult{}, fmt.Errorf("scan aggregate row: %w", err)
 		}
 		inv.Status = Status(status)
 		if errorClass != nil {
@@ -415,10 +423,12 @@ func (s *PostgresStore) Aggregate(ctx context.Context, tenantID string, q Aggreg
 		}
 		inv.LatencyMS = latencyMS
 		inv.TTFTMS = ttftMS
+		inv.RequestSize = reqSize
+		inv.ResponseSize = respSize
 		recs = append(recs, &inv)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("aggregate invocations: %w", err)
+		return AggregateResult{}, fmt.Errorf("aggregate invocations: %w", err)
 	}
 
 	return aggregateRows(recs, q.Bucket), nil
@@ -576,6 +586,16 @@ func (s *PostgresStore) Update(ctx context.Context, tenantID, id string, fields 
 		t := *fields.SettledAt
 		settledAt = &t
 	}
+	receiptArtifactID := current.ReceiptArtifactID
+	if fields.ReceiptArtifactID != nil {
+		v := *fields.ReceiptArtifactID
+		receiptArtifactID = &v
+	}
+	receiptSignedAt := current.ReceiptSignedAt
+	if fields.ReceiptSignedAt != nil {
+		t := *fields.ReceiptSignedAt
+		receiptSignedAt = &t
+	}
 
 	var errorClassStr *string
 	if errorClass != nil {
@@ -598,6 +618,7 @@ func (s *PostgresStore) Update(ctx context.Context, tenantID, id string, fields 
 		    payment_network=$16, payment_asset=$17, payment_amount=$18, payment_payer=$19, payment_nonce=$20,
 		    settlement_status=$21, settlement_tx_hash=$22, settled_amount=$23, operator_amount=$24,
 		    facilitator_fee=$25, settlement_attempts=$26, settlement_reason=$27, settled_at=$28,
+		    receipt_artifact_id=$29, receipt_signed_at=$30,
 		    updated_at=NOW()
 		WHERE id=$1 AND tenant_id=$2
 		RETURNING `+selectCols,
@@ -608,6 +629,7 @@ func (s *PostgresStore) Update(ctx context.Context, tenantID, id string, fields 
 		paymentNetwork, paymentAsset, paymentAmount, paymentPayer, paymentNonce,
 		settlementStatusStr, settlementTxHash, settledAmount, operatorAmount,
 		facilitatorFee, settlementAttempts, settlementReason, settledAt,
+		receiptArtifactID, receiptSignedAt,
 	))
 	if err != nil {
 		// The row was located and locked above, so this should not be ErrNoRows.
