@@ -26,12 +26,12 @@ func TestPGDecision_InsertAndListRoundTrip(t *testing.T) {
 		t.Error("CreatedAt is zero, want a store-assigned timestamp")
 	}
 
-	list, err := s.ListRecent(ctx, "tenant-alpha", 20)
+	list, _, err := s.List(ctx, "tenant-alpha", policy.DecisionFilter{Limit: 20})
 	if err != nil {
-		t.Fatalf("ListRecent: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(list) != 1 {
-		t.Fatalf("ListRecent = %d rows, want 1", len(list))
+		t.Fatalf("List = %d rows, want 1", len(list))
 	}
 	d := list[0]
 	if d.Action != policy.ActionDeny || d.MatchedRule != "2" || d.Reason != "denied by rule 2" {
@@ -45,7 +45,7 @@ func TestPGDecision_InsertAndListRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPGDecision_ListRecentNewestFirstAndLimit(t *testing.T) {
+func TestPGDecision_ListNewestFirstAndLimit(t *testing.T) {
 	pool := openTestPool(t)
 	s := policy.NewPostgresDecisionStore(pool)
 	ctx := context.Background()
@@ -56,12 +56,12 @@ func TestPGDecision_ListRecentNewestFirstAndLimit(t *testing.T) {
 		}
 	}
 
-	list, err := s.ListRecent(ctx, "tenant-alpha", 2)
+	list, _, err := s.List(ctx, "tenant-alpha", policy.DecisionFilter{Limit: 2})
 	if err != nil {
-		t.Fatalf("ListRecent: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(list) != 2 {
-		t.Fatalf("ListRecent(limit=2) = %d rows, want 2", len(list))
+		t.Fatalf("List(limit=2) = %d rows, want 2", len(list))
 	}
 	// created_at DESC, id DESC: uuidv7 ids are time-ordered, so the two newest
 	// inserts ("third", then "second") come back in that order.
@@ -82,9 +82,9 @@ func TestPGDecision_TenantIsolation(t *testing.T) {
 		t.Fatalf("Insert tenant-beta: %v", err)
 	}
 
-	list, err := s.ListRecent(ctx, "tenant-alpha", 20)
+	list, _, err := s.List(ctx, "tenant-alpha", policy.DecisionFilter{Limit: 20})
 	if err != nil {
-		t.Fatalf("ListRecent tenant-alpha: %v", err)
+		t.Fatalf("List tenant-alpha: %v", err)
 	}
 	if len(list) != 0 {
 		t.Errorf("tenant-alpha sees %d rows, want 0 — a tenant must never read another's decisions", len(list))
@@ -106,12 +106,12 @@ func TestPGDecision_HTTPProtocolNullTool(t *testing.T) {
 	if _, err := s.Insert(ctx, rd); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	list, err := s.ListRecent(ctx, "tenant-alpha", 20)
+	list, _, err := s.List(ctx, "tenant-alpha", policy.DecisionFilter{Limit: 20})
 	if err != nil {
-		t.Fatalf("ListRecent: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(list) != 1 {
-		t.Fatalf("ListRecent = %d rows, want 1", len(list))
+		t.Fatalf("List = %d rows, want 1", len(list))
 	}
 	if list[0].MCPTool != nil {
 		t.Errorf("MCPTool = %v, want nil for a protocol=http decision", *list[0].MCPTool)
