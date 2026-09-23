@@ -170,3 +170,101 @@ func TestHTTPClassifierClient_Classify_SSRFGuard(t *testing.T) {
 		t.Fatal("Classify: expected the SSRF guard to block a loopback classifier URL, got nil error")
 	}
 }
+
+// The judge contract: the same webhook `treeship judge --judge-url` speaks.
+func TestHTTPClassifierClient_Classify_JudgeContractVerdict(t *testing.T) {
+	t.Parallel()
+
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"judge":{"model":"jev-1.13.0","kind":"decision-model","replayable":false},"answers":{"verdict":{"choice":"deny","probabilities":{"allow":0.1,"warn":0.1,"deny":0.8},"confidence":0.8}}}`))
+	}))
+	defer srv.Close()
+
+	client := NewHTTPClassifierClient(srv.Client())
+	tool, method := "risky_tool", "tools/call"
+	verdict, err := client.Classify(context.Background(), srv.URL, policy.ClassifierRequest{
+		TenantID: "tnt_1", AgentID: "agt_1", Protocol: policy.ProtocolMCP, MCPMethod: &method, MCPTool: &tool,
+	})
+	if err != nil {
+		t.Fatalf("Classify: unexpected error: %v", err)
+	}
+	if verdict.Action != policy.ActionDeny {
+		t.Errorf("Action = %q, want deny", verdict.Action)
+	}
+	if verdict.Reason != "jev-1.13.0: verdict deny" {
+		t.Errorf("Reason = %q", verdict.Reason)
+	}
+	// The request carried both shapes: the legacy fields and the judge's
+	// state and questions, derived from the structural identity only.
+	if got["tenant_id"] != "tnt_1" {
+		t.Errorf("legacy tenant_id missing: %v", got)
+	}
+	state, _ := got["state"].(map[string]any)
+	if state["tool"] != tool || state["capability"] != method {
+		t.Errorf("judge state = %v", state)
+	}
+	input, _ := state["input"].(map[string]any)
+	if input["agent_id"] != "agt_1" || input["mcp_tool"] != tool {
+		t.Errorf("judge state input = %v", input)
+	}
+	questions, _ := got["questions"].(map[string]any)
+	if _, ok := questions["verdict"]; !ok {
+		t.Errorf("questions missing verdict: %v", questions)
+	}
+	if _, ok := questions["unsafe"]; !ok {
+		t.Errorf("questions missing unsafe: %v", questions)
+	}
+}
+
+func TestHTTPClassifierClient_Classify_JudgeContractUnsafeThreshold(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		body string
+		want policy.Action
+	}{
+		{`{"judge":{"model":"treeship-rules/0.31.6","kind":"rules","replayable":true},"answers":{"unsafe":{"noul":1.0,"confidence":1.0}}}`, policy.ActionDeny},
+		{`{"judge":{"model":"m"},"answers":{"unsafe":{"noul":0.5}}}`, policy.ActionDeny},
+		{`{"judge":{"model":"m"},"answers":{"unsafe":{"noul":0.49}}}`, policy.ActionAllow},
+	} {
+		body := tc.body
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		client := NewHTTPClassifierClient(srv.Client())
+		verdict, err := client.Classify(context.Background(), srv.URL, policy.ClassifierRequest{TenantID: "tnt_1"})
+		srv.Close()
+		if err != nil {
+			t.Fatalf("Classify(%s): unexpected error: %v", body, err)
+		}
+		if verdict.Action != tc.want {
+			t.Errorf("Classify(%s): Action = %q, want %q", body, verdict.Action, tc.want)
+		}
+	}
+}
+
+func TestHTTPClassifierClient_Classify_JudgeContractMalformedIsAnError(t *testing.T) {
+	t.Parallel()
+
+	for _, body := range []string{
+		`{"judge":{"model":"m"},"answers":{}}`,                             // answered neither question
+		`{"judge":{"model":"m"},"answers":{"verdict":{"choice":"maybe"}}}`, // not an action
+		`{"judge":{"model":"m"},"answers":{"unsafe":{"noul":1.5}}}`,        // out of range
+		`{"judge":{"model":"m"},"answers":"yes"}`,                          // wrong shape
+	} {
+		body := body
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		client := NewHTTPClassifierClient(srv.Client())
+		_, err := client.Classify(context.Background(), srv.URL, policy.ClassifierRequest{TenantID: "tnt_1"})
+		srv.Close()
+		if err == nil {
+			t.Errorf("Classify(%s): expected an error (on_error path), got none", body)
+		}
+	}
+}
